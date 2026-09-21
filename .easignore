@@ -1,15 +1,42 @@
-node_modules
-android
-ios
-dist
-web-build
-.expo
-.bolt
-__tests__
-tests
-supabase/tests
+# Dependencies (EAS installs fresh on server)
+node_modules/
+
+# Native projects (EAS runs prebuild to regenerate)
+android/
+ios/
+
+# Build outputs
+dist/
+web-build/
+.expo/
+
+# Development configs
+.bolt/
+.github/
+
+# Tests
+__tests__/
+tests/
+supabase/tests/
 playwright.config.ts
+jest.config.js
+jest.setup.ts
+eslint.config.js
+.prettierrc
+
+# Build scripts (not needed on EAS server)
+build-android.bat
+build-android.ps1
+build-android.sh
+
+# Documentation (not needed for build)
 BUILD_ANDROID.md
 LOCAL_BUILD_NO_EAS.md
 GITHUB_ACTIONS_BUILD.md
 APK_BUILD_GUIDE.md
+README.md
+
+# Misc
+.git/
+.gitignore
+.easignore

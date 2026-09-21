@@ -23,15 +23,33 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
+
+      - name: Verify node_modules
+        run: |
+          if [ ! -d "node_modules/expo" ] || [ ! -d "node_modules/react-native" ]; then
+            echo "ERROR: node_modules incomplete"
+            exit 1
+          fi
+          echo "node_modules OK"
 
       - name: Prebuild & Build APK
         env:
           EAS_NO_VCS: '1'
           ORG_GRADLE_PROJECT_newArchEnabled: 'true'
-          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_URL: 'https://asjqmhuhvmiekdnvddjv.supabase.co'
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc'
           GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true'
         run: |
           npx expo prebuild --platform android --clean
@@ -44,3 +62,14 @@ jobs:
         with:
           name: app-release-apk
           path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Upload Build Logs on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            android/app/build/outputs/logs/
+            android/.gradle/
+            ~/.gradle/caches/transforms-3/logs/
+          retention-days: 7

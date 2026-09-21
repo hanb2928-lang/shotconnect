@@ -32,10 +32,51 @@ function withGradleProps(config) {
     set('android.enableShrinkResourcesInReleaseBuilds', 'false');
     set('android.packagingOptions.pickFirsts', '**/libc++_shared.so,**/libfbjni.so');
 
-    remove('expo.edgeToEdgeEnabled');
+    remove('edgeToEdgeEnabled');
 
     return cfg;
   });
+}
+
+// ── 1b. Direct gradle.properties file patch ──────────────────────────────────
+// withGradleProperties runs before Expo template generation, so some values
+// get overwritten. This direct file patch runs after template generation to
+// ensure our values stick. We sort the mod to run late by using a high-order
+// approach: read the file, apply replacements, write back.
+function withGradlePropsFilePatch(config) {
+  return withDangerousMod(config, [
+    'android',
+    (cfg) => {
+      const gradlePropsPath = path.join(
+        cfg.modRequest.platformProjectRoot,
+        'gradle.properties'
+      );
+      if (!fs.existsSync(gradlePropsPath)) return cfg;
+
+      let content = fs.readFileSync(gradlePropsPath, 'utf8');
+
+      // Set EX_DEV_CLIENT_NETWORK_INSPECTOR=false (template sets it to true)
+      content = content.replace(
+        /EX_DEV_CLIENT_NETWORK_INSPECTOR=true/g,
+        'EX_DEV_CLIENT_NETWORK_INSPECTOR=false'
+      );
+
+      // Remove expo.edgeToEdgeEnabled (causes edge-to-edge display issues)
+      content = content.replace(
+        /^expo\.edgeToEdgeEnabled=true$/m,
+        '# expo.edgeToEdgeEnabled disabled by with-optimized-gradle plugin'
+      );
+
+      // Remove edgeToEdgeEnabled (no expo. prefix variant)
+      content = content.replace(
+        /^edgeToEdgeEnabled=true$/m,
+        '# edgeToEdgeEnabled disabled by with-optimized-gradle plugin'
+      );
+
+      fs.writeFileSync(gradlePropsPath, content, 'utf8');
+      return cfg;
+    },
+  ]);
 }
 
 // ── 2. proguard-rules.pro ─────────────────────────────────────────────────────
@@ -241,9 +282,18 @@ function withNodeModulesPatch(config) {
     (cfg) => {
       const nodeModulesDir = path.join(cfg.modRequest.projectRoot, 'node_modules');
 
+      if (!fs.existsSync(nodeModulesDir)) {
+        console.warn('[with-optimized-gradle] node_modules not found, skipping library patches');
+        return cfg;
+      }
+
       for (const mod of MODULES_TO_PATCH) {
         const gradlePath = path.join(nodeModulesDir, mod, 'android', 'build.gradle');
-        patchLibraryBuildGradle(gradlePath);
+        try {
+          patchLibraryBuildGradle(gradlePath);
+        } catch (e) {
+          console.warn(`[with-optimized-gradle] Failed to patch ${mod}: ${e.message}`);
+        }
       }
 
       return cfg;
@@ -280,6 +330,7 @@ function withAppGradlePatch(config) {
 // ── Compose all plugins ───────────────────────────────────────────────────────
 function withOptimizedGradle(config) {
   config = withGradleProps(config);
+  config = withGradlePropsFilePatch(config);
   config = withProguardRules(config);
   config = withNodeModulesPatch(config);
   config = withAppGradlePatch(config);
