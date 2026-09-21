@@ -126,6 +126,16 @@ android {
             def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
             useLegacyPackaging enableLegacyPackaging.toBoolean()
         }
+        resources {
+            excludes = [
+                '**/MANIFEST.MF',
+                '**/LICENSE',
+                '**/LICENSE.txt',
+                '**/NOTICE',
+                '**/NOTICE.txt',
+                '**/kotlin-tooling-metadata.json'
+            ]
+        }
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'

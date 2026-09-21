@@ -25,11 +25,14 @@ function withGradleProps(config) {
     }
 
     set('org.gradle.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
-    set('reactNativeArchitectures', 'arm64-v8a,x86_64');
+    set('reactNativeArchitectures', 'arm64-v8a,armeabi-v7a,x86_64');
     set('hermesEnabled', 'true');
     set('EX_DEV_CLIENT_NETWORK_INSPECTOR', 'false');
     set('android.enableMinifyInReleaseBuilds', 'false');
     set('android.enableShrinkResourcesInReleaseBuilds', 'false');
+    set('android.packagingOptions.pickFirsts', '**/libc++_shared.so,**/libfbjni.so');
+
+    remove('expo.edgeToEdgeEnabled');
 
     return cfg;
   });
@@ -198,10 +201,62 @@ function withProguardRules(config) {
   ]);
 }
 
-// ── Compose all three plugins ─────────────────────────────────────────────────
+// ── 3. Patch all native module build.gradle files ─────────────────────────────
+// RN 0.81 removed the local Maven repo at node_modules/react-native/android.
+// Many community libraries still reference com.facebook.react:react-native:+
+// which can no longer be resolved. Replace with the new react-android artifact.
+function withNativeModulePatch(config) {
+  return withDangerousMod(config, [
+    'android',
+    (cfg) => {
+      const projectRoot = cfg.modRequest.projectRoot;
+      const nodeModulesDir = path.join(projectRoot, 'node_modules');
+
+      function patchGradleFile(gradlePath) {
+        if (!fs.existsSync(gradlePath)) return;
+        let content = fs.readFileSync(gradlePath, 'utf8');
+        let changed = false;
+
+        if (content.includes('com.facebook.react:react-native:+')) {
+          content = content.replace(/com\.facebook\.react:react-native:\+/g, 'com.facebook.react:react-android');
+          changed = true;
+        }
+
+        const safeExtPattern = /com\.facebook\.react:react-native:\$\{safeExtGet\('reactNativeVersion',\s*'\+'\)\}/;
+        if (safeExtPattern.test(content)) {
+          content = content.replace(safeExtPattern, 'com.facebook.react:react-android');
+          changed = true;
+        }
+
+        if (changed) {
+          fs.writeFileSync(gradlePath, content, 'utf8');
+        }
+      }
+
+      const modulesToPatch = [
+        'react-native-view-shot',
+        'react-native-webview',
+        'react-native-gesture-handler',
+        'react-native-safe-area-context',
+        'react-native-screens',
+        'react-native-svg',
+      ];
+
+      for (const mod of modulesToPatch) {
+        const gradlePath = path.join(nodeModulesDir, mod, 'android', 'build.gradle');
+        patchGradleFile(gradlePath);
+      }
+
+      return cfg;
+    },
+  ]);
+}
+
+// ── Compose all plugins ───────────────────────────────────────────────────────
 function withOptimizedGradle(config) {
   config = withGradleProps(config);
   config = withProguardRules(config);
+  config = withNativeModulePatch(config);
   return config;
 }
 
