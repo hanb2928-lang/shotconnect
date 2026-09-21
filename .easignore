@@ -1,7 +1,15 @@
+node_modules
+android
+ios
 dist
 web-build
 .expo
 .bolt
+__tests__
+tests
+supabase/tests
+playwright.config.ts
 BUILD_ANDROID.md
 LOCAL_BUILD_NO_EAS.md
 GITHUB_ACTIONS_BUILD.md
+APK_BUILD_GUIDE.md
