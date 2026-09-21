@@ -27,7 +27,6 @@ function withGradleProps(config) {
     set('org.gradle.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
     set('reactNativeArchitectures', 'arm64-v8a,armeabi-v7a,x86_64');
     set('hermesEnabled', 'true');
-    set('newArchEnabled', 'true');
     set('EX_DEV_CLIENT_NETWORK_INSPECTOR', 'false');
     set('android.enableMinifyInReleaseBuilds', 'false');
     set('android.enableShrinkResourcesInReleaseBuilds', 'false');
@@ -168,13 +167,14 @@ function withProguardRules(config) {
   ]);
 }
 
-// ── 3. Patch root build.gradle with dependency substitution ──────────────────
-// RN 0.81 removed the local Maven repo at node_modules/react-native/android.
-// 8 community libraries declare com.facebook.react:react-native:+ which fails
-// to resolve. Instead of patching each module individually (fragile — EAS
-// reinstalls node_modules), we add a Gradle dependency substitution rule at
-// the root project level so ALL subprojects automatically resolve
-// com.facebook.react:react-native → com.facebook.react:react-android.
+// ── 3. Inject dependencySubstitution into root build.gradle ─────────────────
+// RN 0.81 renamed the Maven artifact from com.facebook.react:react-native to
+// com.facebook.react:react-android. Community libraries still reference the old
+// artifact with a dynamic version (+). Instead of patching each library's
+// build.gradle individually (fragile across EAS/local environments), we inject
+// a single dependencySubstitution block into the root build.gradle's allprojects
+// block. This redirects every react-native dependency to react-android with an
+// explicit version at Gradle resolution time — no node_modules mutation needed.
 function withRootBuildGradlePatch(config) {
   return withDangerousMod(config, [
     'android',
@@ -183,40 +183,60 @@ function withRootBuildGradlePatch(config) {
         cfg.modRequest.platformProjectRoot,
         'build.gradle'
       );
-      if (fs.existsSync(rootGradlePath)) {
-        let content = fs.readFileSync(rootGradlePath, 'utf8');
+      if (!fs.existsSync(rootGradlePath)) return cfg;
 
-        if (!content.includes('RN 0.81 compatibility')) {
-          // Append a subprojects block — simpler and more reliable than
-          // trying to inject inside the existing allprojects block.
-          const patch = `
-// ── RN 0.81 compatibility: substitute old react-native artifact ──
-// Added by with-optimized-gradle plugin. Do not remove.
-// RN 0.81 removed the local Maven repo at node_modules/react-native/android.
-// 8 community libraries declare com.facebook.react:react-native:+ which
-// fails to resolve. This substitution rule redirects them to the new
-// com.facebook.react:react-android artifact at Gradle resolution time.
-subprojects { subproject ->
-  subproject.configurations.all { cfg ->
-    cfg.resolutionStrategy.dependencySubstitution {
-      substitute module("com.facebook.react:react-native") using module("com.facebook.react:react-android:+") because "RN 0.81 replaced react-native with react-android"
+      let rnVersion = '0.81.5';
+      try {
+        rnVersion = require(path.join(
+          cfg.modRequest.projectRoot,
+          'node_modules',
+          'react-native',
+          'package.json'
+        )).version;
+      } catch {}
+
+      const MARKER = '// ── RN 0.81 dependency substitution (auto-generated)';
+      let content = fs.readFileSync(rootGradlePath, 'utf8');
+
+      // Remove any previously injected block (idempotent)
+      content = content.replace(
+        /\n*\/\/ ── RN 0\.81 dependency substitution \(auto-generated\)[\s\S]*?\n\}\n/,
+        '\n'
+      );
+
+      // Inject the substitution block right after the allprojects { repositories { ... } } block
+      const substitutionBlock = `
+${MARKER}
+allprojects {
+  configurations.all {
+    resolutionStrategy.eachDependency { details ->
+      if (details.requested.group == 'com.facebook.react' && details.requested.name == 'react-native') {
+        details.useTarget "com.facebook.react:react-android:${rnVersion}"
+        details.because 'RN 0.81 renamed react-native artifact to react-android'
+      }
     }
   }
 }
 `;
-          content = content.trimEnd() + '\n' + patch;
-          fs.writeFileSync(rootGradlePath, content, 'utf8');
-        }
+
+      // Insert after the closing brace of the existing allprojects block
+      const allprojectsEnd = content.lastIndexOf('apply plugin: "expo-root-project"');
+      if (allprojectsEnd !== -1) {
+        content = content.slice(0, allprojectsEnd) + substitutionBlock + '\n' + content.slice(allprojectsEnd);
       }
+
+      fs.writeFileSync(rootGradlePath, content, 'utf8');
       return cfg;
     },
   ]);
 }
 
-// ── 4. Patch node_modules build.gradle files for stale Maven repos ──────────
-// 3 modules still reference node_modules/react-native/android which no longer
-// exists in RN 0.81. Replace those stale URLs with mavenCentral so Gradle
-// doesn't fail trying to read a non-existent directory.
+// ── 4. Patch node_modules stale Maven URLs ──────────────────────────────────
+// Some community libraries reference node_modules/react-native/android as a
+// local Maven repo, which no longer exists in RN 0.81. Replace with mavenCentral.
+// This runs alongside the dependencySubstitution above as a belt-and-suspenders
+// fix for stale repository URLs that would cause Gradle to fail before even
+// reaching dependency resolution.
 function withNodeModulesPatch(config) {
   return withDangerousMod(config, [
     'android',
@@ -224,12 +244,11 @@ function withNodeModulesPatch(config) {
       const projectRoot = cfg.modRequest.projectRoot;
       const nodeModulesDir = path.join(projectRoot, 'node_modules');
 
-      function patchGradleFile(gradlePath) {
+      function patchStaleUrls(gradlePath) {
         if (!fs.existsSync(gradlePath)) return;
         let content = fs.readFileSync(gradlePath, 'utf8');
         let changed = false;
 
-        // Replace stale local maven repo URLs with mavenCentral
         const staleUrls = [
           'url "$rootDir/../node_modules/react-native/android"',
           "url '$rootDir/../node_modules/react-native/android'",
@@ -243,7 +262,6 @@ function withNodeModulesPatch(config) {
           }
         }
 
-        // async-storage uses resolveModulePath — use string matching, not regex
         const resolveModuleOld = 'url "${project.ext.resolveModulePath("react-native")}/android"';
         if (content.includes(resolveModuleOld)) {
           content = content.replace(resolveModuleOld, "url 'https://repo.maven.apache.org/maven2/'");
@@ -268,7 +286,7 @@ function withNodeModulesPatch(config) {
 
       for (const mod of modulesToPatch) {
         const gradlePath = path.join(nodeModulesDir, mod, 'android', 'build.gradle');
-        patchGradleFile(gradlePath);
+        patchStaleUrls(gradlePath);
       }
 
       return cfg;
