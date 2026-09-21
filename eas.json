@@ -1,0 +1,54 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "local",
+    "requireCommit": false
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "env": {
+        "EAS_NO_VCS": "1",
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
+      }
+    },
+    "preview": {
+      "developmentClient": false,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "env": {
+        "EAS_NO_VCS": "1",
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
+      }
+    },
+    "production": {
+      "developmentClient": false,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "env": {
+        "EAS_NO_VCS": "1",
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://fzvvriycfiqecherbhli.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dnZyaXljZmlxZWNoZXJibGxpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc0NzU4MDUsImV4cCI6MjEwMzA1MTgwNX0.0eAASvxwmKsPamXPukjvnzJrz5DnDoznoDCCm2SV2Vs"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

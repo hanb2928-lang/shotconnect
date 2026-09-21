@@ -1,0 +1,7 @@
+dist
+web-build
+.expo
+.bolt
+BUILD_ANDROID.md
+LOCAL_BUILD_NO_EAS.md
+GITHUB_ACTIONS_BUILD.md

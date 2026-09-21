@@ -1,0 +1,99 @@
+[functions.extract-product-meta]
+verify_jwt = false
+
+[functions.extract-ocr-text]
+verify_jwt = false
+
+[functions.analyze-photo]
+verify_jwt = false
+
+[functions.generate-copy]
+verify_jwt = false
+
+[functions.generate-review]
+verify_jwt = false
+
+[functions.generate-shortform-guide]
+verify_jwt = false
+
+[functions.generate-tts]
+verify_jwt = false
+
+[functions.generate-batch-tts]
+verify_jwt = false
+
+[functions.generate-variants]
+verify_jwt = false
+
+[functions.keyword-trends]
+verify_jwt = false
+
+[functions.naver-trending]
+verify_jwt = false
+
+[functions.persona-simulator]
+verify_jwt = false
+
+[functions.process-queue]
+verify_jwt = false
+
+[functions.process-queue-trigger]
+verify_jwt = false
+
+[functions.autoscale-manager]
+verify_jwt = false
+
+[functions.r]
+verify_jwt = false
+
+[functions.recommend-style]
+verify_jwt = false
+
+[functions.remove-bg]
+verify_jwt = false
+
+[functions.translate-localize]
+verify_jwt = false
+
+[functions.trend-copy]
+verify_jwt = false
+
+[functions.trend-match]
+verify_jwt = false
+
+[functions.viral-predict]
+verify_jwt = false
+
+[functions.generate-image]
+verify_jwt = false
+
+[functions.virtual-fitting]
+verify_jwt = false
+
+[functions.weather-check]
+verify_jwt = false
+
+[functions.search-pexels-videos]
+verify_jwt = false
+
+[functions.generate-video-edit-plan]
+verify_jwt = false
+
+[functions.render-video]
+verify_jwt = false
+
+[functions.recommend-bgm]
+verify_jwt = false
+
+[functions.stereo-cut-auto]
+verify_jwt = false
+
+[functions.analyze-product-vision]
+verify_jwt = false
+
+[functions.generate-video]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = false
+
