@@ -199,7 +199,7 @@ function withRootBuildGradlePatch(config) {
 subprojects { subproject ->
   subproject.configurations.all { cfg ->
     cfg.resolutionStrategy.dependencySubstitution {
-      substitute module("com.facebook.react:react-native") using module("com.facebook.react:react-android") because "RN 0.81 replaced react-native with react-android"
+      substitute module("com.facebook.react:react-native") using module("com.facebook.react:react-android:+") because "RN 0.81 replaced react-native with react-android"
     }
   }
 }
