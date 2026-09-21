@@ -22,3 +22,17 @@ allprojects {
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
+
+// ── RN 0.81 compatibility: substitute old react-native artifact ──
+// Added by with-optimized-gradle plugin. Do not remove.
+// RN 0.81 removed the local Maven repo at node_modules/react-native/android.
+// 8 community libraries declare com.facebook.react:react-native:+ which
+// fails to resolve. This substitution rule redirects them to the new
+// com.facebook.react:react-android artifact at Gradle resolution time.
+subprojects { subproject ->
+  subproject.configurations.all { cfg ->
+    cfg.resolutionStrategy.dependencySubstitution {
+      substitute module("com.facebook.react:react-native") using module("com.facebook.react:react-android") because "RN 0.81 replaced react-native with react-android"
+    }
+  }
+}

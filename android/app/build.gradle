@@ -122,10 +122,6 @@ android {
         }
     }
     packagingOptions {
-        jniLibs {
-            def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
-            useLegacyPackaging enableLegacyPackaging.toBoolean()
-        }
         resources {
             excludes = [
                 '**/MANIFEST.MF',
@@ -135,6 +131,10 @@ android {
                 '**/NOTICE.txt',
                 '**/kotlin-tooling-metadata.json'
             ]
+        }
+        jniLibs {
+            def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
+            useLegacyPackaging enableLegacyPackaging.toBoolean()
         }
     }
     androidResources {
