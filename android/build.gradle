@@ -20,18 +20,5 @@ allprojects {
   }
 }
 
-
-// ── RN 0.81 dependency substitution (auto-generated)
-allprojects {
-  configurations.all {
-    resolutionStrategy.eachDependency { details ->
-      if (details.requested.group == 'com.facebook.react' && details.requested.name == 'react-native') {
-        details.useTarget "com.facebook.react:react-android:0.81.5"
-        details.because 'RN 0.81 renamed react-native artifact to react-android'
-      }
-    }
-  }
-}
-
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
