@@ -1,5 +1,4 @@
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Setter = (key: string, value: string) => Promise<void> | void;
 type Getter = (key: string) => Promise<string | null> | string | null;
@@ -14,6 +13,16 @@ let nativeGetAllKeys: AllKeysGetter | null = null;
 let initPromise: Promise<void> | null = null;
 let initDone = false;
 
+// Lazy-load AsyncStorage so module-eval never touches the native binding.
+// On native, the native module may not be registered yet at boot.
+async function loadAsyncStorage(): Promise<typeof import('@react-native-async-storage/async-storage') | null> {
+  try {
+    return await import('@react-native-async-storage/async-storage');
+  } catch {
+    return null;
+  }
+}
+
 export function initStorage(): Promise<void> {
   if (initPromise) return initPromise;
 
@@ -27,10 +36,14 @@ export function initStorage(): Promise<void> {
     }
 
     try {
-      nativeGetItem = (key: string) => AsyncStorage.getItem(key);
-      nativeSetItem = (key: string, value: string) => AsyncStorage.setItem(key, value);
-      nativeRemoveItem = (key: string) => AsyncStorage.removeItem(key);
-      nativeGetAllKeys = () => AsyncStorage.getAllKeys();
+      const AsyncStorage = await loadAsyncStorage();
+      if (AsyncStorage?.default) {
+        const impl = AsyncStorage.default;
+        nativeGetItem = (key: string) => impl.getItem(key);
+        nativeSetItem = (key: string, value: string) => impl.setItem(key, value);
+        nativeRemoveItem = (key: string) => impl.removeItem(key);
+        nativeGetAllKeys = () => impl.getAllKeys();
+      }
     } catch {
       // AsyncStorage not available — getItem/setItem will return null/no-op
     }

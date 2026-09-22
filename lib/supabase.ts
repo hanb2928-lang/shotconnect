@@ -1,30 +1,65 @@
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// These values are inlined by Metro at bundle time from the .env file.
-// The fallbacks ensure the app always has a valid URL even if the build
-// environment didn't have the .env file present (e.g. a misconfigured CI run).
 const FALLBACK_URL = 'https://asjqmhuhvmiekdnvddjv.supabase.co';
 const FALLBACK_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc';
 
-// Metro inlines EXPO_PUBLIC_ vars as string literals — no runtime lookup needed.
-// We still guard with || to handle the case where the var was undefined at bundle time.
 export const supabaseUrl: string =
   (process.env.EXPO_PUBLIC_SUPABASE_URL || FALLBACK_URL).trim();
 
 export const supabaseAnonKey: string =
   (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_KEY).trim();
 
-// On native (Android/iOS), use AsyncStorage so auth sessions survive app restarts.
-// On web, use the default localStorage-backed storage.
+// Lazy-load AsyncStorage so module-eval never touches the native binding.
+// On native, the native module may not be registered yet at boot time.
+let asyncStorageModule: typeof import('@react-native-async-storage/async-storage') | null = null;
+let asyncStorageLoadFailed = false;
+
+async function getAsyncStorage() {
+  if (asyncStorageLoadFailed) return null;
+  if (asyncStorageModule) return asyncStorageModule;
+  try {
+    asyncStorageModule = await import('@react-native-async-storage/async-storage');
+    return asyncStorageModule;
+  } catch {
+    asyncStorageLoadFailed = true;
+    return null;
+  }
+}
+
+// Build a storage adapter that lazy-loads AsyncStorage on first call.
+// If AsyncStorage is unavailable, falls back to no-op (in-memory only sessions).
 const authStorage =
   Platform.OS !== 'web'
     ? {
-        getItem: (key: string) => AsyncStorage.getItem(key),
-        setItem: (key: string, value: string) => AsyncStorage.setItem(key, value),
-        removeItem: (key: string) => AsyncStorage.removeItem(key),
+        getItem: async (key: string): Promise<string | null> => {
+          const storage = await getAsyncStorage();
+          if (!storage?.default) return null;
+          try {
+            return await storage.default.getItem(key);
+          } catch {
+            return null;
+          }
+        },
+        setItem: async (key: string, value: string): Promise<void> => {
+          const storage = await getAsyncStorage();
+          if (!storage?.default) return;
+          try {
+            await storage.default.setItem(key, value);
+          } catch {
+            // storage write failed — session won't persist, but app continues
+          }
+        },
+        removeItem: async (key: string): Promise<void> => {
+          const storage = await getAsyncStorage();
+          if (!storage?.default) return;
+          try {
+            await storage.default.removeItem(key);
+          } catch {
+            // best-effort
+          }
+        },
       }
     : undefined;
 
