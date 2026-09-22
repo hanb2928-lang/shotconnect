@@ -1,12 +1,9 @@
 import { Platform } from 'react-native';
 
-// App version from app.json — kept in sync manually
 const APP_VERSION = '1.0.0';
 
-// Stable per-launch session ID
 const SESSION_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-// Lazy device info (computed once)
 let cachedDeviceInfo: Record<string, unknown> | null = null;
 function getDeviceInfo(): Record<string, unknown> {
   if (cachedDeviceInfo) return cachedDeviceInfo;
@@ -28,7 +25,6 @@ export interface LogContext {
   extra?: Record<string, unknown>;
 }
 
-// In-memory queue for offline resilience — flushed on next network activity
 const pendingQueue: Array<{
   level: LogLevel;
   message: string;
@@ -44,7 +40,6 @@ async function flushQueue(): Promise<void> {
   isFlushing = true;
   const batch = pendingQueue.splice(0, 10);
   try {
-    // Lazy import so errorLogger doesn't depend on supabase at module-eval time
     const { supabase } = await import('@/lib/supabase');
     const rows = batch.map((item) => ({
       level: item.level,
@@ -59,7 +54,6 @@ async function flushQueue(): Promise<void> {
     }));
     await supabase.from('error_logs').insert(rows);
   } catch {
-    // Re-queue on failure (up to 50 total to cap memory)
     if (pendingQueue.length < 50) {
       pendingQueue.unshift(...batch);
     }
@@ -74,8 +68,6 @@ export function log(
   stack?: string,
   context?: LogContext,
 ): void {
-  // Structured logcat output — uses SC_ERROR tag so it's easy to filter:
-  //   adb logcat *:S SC_ERROR:V
   const tag = level === 'fatal' ? 'SC_FATAL' : level === 'warning' ? 'SC_WARN' : 'SC_ERROR';
   const ctxStr = context
     ? ` | component=${context.component ?? '-'} action=${context.action ?? '-'} route=${context.route ?? '-'}`
@@ -85,7 +77,6 @@ export function log(
   if (stack) consoleFn(`[${tag}:STACK] ${stack.split('\n').slice(0, 8).join(' | ')}`);
 
   pendingQueue.push({ level, message, stack, context, timestamp: new Date().toISOString() });
-  // Fire-and-forget flush
   flushQueue().catch(() => {});
 }
 
@@ -103,42 +94,109 @@ export function logWarning(message: string, context?: LogContext): void {
   log('warning', message, undefined, context);
 }
 
-// Install global unhandled promise rejection handler.
-// Call once from the app root (e.g. _layout.tsx).
-export function installGlobalErrorHandlers(): void {
+function safeStringify(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
   try {
-    // Unhandled promise rejections — guard against Hermes not having
-    // the promise polyfill initialized at module-eval time
-    const origHandler = (global as any).onunhandledrejection;
-    (global as any).onunhandledrejection = (event: PromiseRejectionEvent) => {
-      logFatal(event.reason, { action: 'unhandledrejection' });
-      if (origHandler) origHandler(event);
-    };
+    return JSON.stringify(value);
   } catch {
-    // global not writable or not initialized
+    return String(value);
   }
+}
 
+// Track installation state so we don't double-install
+let handlersInstalled = false;
+
+function tryInstallPromiseHandler(): boolean {
   try {
-    // React Native global error handler
-    const prevHandler = (global as any).ErrorUtils?.getGlobalHandler?.();
-    (global as any).ErrorUtils?.setGlobalHandler?.((error: Error, isFatal?: boolean) => {
+    if (typeof (global as any).onunhandledrejection === 'undefined' &&
+        typeof (global as any).Promise === 'undefined') {
+      return false;
+    }
+    const origHandler = (global as any).onunhandledrejection;
+    (global as any).onunhandledrejection = (event: any) => {
+      const reason = event?.reason ?? event;
+      logFatal(safeStringify(reason), {
+        action: 'unhandledrejection',
+        extra: reason instanceof Error ? { stack: reason.stack } : undefined,
+      });
+      try {
+        if (origHandler) origHandler(event);
+      } catch {
+        // swallow
+      }
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function tryInstallErrorHandler(): boolean {
+  try {
+    const errorUtils = (global as any).ErrorUtils;
+    if (!errorUtils?.setGlobalHandler || !errorUtils?.getGlobalHandler) {
+      return false;
+    }
+    const prevHandler = errorUtils.getGlobalHandler();
+    errorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+      const msg = error instanceof Error ? error.message : safeStringify(error);
+      const stack = error instanceof Error ? error.stack : undefined;
       if (isFatal) {
-        logFatal(error, { action: 'globalHandler', extra: { isFatal: true } });
+        logFatal(msg, { action: 'globalHandler', extra: { isFatal: true, stack } });
       } else {
-        logError(error, { action: 'globalHandler', extra: { isFatal: false } });
+        logError(msg, { action: 'globalHandler', extra: { isFatal: false } });
       }
       try {
-        prevHandler?.(error, isFatal);
+        if (typeof prevHandler === 'function') {
+          prevHandler(error, isFatal);
+        }
       } catch {
         // prevHandler may re-throw fatal errors — swallow to prevent crash loop
       }
     });
+    return true;
   } catch {
-    // ErrorUtils not available at this point
+    return false;
   }
 }
 
-// Retrieve recent error logs for the in-app viewer
+function installWithRetry(): void {
+  if (handlersInstalled) return;
+
+  const promiseOk = tryInstallPromiseHandler();
+  const errorOk = tryInstallErrorHandler();
+
+  if (promiseOk && errorOk) {
+    handlersInstalled = true;
+    return;
+  }
+
+  // On native, ErrorUtils may not be available at module-eval time.
+  // Retry on next microtask, then on a longer interval if still not ready.
+  let attempts = 0;
+  const maxAttempts = 20;
+  const retry = () => {
+    if (handlersInstalled || attempts >= maxAttempts) return;
+    attempts++;
+    const pOk = tryInstallPromiseHandler();
+    const eOk = tryInstallErrorHandler();
+    if (pOk && eOk) {
+      handlersInstalled = true;
+    } else if (!handlersInstalled) {
+      // Exponential backoff: 10ms, 20ms, 40ms... capped at 500ms
+      const delay = Math.min(10 * Math.pow(2, attempts - 1), 500);
+      setTimeout(retry, delay);
+    }
+  };
+  setTimeout(retry, 0);
+}
+
+export function installGlobalErrorHandlers(): void {
+  if (handlersInstalled) return;
+  installWithRetry();
+}
+
 export async function fetchRecentLogs(limit = 50): Promise<{
   id: string;
   level: string;
