@@ -84,8 +84,8 @@ const INDUSTRY_PRESETS: Record<IndustryKey, IndustryPreset> = {
     lighting: "professional fashion photography lighting with key and fill lights",
     mood: "stylish, editorial, confident",
     cameraAngle: "full-body or three-quarter fashion editorial angle",
-    styleKeywords: "fabric texture detail, accurate garment fit, trend-conscious color palette",
-    negativeHints: "deformed body proportions, extra limbs, distorted face, merged clothing, warped fabric patterns",
+    styleKeywords: "fabric texture detail, accurate garment fit, trend-conscious color palette, natural drape and folds, stitch detail visible, photorealistic material rendering",
+    negativeHints: "deformed body proportions, extra limbs, distorted face, merged clothing, warped fabric patterns, any text overlay, captions, price tags, logo text, watermarks, subtitles, excessive filters, artificial graphic effects",
   },
   beauty: {
     label: "뷰티/화장품",
@@ -146,7 +146,8 @@ const INDUSTRY_PRESETS: Record<IndustryKey, IndustryPreset> = {
 const NEGATIVE_PROMPT_BASE =
   "Avoid: distorted fingers, extra fingers, missing fingers, deformed hands, warped shapes, melted forms, " +
   "morphed proportions, hallucinated text, illegible labels, stretched product, color-shifted branding, " +
-  "excessive noise, blurry details, unnatural facial expressions, extra limbs, merged objects, plastic-looking textures.";
+  "excessive noise, blurry details, unnatural facial expressions, extra limbs, merged objects, plastic-looking textures, " +
+  "any text overlay, captions, price tags, logo text, watermarks, subtitles, excessive filters, artificial graphic effects.";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -404,6 +405,13 @@ function buildStructuredPrompt(
     );
   }
 
+  const isFashion = /fashion|clothing|apparel|garment|의류|패션|옷/i.test(expandedPrompt) ||
+    preset.label === "의류/패션";
+
+  const fashionDirectives = isFashion
+    ? `\nZERO-TEXT POLICY: Do NOT generate any text, captions, titles, price tags, logo text, watermarks, or subtitles on the image. Output pure visual data only.\nFABRIC PRESERVATION: Render fabric drape, weight, stitch lines, and seam detail accurately. Heavy fabrics show structured folds, light fabrics show flowing movement. Preserve natural tension at shoulders, waist, and hips.\nCOMMERCIAL FLEXIBILITY: Leave 15-20% clean negative space around the subject for downstream text overlay. Frame with breathing room, sharp focus on garment, softly blurred background.`
+    : "";
+
   return (
     `[Subject] ${expandedPrompt}\n` +
     `[Environment] ${preset.environment}\n` +
@@ -414,7 +422,7 @@ function buildStructuredPrompt(
     `vibrant colors, sharp focus, detailed texture.\n` +
     `CRITICAL: Do NOT distort, warp, stretch, or morph the product's original shape, proportions, colors, ` +
     `patterns, or text. Preserve the product exactly as it appears — maintain exact shape, color accuracy, ` +
-    `pattern integrity, and all labels/logos/text without alteration or hallucination.${seedNote}`
+    `pattern integrity, and all labels/logos/text without alteration or hallucination.${fashionDirectives}${seedNote}`
   );
 }
 
