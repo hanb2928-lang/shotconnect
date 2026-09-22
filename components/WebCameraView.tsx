@@ -81,6 +81,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingPromiseRef = useRef<Promise<VideoRecordingResult> | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isRecordingRef = useRef(false);
   const pulseScale = useSharedValue(1);
 
   const stopStream = useCallback(() => {
@@ -156,14 +157,16 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
 
   useEffect(() => {
     if (isActive && !previewBase64) {
-      const id = setTimeout(() => startStream(facing), 100);
+      const id = setTimeout(() => {
+        if (!isRecordingRef.current) startStream(facing);
+      }, 100);
       return () => {
         clearTimeout(id);
-        stopStream();
+        if (!isRecordingRef.current) stopStream();
       };
     }
     return () => {
-      stopStream();
+      if (!isRecordingRef.current) stopStream();
     };
   }, [isActive, facing, previewBase64, startStream, stopStream]);
 
@@ -177,6 +180,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       if (recorderRef.current && recorderRef.current.state !== 'inactive') {
         stopVideoRecording(recorderRef.current);
       }
+      isRecordingRef.current = false;
       stopStream();
     };
   }, [stopStream]);
@@ -194,6 +198,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
+    isRecordingRef.current = false;
     setIsRecording(false);
     setRecordingDuration(0);
     recorderRef.current = null;
@@ -240,19 +245,27 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     if (!stream) return false;
     const hasAudio = stream.getAudioTracks().length > 0;
     if (!hasAudio) {
+      isRecordingRef.current = true;
       stopStream();
       await startStream(facing, true);
       await new Promise((r) => setTimeout(r, 300));
     }
     const currentStream = streamRef.current;
-    if (!currentStream) return false;
+    if (!currentStream) {
+      isRecordingRef.current = false;
+      return false;
+    }
     const result = startVideoRecording(currentStream, {
       maxDurationMs: 30000,
       videoBitsPerSecond: 4_000_000,
     });
-    if (!result) return false;
+    if (!result) {
+      isRecordingRef.current = false;
+      return false;
+    }
     recorderRef.current = result.recorder;
     recordingPromiseRef.current = result.promise;
+    isRecordingRef.current = true;
     setIsRecording(true);
     setRecordingDuration(0);
     const startTime = Date.now();
@@ -272,6 +285,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     try {
       const result = await recordingPromiseRef.current;
       const { base64, mimeType } = await blobToBase64(result.blob);
+      isRecordingRef.current = false;
       setIsRecording(false);
       setRecordingDuration(0);
       recorderRef.current = null;
@@ -284,6 +298,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       }
       return { base64, mimeType };
     } catch {
+      isRecordingRef.current = false;
       setIsRecording(false);
       setRecordingDuration(0);
       recorderRef.current = null;
