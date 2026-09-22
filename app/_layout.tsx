@@ -61,22 +61,34 @@ export default function RootLayout() {
     if (startedRef.current) return;
     startedRef.current = true;
 
+    const timeoutId = setTimeout(() => {
+      setReady('app');
+      SplashScreen.hideAsync();
+    }, 8000);
+
     (async () => {
       try {
-        await initStorage();
-        preloadTemplates().catch(() => {});
-        if (fontError && !fontsLoaded) {
-          setReady('error');
-        } else {
-          setReady('app');
-        }
-        SplashScreen.hideAsync();
+        await Promise.race([
+          initStorage(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('storage timeout')), 5000)),
+        ]);
       } catch {
-        startedRef.current = false;
-        setReady('error');
-        SplashScreen.hideAsync();
+        // storage init failed — app can still run with in-memory state
       }
+
+      preloadTemplates().catch(() => {});
+
+      clearTimeout(timeoutId);
+
+      if (fontError && !fontsLoaded) {
+        setReady('error');
+      } else {
+        setReady('app');
+      }
+      SplashScreen.hideAsync();
     })();
+
+    return () => clearTimeout(timeoutId);
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {

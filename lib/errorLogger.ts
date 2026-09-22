@@ -127,7 +127,11 @@ export function installGlobalErrorHandlers(): void {
       } else {
         logError(error, { action: 'globalHandler', extra: { isFatal: false } });
       }
-      prevHandler?.(error, isFatal);
+      try {
+        prevHandler?.(error, isFatal);
+      } catch {
+        // prevHandler may re-throw fatal errors — swallow to prevent crash loop
+      }
     });
   } catch {
     // ErrorUtils not available at this point
