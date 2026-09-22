@@ -800,6 +800,7 @@ export default function ResultScreen() {
           detailRestoration: targetMediaType === 'image' ? detailRestoration : undefined,
           hdUpscale,
           draft: true,
+          selectedMode: videoGenMode === 'auto' ? 'auto_3d' : 'manual',
         },
       );
 
@@ -885,6 +886,7 @@ export default function ResultScreen() {
             stylePreset: targetMediaType === 'image' ? stylePreset : undefined,
             detailRestoration: targetMediaType === 'image' ? detailRestoration : undefined,
             hdUpscale: true,
+            selectedMode: videoGenMode === 'auto' ? 'auto_3d' : 'manual',
           }).then(({ hdJobId }) => {
             if (!mountedRef.current) return;
             hdUnsubRef.current = subscribeHdUpgrade(scan.id, submitResult.taskId, (hdResult) => {
