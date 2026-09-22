@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -27,28 +27,67 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { installGlobalErrorHandlers } from '@/lib/errorLogger';
 
-// Install as early as possible, before any async work
 installGlobalErrorHandlers();
 
 SplashScreen.preventAutoHideAsync();
 
 type ReadyState = 'loading' | 'app' | 'error';
 
+const LOADING_TEXT = '로딩 중...';
+const ERROR_TITLE = '문제가 발생했어요';
+const ERROR_DESC = '예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+const RETRY_TEXT = '다시 시도';
+
 function useSafeKeepAwake() {
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    let active = true;
     activateKeepAwakeAsync('screen').catch(() => {});
-    return () => { active = false; };
+    return () => {};
   }, []);
+}
+
+function AppShell() {
+  const { t } = useI18n();
+
+  return (
+    <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="editor" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="guide"
+        options={{
+          headerShown: true,
+          headerTitle: t('guide.title'),
+          headerStyle: { backgroundColor: theme.colors.dark.surface },
+          headerTintColor: theme.colors.dark.text,
+          headerTitleStyle: { fontFamily: theme.typography.fontFamily.bold },
+          headerShadowVisible: false,
+        }}
+      />
+      <Stack.Screen
+        name="settings"
+        options={{
+          headerShown: true,
+          headerTitle: t('settings.title'),
+          headerStyle: { backgroundColor: theme.colors.dark.surface },
+          headerTintColor: theme.colors.dark.text,
+          headerTitleStyle: { fontFamily: theme.typography.fontFamily.bold },
+          headerShadowVisible: false,
+        }}
+      />
+      <Stack.Screen name="auth/callback" options={{ headerShown: false, animation: 'fade' }} />
+      <Stack.Screen name="+not-found" />
+    </Stack>
+  );
 }
 
 export default function RootLayout() {
   useFrameworkReady();
   useSafeKeepAwake();
-  const { t } = useI18n();
   const [ready, setReady] = useState<ReadyState>('loading');
-  const startedRef = useRef(false);
+  const [fontTimedOut, setFontTimedOut] = useState(false);
+  const initStartedRef = useRef(false);
+  const splashHiddenRef = useRef(false);
 
   const [fontsLoaded, fontError] = useFonts({
     'PlusJakartaSans-Regular': PlusJakartaSans_400Regular,
@@ -57,13 +96,28 @@ export default function RootLayout() {
     'PlusJakartaSans-Bold': PlusJakartaSans_700Bold,
   });
 
+  const hideSplash = useCallback(() => {
+    if (!splashHiddenRef.current) {
+      splashHiddenRef.current = true;
+      SplashScreen.hideAsync();
+    }
+  }, []);
+
+  // Font timeout: if fonts don't resolve in 6s, proceed with system fonts
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
+    if (fontsLoaded || fontError) return;
+    const id = setTimeout(() => setFontTimedOut(true), 6000);
+    return () => clearTimeout(id);
+  }, [fontsLoaded, fontError]);
+
+  // Init effect: runs exactly once, independent of font state
+  useEffect(() => {
+    if (initStartedRef.current) return;
+    initStartedRef.current = true;
 
     const timeoutId = setTimeout(() => {
       setReady('app');
-      SplashScreen.hideAsync();
+      hideSplash();
     }, 8000);
 
     (async () => {
@@ -79,18 +133,14 @@ export default function RootLayout() {
       preloadTemplates().catch(() => {});
 
       clearTimeout(timeoutId);
-
-      if (fontError && !fontsLoaded) {
-        setReady('error');
-      } else {
-        setReady('app');
-      }
-      SplashScreen.hideAsync();
+      setReady('app');
+      hideSplash();
     })();
 
     return () => clearTimeout(timeoutId);
-  }, [fontsLoaded, fontError]);
+  }, [hideSplash]);
 
+  // Deep link handling
   useEffect(() => {
     const handleDeepLink = (url: string) => {
       if (!url) return;
@@ -109,39 +159,44 @@ export default function RootLayout() {
     };
   }, []);
 
-  if (!fontsLoaded && !fontError) {
+  const fontsReady = fontsLoaded || fontError || fontTimedOut;
+
+  // Font loading gate — shows spinner until fonts resolve or timeout
+  if (!fontsReady) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.dark.bg, gap: theme.spacing.md }}>
         <ActivityIndicator size="large" color={theme.colors.primary[400]} />
-        <Text style={{ fontSize: 14, color: theme.colors.dark.textDim }}>{t('app.loading')}</Text>
+        <Text style={{ fontSize: 14, color: theme.colors.dark.textDim }}>{LOADING_TEXT}</Text>
       </View>
     );
   }
 
+  // Init loading gate — shows loading screen until storage/template init completes
   if (ready === 'loading') {
-    return <LoadingScreen message={t('app.loading')} />;
+    return <LoadingScreen message={LOADING_TEXT} />;
   }
 
+  // Error gate — init failed completely
   if (ready === 'error') {
-  const retryInit = () => {
-    startedRef.current = false;
-    setReady('loading');
-  };
+    const retryInit = () => {
+      initStartedRef.current = false;
+      setReady('loading');
+    };
     return (
       <ErrorBoundary>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.dark.bg, paddingHorizontal: 40, gap: 12 }}>
           <Text style={{ fontSize: 18, fontFamily: theme.typography.fontFamily.bold, color: theme.colors.dark.text, marginBottom: 4 }}>
-            {t('app.error.title')}
+            {ERROR_TITLE}
           </Text>
           <Text style={{ fontSize: 14, fontFamily: theme.typography.fontFamily.regular, color: theme.colors.dark.textDim, textAlign: 'center', lineHeight: 22 }}>
-            {t('app.error.desc')}
+            {ERROR_DESC}
           </Text>
           <TouchableOpacity
             style={{ marginTop: 12, paddingVertical: 12, paddingHorizontal: 28, borderRadius: 10, backgroundColor: theme.colors.primary[500] }}
             onPress={retryInit}
             activeOpacity={0.8}
           >
-            <Text style={{ fontSize: 15, fontFamily: theme.typography.fontFamily.bold, color: '#fff' }}>{t('app.error.retry')}</Text>
+            <Text style={{ fontSize: 15, fontFamily: theme.typography.fontFamily.bold, color: '#fff' }}>{RETRY_TEXT}</Text>
           </TouchableOpacity>
         </View>
       </ErrorBoundary>
@@ -151,45 +206,18 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <I18nProvider>
-      <AppThemeProvider>
-        <AffiliateToastProvider>
-          <SafeAreaProvider>
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="editor" options={{ headerShown: false }} />
-                <Stack.Screen
-                  name="guide"
-                  options={{
-                    headerShown: true,
-                    headerTitle: t('guide.title'),
-                    headerStyle: { backgroundColor: theme.colors.dark.surface },
-                    headerTintColor: theme.colors.dark.text,
-                    headerTitleStyle: { fontFamily: theme.typography.fontFamily.bold },
-                    headerShadowVisible: false,
-                  }}
-                />
-                <Stack.Screen
-                  name="settings"
-                  options={{
-                    headerShown: true,
-                    headerTitle: t('settings.title'),
-                    headerStyle: { backgroundColor: theme.colors.dark.surface },
-                    headerTintColor: theme.colors.dark.text,
-                    headerTitleStyle: { fontFamily: theme.typography.fontFamily.bold },
-                    headerShadowVisible: false,
-                  }}
-                />
-                <Stack.Screen name="auth/callback" options={{ headerShown: false, animation: 'fade' }} />
-                <Stack.Screen name="+not-found" />
-              </Stack>
-              <NetworkBanner />
-              <VideoJobRecoveryToast />
-              <StatusBar style="light" />
-            </GestureHandlerRootView>
-          </SafeAreaProvider>
-        </AffiliateToastProvider>
-      </AppThemeProvider>
+        <AppThemeProvider>
+          <AffiliateToastProvider>
+            <SafeAreaProvider>
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <AppShell />
+                <NetworkBanner />
+                <VideoJobRecoveryToast />
+                <StatusBar style="light" />
+              </GestureHandlerRootView>
+            </SafeAreaProvider>
+          </AffiliateToastProvider>
+        </AppThemeProvider>
       </I18nProvider>
     </ErrorBoundary>
   );
