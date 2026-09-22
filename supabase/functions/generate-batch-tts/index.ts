@@ -188,7 +188,7 @@ async function resolveOpenAIKey(): Promise<string | null> {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       const resp = await fetch(
-        `${supabaseUrl}/rest/v1/user_settings?select=openai_api_key&order=created_at.desc&limit=1`,
+        `${supabaseUrl}/rest/v1/user_settings?select=openai_api_key&order=updated_at.desc&limit=1`,
         {
           headers: {
             apikey: serviceRoleKey,
