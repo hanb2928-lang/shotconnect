@@ -37,11 +37,8 @@ async function getL2<T>(cacheKey: string): Promise<T | null> {
     const expiresAt = new Date(data.expires_at as string).getTime();
     if (Date.now() > expiresAt) return null;
 
-    const currentHitCount = (data as { hit_count?: number }).hit_count ?? 0;
     supabase
-      .from('ai_content_cache')
-      .update({ hit_count: currentHitCount + 1, updated_at: new Date().toISOString() })
-      .eq('cache_key', cacheKey)
+      .rpc('increment_cache_hit_count', { cache_key: cacheKey })
       .then(() => {}, () => {});
 
     return data.result as T;
@@ -147,11 +144,9 @@ export async function findSimilarCachedResult<T>(
       const resultTone = (result.productMood as string) || (result.targetAudience as string) || '';
       if (toneKeys.length > 0 && !toneKeys.some((k) => resultTone.includes(k))) continue;
 
-      // Bump hit count for the matched entry
+      // Bump hit count for the matched entry (atomic server-side increment)
       supabase
-        .from('ai_content_cache')
-        .update({ hit_count: ((row as { hit_count?: number }).hit_count ?? 0) + 1, updated_at: new Date().toISOString() })
-        .eq('id', (row as { id: string }).id)
+        .rpc('increment_cache_hit_count_by_id', { row_id: (row as { id: string }).id })
         .then(() => {}, () => {});
 
       // Promote to L1
