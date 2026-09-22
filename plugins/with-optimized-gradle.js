@@ -27,7 +27,7 @@ function withGradleProps(config) {
     }
 
     set('org.gradle.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
-    set('reactNativeArchitectures', 'arm64-v8a,armeabi-v7a,x86_64');
+    set('reactNativeArchitectures', 'arm64-v8a');
     set('hermesEnabled', 'true');
     set('newArchEnabled', 'false');
     set('android.kotlinVersion', '2.1.20');
