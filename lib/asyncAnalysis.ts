@@ -303,17 +303,28 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
     const errorBody = await response.text().catch(() => '');
     throw new Error(`TTS 생성 실패 (${response.status}): ${errorBody || response.statusText}`);
   }
-  let data: { audioBase64?: string };
+  let data: { audioBase64?: string; error?: string };
   try {
     data = await response.json();
   } catch {
     throw new Error('TTS 응답을 파싱하지 못했습니다');
   }
-  if (!data?.audioBase64) {
-    throw new Error('TTS 응답에 오디오 데이터가 없습니다');
+  if (data?.error) {
+    throw new Error(`TTS 서버 오류: ${data.error}`);
+  }
+  if (!data?.audioBase64 || data.audioBase64.length < 100) {
+    throw new Error('TTS 응답에 유효한 오디오 데이터가 없습니다');
   }
 
-  const audioBytes = base64ToUint8Array(data.audioBase64);
+  let audioBytes: Uint8Array;
+  try {
+    audioBytes = base64ToUint8Array(data.audioBase64);
+  } catch {
+    throw new Error('TTS 오디오 데이터를 디코딩하지 못했습니다');
+  }
+  if (audioBytes.length === 0) {
+    throw new Error('TTS 오디오 데이터가 비어 있습니다');
+  }
   const audioFileName = `tts-${scanId}-${Date.now()}.mp3`;
   const { error: uploadError } = await supabase.storage
     .from('scans')
@@ -321,7 +332,9 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
   if (uploadError) throw new Error(`TTS 오디오 업로드 실패: ${uploadError.message}`);
 
   const { data: urlData } = supabase.storage.from('scans').getPublicUrl(audioFileName);
-  if (!urlData.publicUrl) throw new Error('TTS 공개 URL 생성 실패');
+  if (!urlData.publicUrl || !urlData.publicUrl.startsWith('https://')) {
+    throw new Error('TTS 공개 URL 생성 실패: 올바른 형식이 아닙니다');
+  }
 
   await supabase.from('scans').update({ tts_url: urlData.publicUrl }).eq('id', scanId);
 }

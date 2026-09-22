@@ -143,6 +143,9 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
     setIsLoading(true);
     try {
       if (!ttsUrl) throw new Error('No TTS URL provided');
+      if (!/^https?:\/\//.test(ttsUrl)) {
+        throw new Error('오디오 URL 형식이 올바르지 않습니다');
+      }
       const ctx = unlockAudioContext();
       const audio = new Audio();
       if (!audio) throw new Error('Failed to create Audio element');
