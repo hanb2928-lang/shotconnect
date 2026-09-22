@@ -20,19 +20,24 @@ function withGradleProps(config) {
     }
 
     function remove(key) {
-      const idx = props.findIndex((p) => p.type === 'property' && p.key === key);
-      if (idx >= 0) props.splice(idx, 1);
+      let idx;
+      while ((idx = props.findIndex((p) => p.type === 'property' && p.key === key)) >= 0) {
+        props.splice(idx, 1);
+      }
     }
 
     set('org.gradle.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
     set('reactNativeArchitectures', 'arm64-v8a,armeabi-v7a,x86_64');
     set('hermesEnabled', 'true');
     set('EX_DEV_CLIENT_NETWORK_INSPECTOR', 'false');
+    set('android.kotlinVersion', '2.1.20');
     set('android.enableMinifyInReleaseBuilds', 'false');
     set('android.enableShrinkResourcesInReleaseBuilds', 'false');
     set('android.packagingOptions.pickFirsts', '**/libc++_shared.so,**/libfbjni.so');
 
     remove('edgeToEdgeEnabled');
+    remove('expo.edgeToEdgeEnabled');
+    remove('react.edgeToEdgeEnabled');
 
     return cfg;
   });
@@ -54,26 +59,33 @@ function withGradlePropsFilePatch(config) {
       if (!fs.existsSync(gradlePropsPath)) return cfg;
 
       let content = fs.readFileSync(gradlePropsPath, 'utf8');
+      let changed = false;
 
-      // Set EX_DEV_CLIENT_NETWORK_INSPECTOR=false (template sets it to true)
-      content = content.replace(
-        /EX_DEV_CLIENT_NETWORK_INSPECTOR=true/g,
-        'EX_DEV_CLIENT_NETWORK_INSPECTOR=false'
-      );
+      const replacements = [
+        // Network inspector off
+        [/EX_DEV_CLIENT_NETWORK_INSPECTOR=true/g, 'EX_DEV_CLIENT_NETWORK_INSPECTOR=false'],
+        // Edge-to-edge variants
+        [/expo\.edgeToEdgeEnabled=true/g, 'expo.edgeToEdgeEnabled=false'],
+        [/^edgeToEdgeEnabled=true$/m, '# edgeToEdgeEnabled disabled by with-optimized-gradle plugin'],
+        [/^react\.edgeToEdgeEnabled=true$/m, '# react.edgeToEdgeEnabled disabled by with-optimized-gradle plugin'],
+      ];
 
-      // Remove expo.edgeToEdgeEnabled (causes edge-to-edge display issues)
-      content = content.replace(
-        /^expo\.edgeToEdgeEnabled=true$/m,
-        '# expo.edgeToEdgeEnabled disabled by with-optimized-gradle plugin'
-      );
+      // Ensure kotlinVersion is set
+      if (!content.includes('android.kotlinVersion')) {
+        content += '\n# Kotlin version (must match RN 0.81 catalog)\nandroid.kotlinVersion=2.1.20\n';
+        changed = true;
+      }
 
-      // Remove edgeToEdgeEnabled (no expo. prefix variant)
-      content = content.replace(
-        /^edgeToEdgeEnabled=true$/m,
-        '# edgeToEdgeEnabled disabled by with-optimized-gradle plugin'
-      );
+      for (const [pattern, replacement] of replacements) {
+        if (pattern.test(content)) {
+          content = content.replace(pattern, replacement);
+          changed = true;
+        }
+      }
 
-      fs.writeFileSync(gradlePropsPath, content, 'utf8');
+      if (changed) {
+        fs.writeFileSync(gradlePropsPath, content, 'utf8');
+      }
       return cfg;
     },
   ]);
