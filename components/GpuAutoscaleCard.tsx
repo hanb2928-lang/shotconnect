@@ -32,7 +32,7 @@ export function GpuAutoscaleCard() {
       const { data, error } = await supabase
         .from('gpu_autoscale_config')
         .select('min_workers, max_workers, scale_up_threshold, enabled')
-        .eq('id', 1)
+        .limit(1)
         .maybeSingle();
       if (!error && data) setConfig(data as AutoscaleConfig);
     } catch {
@@ -69,7 +69,7 @@ export function GpuAutoscaleCard() {
       const { error } = await supabase
         .from('gpu_autoscale_config')
         .update({ enabled: !config.enabled, updated_at: new Date().toISOString() })
-        .eq('id', 1);
+        .limit(1);
       if (!error) {
         setConfig({ ...config, enabled: !config.enabled });
       }
