@@ -26,7 +26,9 @@ function withGradleProps(config) {
       }
     }
 
-    set('org.gradle.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
+    set('org.gradle.jvmargs', '-Xmx6144m -XX:MaxMetaspaceSize=1536m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8');
+    set('org.gradle.workers.max', '4');
+    set('org.gradle.configureondemand', 'false');
     set('reactNativeArchitectures', 'arm64-v8a');
     set('hermesEnabled', 'true');
     set('newArchEnabled', 'false');
@@ -34,6 +36,15 @@ function withGradleProps(config) {
     set('android.enableMinifyInReleaseBuilds', 'false');
     set('android.enableShrinkResourcesInReleaseBuilds', 'false');
     set('android.packagingOptions.pickFirsts', '**/libc++_shared.so,**/libfbjni.so');
+
+    // Pin SDK/NDK versions to match RN 0.81 catalog exactly.
+    // Without these, expo-root-project falls back to SDK 35 / buildTools 35.0.0,
+    // but RN 0.81 native libraries require SDK 36 / buildTools 36.0.0.
+    set('android.ndkVersion', '27.1.12297006');
+    set('android.buildToolsVersion', '36.0.0');
+    set('android.minSdkVersion', '24');
+    set('android.compileSdkVersion', '36');
+    set('android.targetSdkVersion', '36');
 
     remove('edgeToEdgeEnabled');
     remove('expo.edgeToEdgeEnabled');
@@ -47,8 +58,7 @@ function withGradleProps(config) {
 // ── 1b. Direct gradle.properties file patch ──────────────────────────────────
 // withGradleProperties runs before Expo template generation, so some values
 // get overwritten. This direct file patch runs after template generation to
-// ensure our values stick. We sort the mod to run late by using a high-order
-// approach: read the file, apply replacements, write back.
+// ensure our values stick.
 function withGradlePropsFilePatch(config) {
   return withDangerousMod(config, [
     'android',
@@ -63,11 +73,8 @@ function withGradlePropsFilePatch(config) {
       let changed = false;
 
       const replacements = [
-        // Network inspector off
         { pattern: /EX_DEV_CLIENT_NETWORK_INSPECTOR\s*=\s*true/g, replacement: 'EX_DEV_CLIENT_NETWORK_INSPECTOR=false' },
-        // New Architecture off for build stability
         { pattern: /newArchEnabled\s*=\s*true/g, replacement: 'newArchEnabled=false' },
-        // Edge-to-edge variants
         { pattern: /expo\.edgeToEdgeEnabled=true/g, replacement: 'expo.edgeToEdgeEnabled=false' },
         { pattern: /^edgeToEdgeEnabled=true$/m, replacement: '# edgeToEdgeEnabled disabled by with-optimized-gradle plugin' },
         { pattern: /^react\.edgeToEdgeEnabled=true$/m, replacement: '# react.edgeToEdgeEnabled disabled by with-optimized-gradle plugin' },
@@ -76,6 +83,25 @@ function withGradlePropsFilePatch(config) {
       // Ensure kotlinVersion is set
       if (!content.includes('android.kotlinVersion')) {
         content += '\n# Kotlin version (must match RN 0.81 catalog)\nandroid.kotlinVersion=2.1.20\n';
+        changed = true;
+      }
+
+      // Pin SDK/NDK versions to match RN 0.81 catalog (expo-root-project defaults to 35)
+      const sdkPins = {
+        'android.ndkVersion': '27.1.12297006',
+        'android.buildToolsVersion': '36.0.0',
+        'android.minSdkVersion': '24',
+        'android.compileSdkVersion': '36',
+        'android.targetSdkVersion': '36',
+      };
+      for (const [key, val] of Object.entries(sdkPins)) {
+        const escapedKey = key.replace(/\./g, '\\.');
+        const re = new RegExp('^' + escapedKey + '=.*$', 'm');
+        if (re.test(content)) {
+          content = content.replace(re, key + '=' + val);
+        } else {
+          content += '\n' + key + '=' + val;
+        }
         changed = true;
       }
 
