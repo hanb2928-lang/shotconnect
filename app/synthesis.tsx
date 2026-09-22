@@ -223,7 +223,8 @@ export default function SynthesisScreen() {
       setVideoProgress((prev) => {
         if (!prev) return prev;
         const pctMatch = polling.progressMessage?.match(/\((\d+)%\)/);
-        const polledProgress = pctMatch ? parseInt(pctMatch[1], 10) / 100 : null;
+        const parsed = pctMatch ? parseInt(pctMatch[1], 10) : NaN;
+        const polledProgress = !isNaN(parsed) ? parsed / 100 : null;
         const baseProgress = prev.progress;
         const timeBasedProgress = Math.min(0.9, 0.12 + elapsed * 0.005);
         const nextProgress = polledProgress ?? Math.max(baseProgress, timeBasedProgress);

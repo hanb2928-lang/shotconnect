@@ -10,7 +10,8 @@ export interface AiRecommendBundle {
   summary: string;
 }
 
-function pickVoiceCategory(style: StyleRecommendation, category: string): VoiceCategory {
+function pickVoiceCategory(style: StyleRecommendation | null | undefined, category: string): VoiceCategory {
+  if (!style) return 'trendy_beauty';
   const cat = (category || '').toLowerCase();
   if (style.cardStyle === 'bold') return 'trendy_hype';
   if (style.cardStyle === 'magazine') return 'calm_documentarian';
@@ -22,7 +23,8 @@ function pickVoiceCategory(style: StyleRecommendation, category: string): VoiceC
   return 'trendy_beauty';
 }
 
-function mapStyleToTemplateLabel(style: StyleRecommendation): string {
+function mapStyleToTemplateLabel(style: StyleRecommendation | null | undefined): string {
+  if (!style) return '숏폼 영상';
   if (style.hybridMode === 'photo-to-comic') return '웹툰형 만화';
   if (style.format === 'horizontal') return '카드뉴스';
   return '숏폼 영상';
@@ -71,10 +73,10 @@ export async function fetchAiRecommendBundle(params: {
     witty_casual: 'm5_witty_casual',
     energetic_leader: 'm6_energetic_leader',
   };
-  const voice = getTtsVoiceByKey(voices[voiceCategory]) ?? getTtsVoiceByKey('f1_trendy_beauty')!;
-
+  const voiceKey = voices[voiceCategory] ?? 'f1_trendy_beauty';
+  const voice = getTtsVoiceByKey(voiceKey) ?? getTtsVoiceByKey('f1_trendy_beauty')!;
   const templateLabel = mapStyleToTemplateLabel(style);
-  const summary = `${templateLabel} · ${style.cardStyle} 스타일 · ${style.musicMood} BGM · ${voice.label} 내레이션 · ${style.duration}초`;
+  const summary = `${templateLabel} · ${style?.cardStyle ?? 'standard'} 스타일 · ${style?.musicMood ?? 'upbeat'} BGM · ${voice.label} 내레이션 · ${style?.duration ?? 15}초`;
 
   return { style, template, voice, templateLabel, summary };
 }
