@@ -29,7 +29,7 @@ function withGradleProps(config) {
     set('org.gradle.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
     set('reactNativeArchitectures', 'arm64-v8a,armeabi-v7a,x86_64');
     set('hermesEnabled', 'true');
-    set('EX_DEV_CLIENT_NETWORK_INSPECTOR', 'false');
+    set('newArchEnabled', 'false');
     set('android.kotlinVersion', '2.1.20');
     set('android.enableMinifyInReleaseBuilds', 'false');
     set('android.enableShrinkResourcesInReleaseBuilds', 'false');
@@ -38,6 +38,7 @@ function withGradleProps(config) {
     remove('edgeToEdgeEnabled');
     remove('expo.edgeToEdgeEnabled');
     remove('react.edgeToEdgeEnabled');
+    remove('EX_DEV_CLIENT_NETWORK_INSPECTOR');
 
     return cfg;
   });
@@ -63,11 +64,13 @@ function withGradlePropsFilePatch(config) {
 
       const replacements = [
         // Network inspector off
-        [/EX_DEV_CLIENT_NETWORK_INSPECTOR=true/g, 'EX_DEV_CLIENT_NETWORK_INSPECTOR=false'],
+        { pattern: /EX_DEV_CLIENT_NETWORK_INSPECTOR\s*=\s*true/g, replacement: 'EX_DEV_CLIENT_NETWORK_INSPECTOR=false' },
+        // New Architecture off for build stability
+        { pattern: /newArchEnabled\s*=\s*true/g, replacement: 'newArchEnabled=false' },
         // Edge-to-edge variants
-        [/expo\.edgeToEdgeEnabled=true/g, 'expo.edgeToEdgeEnabled=false'],
-        [/^edgeToEdgeEnabled=true$/m, '# edgeToEdgeEnabled disabled by with-optimized-gradle plugin'],
-        [/^react\.edgeToEdgeEnabled=true$/m, '# react.edgeToEdgeEnabled disabled by with-optimized-gradle plugin'],
+        { pattern: /expo\.edgeToEdgeEnabled=true/g, replacement: 'expo.edgeToEdgeEnabled=false' },
+        { pattern: /^edgeToEdgeEnabled=true$/m, replacement: '# edgeToEdgeEnabled disabled by with-optimized-gradle plugin' },
+        { pattern: /^react\.edgeToEdgeEnabled=true$/m, replacement: '# react.edgeToEdgeEnabled disabled by with-optimized-gradle plugin' },
       ];
 
       // Ensure kotlinVersion is set
@@ -76,11 +79,9 @@ function withGradlePropsFilePatch(config) {
         changed = true;
       }
 
-      for (const [pattern, replacement] of replacements) {
-        if (pattern.test(content)) {
-          content = content.replace(pattern, replacement);
-          changed = true;
-        }
+      for (const { pattern, replacement } of replacements) {
+        content = content.replace(pattern, replacement);
+        changed = true;
       }
 
       if (changed) {
@@ -220,132 +221,11 @@ function withProguardRules(config) {
   ]);
 }
 
-// ── 3. Patch community library build.gradle files directly ───────────────────
-// RN 0.81 renamed the Maven artifact from com.facebook.react:react-native to
-// com.facebook.react:react-android. Community libraries that still reference
-// `com.facebook.react:react-native:+` and the stale `node_modules/react-native/android`
-// Maven repo must be patched at the source. Instead of using a root-level
-// dependencySubstitution block (which can conflict with EAS build environments),
-// we patch each library's build.gradle directly:
-//   1. Replace stale `url "$rootDir/../node_modules/react-native/android"` with mavenCentral
-//   2. Replace `implementation 'com.facebook.react:react-native:+'` with
-//      `implementation 'com.facebook.react:react-android:+'`
-const MODULES_TO_PATCH = [
-  '@react-native-async-storage/async-storage',
-  '@react-native-community/datetimepicker',
-  'react-native-gesture-handler',
-  'react-native-safe-area-context',
-  'react-native-screens',
-  'react-native-svg',
-  'react-native-view-shot',
-  'react-native-webview',
-];
-
-function patchLibraryBuildGradle(gradlePath) {
-  if (!fs.existsSync(gradlePath)) return false;
-  let content = fs.readFileSync(gradlePath, 'utf8');
-  let changed = false;
-
-  // Replace stale local Maven repo URLs pointing to react-native/android
-  const staleUrlPatterns = [
-    /url\s+"\$\{rootDir\}\/\.\.\/node_modules\/react-native\/android"/g,
-    /url\s+\"\$rootDir\/\.\.\/node_modules\/react-native\/android"/g,
-    /url\s+'\$rootDir\/\.\.\/node_modules\/react-native\/android'/g,
-    /url\s+"\$\{projectDir\}\/\.\.\/node_modules\/react-native\/android"/g,
-    /url\s+"\$projectDir\/\.\.\/node_modules\/react-native\/android"/g,
-    /url\s+'\$projectDir\/\.\.\/node_modules\/react-native\/android'/g,
-    /url\s+"\$\{project\.ext\.resolveModulePath\("react-native"\)\}\/android"/g,
-    /url\s+"\$\{reactNativeRootDir\}\/android"/g,
-  ];
-  for (const pattern of staleUrlPatterns) {
-    if (pattern.test(content)) {
-      content = content.replace(pattern, "url 'https://repo.maven.apache.org/maven2/'");
-      changed = true;
-    }
-  }
-
-  // Replace the old artifact dependency with the new react-android artifact
-  // Match both single and double quoted variants, with + or ${...} version
-  const oldArtifactPatterns = [
-    /implementation\s+'com\.facebook\.react:react-native:\+'/g,
-    /implementation\s+"com\.facebook\.react:react-native:\+"/g,
-    /implementation\s+'com\.facebook\.react:react-native:\$\{[^}]+\}'/g,
-    /implementation\s+"com\.facebook\.react:react-native:\$\{[^}]+\}"/g,
-  ];
-  for (const pattern of oldArtifactPatterns) {
-    if (pattern.test(content)) {
-      content = content.replace(
-        pattern,
-        "implementation 'com.facebook.react:react-android:+'"
-      );
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    fs.writeFileSync(gradlePath, content, 'utf8');
-  }
-  return changed;
-}
-
-function withNodeModulesPatch(config) {
-  return withDangerousMod(config, [
-    'android',
-    (cfg) => {
-      const nodeModulesDir = path.join(cfg.modRequest.projectRoot, 'node_modules');
-
-      if (!fs.existsSync(nodeModulesDir)) {
-        console.warn('[with-optimized-gradle] node_modules not found, skipping library patches');
-        return cfg;
-      }
-
-      for (const mod of MODULES_TO_PATCH) {
-        const gradlePath = path.join(nodeModulesDir, mod, 'android', 'build.gradle');
-        try {
-          patchLibraryBuildGradle(gradlePath);
-        } catch (e) {
-          console.warn(`[with-optimized-gradle] Failed to patch ${mod}: ${e.message}`);
-        }
-      }
-
-      return cfg;
-    },
-  ]);
-}
-
-// ── 4. Patch app build.gradle packaging options ──────────────────────────────
-function withAppGradlePatch(config) {
-  return withDangerousMod(config, [
-    'android',
-    (cfg) => {
-      const appGradlePath = path.join(
-        cfg.modRequest.platformProjectRoot,
-        'app',
-        'build.gradle'
-      );
-      if (fs.existsSync(appGradlePath)) {
-        let content = fs.readFileSync(appGradlePath, 'utf8');
-        if (!content.includes('MANIFEST.MF')) {
-          const oldPackaging = '    packagingOptions {\n        jniLibs {';
-          const newPackaging = '    packagingOptions {\n        resources {\n            excludes = [\n                \'**/MANIFEST.MF\',\n                \'**/LICENSE\',\n                \'**/LICENSE.txt\',\n                \'**/NOTICE\',\n                \'**/NOTICE.txt\',\n                \'**/kotlin-tooling-metadata.json\'\n            ]\n        }\n        jniLibs {';
-          if (content.includes(oldPackaging)) {
-            content = content.replace(oldPackaging, newPackaging);
-            fs.writeFileSync(appGradlePath, content, 'utf8');
-          }
-        }
-      }
-      return cfg;
-    },
-  ]);
-}
-
 // ── Compose all plugins ───────────────────────────────────────────────────────
 function withOptimizedGradle(config) {
   config = withGradleProps(config);
   config = withGradlePropsFilePatch(config);
   config = withProguardRules(config);
-  config = withNodeModulesPatch(config);
-  config = withAppGradlePatch(config);
   return config;
 }
 
