@@ -20,7 +20,18 @@ async function getAsyncStorage() {
   if (asyncStorageLoadFailed) return null;
   if (asyncStorageModule) return asyncStorageModule;
   try {
-    asyncStorageModule = await import('@react-native-async-storage/async-storage');
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 5000),
+    );
+    const mod = await Promise.race([
+      import('@react-native-async-storage/async-storage'),
+      timeout,
+    ]);
+    if (!mod) {
+      asyncStorageLoadFailed = true;
+      return null;
+    }
+    asyncStorageModule = mod;
     return asyncStorageModule;
   } catch {
     asyncStorageLoadFailed = true;

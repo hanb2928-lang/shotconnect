@@ -12,12 +12,22 @@ let nativeRemoveItem: Remover | null = null;
 let nativeGetAllKeys: AllKeysGetter | null = null;
 let initPromise: Promise<void> | null = null;
 let initDone = false;
+let initAttempted = false;
+
+const STORAGE_INIT_TIMEOUT_MS = 5000;
 
 // Lazy-load AsyncStorage so module-eval never touches the native binding.
 // On native, the native module may not be registered yet at boot.
 async function loadAsyncStorage(): Promise<typeof import('@react-native-async-storage/async-storage') | null> {
   try {
-    return await import('@react-native-async-storage/async-storage');
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), STORAGE_INIT_TIMEOUT_MS),
+    );
+    const mod = await Promise.race([
+      import('@react-native-async-storage/async-storage'),
+      timeout,
+    ]);
+    return mod;
   } catch {
     return null;
   }
@@ -32,6 +42,7 @@ export function initStorage(): Promise<void> {
         webStorage = window.localStorage;
       }
       initDone = true;
+      initAttempted = true;
       return;
     }
 
@@ -48,14 +59,26 @@ export function initStorage(): Promise<void> {
       // AsyncStorage not available — getItem/setItem will return null/no-op
     }
     initDone = true;
+    initAttempted = true;
   })();
+
+  // Safety net: if the init promise itself hangs (e.g. native module deadlock),
+  // force initDone so getItem/setItem don't block forever waiting on it.
+  setTimeout(() => {
+    if (!initDone) {
+      initDone = true;
+      initAttempted = true;
+    }
+  }, STORAGE_INIT_TIMEOUT_MS + 500);
 
   return initPromise;
 }
 
 export async function getItem(key: string): Promise<string | null> {
-  if (!initDone) {
+  if (!initDone && !initAttempted) {
     await initStorage();
+  } else if (!initDone) {
+    // Init was attempted but timed out — don't block, proceed with no-op
   }
 
   if (webStorage) {
@@ -76,8 +99,10 @@ export async function getItem(key: string): Promise<string | null> {
 }
 
 export async function setItem(key: string, value: string): Promise<void> {
-  if (!initDone) {
+  if (!initDone && !initAttempted) {
     await initStorage();
+  } else if (!initDone) {
+    // Init was attempted but timed out — don't block, proceed with no-op
   }
 
   if (webStorage) {
