@@ -65,6 +65,18 @@ if (-not (Test-Path "node_modules/expo")) {
     Read-Host "Enter를 눌러 종료"
     exit 1
 }
+if (-not (Test-Path "node_modules/react-native-reanimated")) {
+    Write-Host "오류: node_modules가 불완전합니다. react-native-reanimated를 찾을 수 없습니다." -ForegroundColor Red
+    Write-Host "해결: Remove-Item -Recurse -Force node_modules; Remove-Item package-lock.json; npm install --legacy-peer-deps" -ForegroundColor Yellow
+    Read-Host "Enter를 눌러 종료"
+    exit 1
+}
+if (-not (Test-Path "node_modules/react-native-worklets")) {
+    Write-Host "오류: node_modules가 불완전합니다. react-native-worklets를 찾을 수 없습니다." -ForegroundColor Red
+    Write-Host "해결: Remove-Item -Recurse -Force node_modules; Remove-Item package-lock.json; npm install --legacy-peer-deps" -ForegroundColor Yellow
+    Read-Host "Enter를 눌러 종료"
+    exit 1
+}
 Write-Host "node_modules 검증 통과." -ForegroundColor Green
 Write-Host ""
 

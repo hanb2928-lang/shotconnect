@@ -38,10 +38,21 @@ jobs:
 
       - name: Verify node_modules
         run: |
-          if [ ! -d "node_modules/expo" ] || [ ! -d "node_modules/react-native" ]; then
-            echo "ERROR: node_modules incomplete"
-            exit 1
-          fi
+          for mod in expo react-native expo-router react-native-reanimated react-native-worklets; do
+            if [ ! -d "node_modules/$mod" ]; then
+              echo "ERROR: node_modules/$mod not found"
+              echo "Attempting reinstall..."
+              rm -rf node_modules package-lock.json
+              npm install --legacy-peer-deps
+              break
+            fi
+          done
+          for mod in expo react-native expo-router react-native-reanimated react-native-worklets; do
+            if [ ! -d "node_modules/$mod" ]; then
+              echo "ERROR: node_modules/$mod still missing after reinstall"
+              exit 1
+            fi
+          done
           echo "node_modules OK"
 
       - name: Prebuild & Build APK

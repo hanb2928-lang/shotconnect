@@ -73,6 +73,18 @@ if not exist "node_modules\expo" (
     pause
     exit /b 1
 )
+if not exist "node_modules\react-native-reanimated" (
+    echo 오류: node_modules가 불완전합니다. react-native-reanimated를 찾을 수 없습니다.
+    echo 해결: rmdir /s /q node_modules ^&^& del package-lock.json ^&^& npm install --legacy-peer-deps
+    pause
+    exit /b 1
+)
+if not exist "node_modules\react-native-worklets" (
+    echo 오류: node_modules가 불완전합니다. react-native-worklets를 찾을 수 없습니다.
+    echo 해결: rmdir /s /q node_modules ^&^& del package-lock.json ^&^& npm install --legacy-peer-deps
+    pause
+    exit /b 1
+)
 echo node_modules 검증 통과.
 echo.
 

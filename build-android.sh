@@ -59,6 +59,16 @@ if [ ! -d "node_modules/react-native" ]; then
     echo "Fix: rm -rf node_modules package-lock.json && npm install --legacy-peer-deps"
     exit 1
 fi
+if [ ! -d "node_modules/react-native-reanimated" ]; then
+    echo "ERROR: node_modules incomplete. react-native-reanimated not found."
+    echo "Fix: rm -rf node_modules package-lock.json && npm install --legacy-peer-deps"
+    exit 1
+fi
+if [ ! -d "node_modules/react-native-worklets" ]; then
+    echo "ERROR: node_modules incomplete. react-native-worklets not found."
+    echo "Fix: rm -rf node_modules package-lock.json && npm install --legacy-peer-deps"
+    exit 1
+fi
 echo "node_modules verification passed."
 echo ""
 
