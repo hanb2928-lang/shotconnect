@@ -2012,10 +2012,30 @@ async function updateScanWithVideo(scanId: string, videoUrl: string): Promise<vo
   }
 }
 
-async function sendVideoCompletePush(_scanId: string): Promise<void> {
-  // No-auth app: scans table has no user_id column, so per-user push
-  // is not applicable. Push notifications are handled client-side via
-  // the Realtime subscription on video_jobs.
+async function sendVideoCompletePush(scanId: string): Promise<void> {
+  if (!supabaseUrl || !serviceRoleKey) return;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    await fetch(`${supabaseUrl}/functions/v1/send-push`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+      },
+      body: JSON.stringify({
+        title: "영상 생성 완료",
+        body: "AI 영상이 완성되었어요. 지금 바로 확인해보세요!",
+        url: `/result/${scanId}`,
+        data: { scanId, type: "video_complete" },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+  } catch {
+    // non-fatal — push is best-effort
+  }
 }
 
 function delay(ms: number): Promise<void> {

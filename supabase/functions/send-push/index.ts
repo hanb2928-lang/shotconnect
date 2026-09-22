@@ -46,9 +46,9 @@ Deno.serve(async (req: Request) => {
   try {
     const payload = await req.json() as PushPayload;
 
-    if (!payload.userId || !payload.title || !payload.body) {
+    if (!payload.title || !payload.body) {
       return new Response(
-        JSON.stringify({ error: "userId, title, body are required" }),
+        JSON.stringify({ error: "title, body are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -64,10 +64,12 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const subs = await fetchSubscriptions(payload.userId);
+    const subs = payload.userId
+      ? await fetchSubscriptions(payload.userId)
+      : await fetchAllSubscriptions();
     if (subs.length === 0) {
       return new Response(
-        JSON.stringify({ sent: 0, message: "No push subscriptions found for user" }),
+        JSON.stringify({ sent: 0, message: "No push subscriptions found" }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -100,7 +102,11 @@ Deno.serve(async (req: Request) => {
     );
 
     if (expiredEndpoints.length > 0) {
-      await cleanupExpiredSubscriptions(payload.userId, expiredEndpoints);
+      if (payload.userId) {
+        await cleanupExpiredSubscriptions(payload.userId, expiredEndpoints);
+      } else {
+        await cleanupExpiredSubscriptionsByEndpoint(expiredEndpoints);
+      }
     }
 
     return new Response(
@@ -115,6 +121,51 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+async function fetchAllSubscriptions(): Promise<SubscriptionRow[]> {
+  if (!supabaseUrl || !serviceRoleKey) return [];
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/push_subscriptions?select=endpoint,keys`,
+      {
+        headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+        signal: controller.signal,
+      },
+    );
+    clearTimeout(timeoutId);
+    if (!resp.ok) return [];
+    const rows = await resp.json() as Array<{ endpoint: string; keys: { p256dh?: string; auth?: string } }>;
+    return rows
+      .filter((r) => r.keys?.p256dh && r.keys?.auth)
+      .map((r) => ({ endpoint: r.endpoint, keys: { p256dh: r.keys.p256dh!, auth: r.keys.auth! } }));
+  } catch {
+    clearTimeout(timeoutId);
+    return [];
+  }
+}
+
+async function cleanupExpiredSubscriptionsByEndpoint(endpoints: string[]): Promise<void> {
+  if (!supabaseUrl || !serviceRoleKey) return;
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      await fetch(
+        `${supabaseUrl}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`,
+        {
+          method: "DELETE",
+          headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+          signal: controller.signal,
+        },
+      );
+      clearTimeout(timeoutId);
+    } catch {
+      // non-fatal
+    }
+  }
+}
 
 async function fetchSubscriptions(userId: string): Promise<SubscriptionRow[]> {
   if (!supabaseUrl || !serviceRoleKey) return [];
