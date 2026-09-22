@@ -122,7 +122,7 @@ async function fetchSubscriptions(userId: string): Promise<SubscriptionRow[]> {
   const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/push_subscriptions?user_id=eq.${userId}&select=endpoint,p256dh,auth`,
+      `${supabaseUrl}/rest/v1/push_subscriptions?user_id=eq.${userId}&select=endpoint,keys`,
       {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
         signal: controller.signal,
@@ -130,8 +130,10 @@ async function fetchSubscriptions(userId: string): Promise<SubscriptionRow[]> {
     );
     clearTimeout(timeoutId);
     if (!resp.ok) return [];
-    const rows = await resp.json() as Array<{ endpoint: string; p256dh: string; auth: string }>;
-    return rows.map((r) => ({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } }));
+    const rows = await resp.json() as Array<{ endpoint: string; keys: { p256dh?: string; auth?: string } }>;
+    return rows
+      .filter((r) => r.keys?.p256dh && r.keys?.auth)
+      .map((r) => ({ endpoint: r.endpoint, keys: { p256dh: r.keys.p256dh!, auth: r.keys.auth! } }));
   } catch {
     clearTimeout(timeoutId);
     return [];

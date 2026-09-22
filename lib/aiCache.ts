@@ -28,7 +28,7 @@ async function getL2<T>(cacheKey: string): Promise<T | null> {
   try {
     const { data, error } = await supabase
       .from('ai_content_cache')
-      .select('result, expires_at')
+      .select('result, expires_at, hit_count')
       .eq('cache_key', cacheKey)
       .maybeSingle();
 
@@ -37,9 +37,10 @@ async function getL2<T>(cacheKey: string): Promise<T | null> {
     const expiresAt = new Date(data.expires_at as string).getTime();
     if (Date.now() > expiresAt) return null;
 
+    const currentHitCount = (data as { hit_count?: number }).hit_count ?? 0;
     supabase
       .from('ai_content_cache')
-      .update({ hit_count: ((data as { hit_count?: number }).hit_count ?? 0) + 1, updated_at: new Date().toISOString() })
+      .update({ hit_count: currentHitCount + 1, updated_at: new Date().toISOString() })
       .eq('cache_key', cacheKey)
       .then(() => {}, () => {});
 

@@ -61,6 +61,7 @@ interface GenerateVideoRequest {
   enableCaustics?: boolean;
   enableVirtualFitting?: boolean;
   enableFabricPhysics?: boolean;
+  orbitSpeed?: number;
   // webhook fields (sent by Runway callback)
   status?: string;
   output?: string[] | { url?: string } | string;
@@ -2011,42 +2012,10 @@ async function updateScanWithVideo(scanId: string, videoUrl: string): Promise<vo
   }
 }
 
-async function sendVideoCompletePush(scanId: string): Promise<void> {
-  if (!supabaseUrl || !serviceRoleKey) return;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(
-      `${supabaseUrl}/rest/v1/scans?select=user_id&id=eq.${scanId}`,
-      { headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }, signal: controller.signal },
-    );
-    clearTimeout(timeoutId);
-    if (!resp.ok) return;
-    const rows = await resp.json() as Array<{ user_id: string | null }>;
-    if (!rows[0]?.user_id) return;
-    const userId = rows[0].user_id;
-
-    const pushController = new AbortController();
-    const pushTimeoutId = setTimeout(() => pushController.abort(), 10000);
-    await fetch(`${supabaseUrl}/functions/v1/send-push`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
-      },
-      body: JSON.stringify({
-        userId,
-        title: "숏폼 영상 제작 완료!",
-        body: "AI 영상이 완성되었습니다. 지금 바로 확인해보세요.",
-        url: `/result/${scanId}`,
-      }),
-      signal: pushController.signal,
-    });
-    clearTimeout(pushTimeoutId);
-  } catch {
-    // non-fatal — push is best-effort
-  }
+async function sendVideoCompletePush(_scanId: string): Promise<void> {
+  // No-auth app: scans table has no user_id column, so per-user push
+  // is not applicable. Push notifications are handled client-side via
+  // the Realtime subscription on video_jobs.
 }
 
 function delay(ms: number): Promise<void> {
