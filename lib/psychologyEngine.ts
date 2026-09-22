@@ -621,6 +621,26 @@ const SNIPER_TRIGGERS: SniperTrigger[] = [
     copyTemplate: '단점 하나 말하자면 배송이 좀 느려요. 근데 그걸 감수하고도 재구매하는 이유가 있습니다',
     conversionBoostPercent: 31,
   },
+  {
+    id: 'sniper_009',
+    triggerName: '페인 포인트 저격',
+    targetEmotion: 'empathy',
+    technique: '유저가 일상에서 겪던 불편함이나 컴플렉스를 부드럽게 짚어낸 뒤 이 상품이 해결 열쇠임을 각인',
+    applicationTiming: 4,
+    precisionTarget: '일상의 불편함에 대한 공감 회로',
+    copyTemplate: '매번 퇴근길에 거울 보며 지친 피부에 한숨 쉬셨죠? 오늘 밤 단 5분 투자로 내일 아침 결이 달라집니다',
+    conversionBoostPercent: 37,
+  },
+  {
+    id: 'sniper_010',
+    triggerName: '소속감 자존감 터치',
+    targetEmotion: 'desire',
+    technique: '단순 물건 구매가 아닌 이 물건을 쓰는 감각적이고 가치 있는 자아를 상상하게 만듦',
+    applicationTiming: 6,
+    precisionTarget: '자아 정체성 및 자존감 회로',
+    copyTemplate: '이동 중에 툭 꺼내 쓰는 것만으로도 공간의 분위기가 달라지는 아이템이에요. 본인의 취향을 아시는 분들에게 꼭 어울립니다',
+    conversionBoostPercent: 35,
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -97,6 +97,8 @@ export const PLATFORM_CONVERSION_PROFILES: Record<ConversionPlatform, PlatformCo
 
 export const PSYCHOLOGICAL_TRIGGERS = [
   { name: "손실 회피 역전", desc: "구매 안 하면 더 비싸게 사게 됨을 암시", example: "지금 안 사면 나중에 2배로 줍게 됩니다" },
+  { name: "페인 포인트 저격", desc: "유저가 일상에서 겪던 불편함을 부드럽게 짚은 뒤 이 상품이 해결열쇠임을 각인", example: "매번 퇴근길에 거울 보며 지친 피부에 한숨 쉬셨죠? 오늘 밤 단 5분 투자로 내일 아침 결이 달라집니다" },
+  { name: "소속감과 자존감 터치", desc: "단순 물건 구매가 아닌 '이 물건을 쓰는 감각적이고 가치 있는 나'를 상상하게 만듦", example: "이동 중에 툭 꺼내 쓰는 것만으로도 공간의 분위기가 달라지는 아이템이에요. 본인의 취향을 아시는 분들에게 꼭 어울립니다" },
   { name: "사회적 증거", desc: "구체적 숫자로 뇌의 판단을 대체", example: "재구매율 89%, 리뷰 12,847개, 별점 4.8" },
   { name: "긴급성/희소성", desc: "한정 수량, 시간 제한으로 행동 촉발", example: "재고 3개 남았을 때가 마지막 기회" },
   { name: "호기심 갭", desc: "정보를 일부 숨겨 끝까지 보게 만듦", example: "이 제품 진짜 살 만한가? 결론은 마지막에" },
