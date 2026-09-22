@@ -10,12 +10,7 @@
     "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.snapconnect.app",
-      "infoPlist": {
-        "NSCameraUsageDescription": "ShortConnect이 상품을 촬영하고 AI 분석을 수행하기 위해 카메라 접근이 필요합니다.",
-        "NSMicrophoneUsageDescription": "ShortConnect이 음성 명령 및 나레이션 녹음을 위해 마이크 접근이 필요합니다.",
-        "NSPhotoLibraryUsageDescription": "ShortConnect이 갤러리에서 사진을 선택하여 분석하기 위해 사진 라이브러리 접근이 필요합니다."
-      }
+      "bundleIdentifier": "com.snapconnect.app"
     },
     "android": {
       "package": "com.snapconnect.app",
@@ -39,9 +34,6 @@
     "extra": {
       "supabaseUrl": "https://asjqmhuhvmiekdnvddjv.supabase.co",
       "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc",
-      "router": {
-        "origin": "snapconnect://"
-      },
       "eas": {
         "projectId": ""
       }
@@ -52,55 +44,12 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      [
-        "expo-router",
-        {
-          "origin": "snapconnect://"
-        }
-      ],
       "expo-font",
       "expo-web-browser",
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "Allow ShortConnect to access your photos to upload and analyze them."
-        }
-      ],
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow ShortConnect to access your camera to capture and analyze photos.",
-          "microphonePermission": "Allow ShortConnect to access your microphone for voice commands and narration recording.",
-          "shutterSound": false
-        }
-      ],
-      [
-        "expo-media-library",
-        {
-          "photosPermission": "Allow ShortConnect to save template cards to your photo gallery.",
-          "savePhotosPermission": "Allow ShortConnect to save template cards to your photo gallery."
-        }
-      ],
-      "expo-system-ui",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "buildArchs": ["arm64-v8a"],
-            "ndkVersion": "27.1.12297006",
-            "buildToolsVersion": "36.0.0",
-            "compileSdkVersion": 36,
-            "targetSdkVersion": 36,
-            "minSdkVersion": 24,
-            "kotlinVersion": "2.1.20",
-            "networkInspector": false
-          }
-        }
-      ],
-      "./plugins/with-optimized-gradle"
-    ],
-    "experiments": {
-      "typedRoutes": true
-    }
+      "expo-image-picker",
+      "expo-camera",
+      "expo-media-library",
+      "expo-system-ui"
+    ]
   }
 }
