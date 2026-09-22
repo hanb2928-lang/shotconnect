@@ -26,9 +26,13 @@ function withGradleProps(config) {
       }
     }
 
-    set('org.gradle.jvmargs', '-Xmx6144m -XX:MaxMetaspaceSize=1536m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8');
+    set('org.gradle.jvmargs', '-Xmx8192m -XX:MaxMetaspaceSize=2048m -XX:+HeapDumpOnOutOfMemoryError -XX:+UseParallelGC -Dfile.encoding=UTF-8');
     set('org.gradle.workers.max', '4');
     set('org.gradle.configureondemand', 'false');
+    set('org.gradle.parallel', 'true');
+    set('org.gradle.caching', 'true');
+    set('kotlin.daemon.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
+    set('org.gradle.daemon.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m');
     set('reactNativeArchitectures', 'arm64-v8a');
     set('hermesEnabled', 'true');
     set('newArchEnabled', 'false');
