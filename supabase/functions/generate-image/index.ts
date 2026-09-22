@@ -382,10 +382,10 @@ function buildStructuredPrompt(
   size: string,
   seed?: number,
 ): string {
-  const isVertical = size === "1024x1792";
+  const isVertical = size === "1024x1536";
   const formatNote = isVertical
     ? "9:16 vertical format optimized for short-form video (Reels, Shorts, TikTok)"
-    : size === "1792x1024"
+    : size === "1536x1024"
     ? "16:9 horizontal format"
     : "1:1 square format";
 

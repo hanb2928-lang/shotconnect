@@ -157,12 +157,14 @@ Deno.serve(async (req: Request) => {
           const newConsecutiveFailures = (job.consecutive_failures ?? 0) + 1;
 
           if (newAttempts >= MAX_ATTEMPTS) {
-            await markJobError(job.id, newAttempts, errorMsg, newConsecutiveFailures);
+            try { await markJobError(job.id, newAttempts, errorMsg, newConsecutiveFailures); }
+            catch (e) { console.error('markJobError failed for job', job.id, e); }
             processed.push({ id: job.id, status: "error", error: errorMsg });
           } else {
             const backoffMultiplier = Math.min(newConsecutiveFailures, 4);
             const requeueDelay = BACKOFF_DELAY_MS * backoffMultiplier;
-            await requeueJob(job.id, newAttempts, errorMsg, newConsecutiveFailures);
+            try { await requeueJob(job.id, newAttempts, errorMsg, newConsecutiveFailures); }
+            catch (e) { console.error('requeueJob failed for job', job.id, e); }
             processed.push({ id: job.id, status: "requeued", error: errorMsg });
             // Fire-and-forget trigger after delay to retry the requeued job
             if (requeueDelay > 0) {
@@ -348,18 +350,22 @@ async function checkQueuedJobsRaw(): Promise<number> {
 }
 
 async function checkQueuedJobs(): Promise<boolean> {
-  const resp = await fetch(
-    `${supabaseUrl}/rest/v1/render_jobs?select=id&status=eq.queued&limit=1`,
-    {
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/render_jobs?select=id&status=eq.queued&limit=1`,
+      {
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
       },
-    },
-  );
-  if (!resp.ok) return false;
-  const rows = await resp.json() as Array<{ id: string }>;
-  return rows.length > 0;
+    );
+    if (!resp.ok) return false;
+    const rows = await resp.json() as Array<{ id: string }>;
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function dequeueBatchJobs(maxCount: number, maxAttempts: number): Promise<RenderJob[]> {

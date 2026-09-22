@@ -2,6 +2,8 @@
 // Fetches live weather data from Open-Meteo API (free, no API key required)
 // Returns current temperature, precipitation, and weather code for a given lat/lon.
 
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",

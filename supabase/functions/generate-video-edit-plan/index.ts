@@ -364,7 +364,7 @@ function normalizePlan(
 
   const hookTiming = {
     firstHookSec: Number((raw.hookTiming as Record<string, unknown>)?.firstHookSec) || 0,
-    reason: String((raw.hookTiming as Record<string, unknown>)?.reason) || "첫 1~3초에 후킹을 배치합니다.",
+    reason: ((raw.hookTiming as Record<string, unknown>)?.reason as string) || "첫 1~3초에 후킹을 배치합니다.",
   };
 
   const psychRaw = (raw.psychology as Record<string, unknown>) || {};

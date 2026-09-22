@@ -23,7 +23,7 @@ export function useCameraVisibilityRecovery({
   }, [restartStream, stopStream]);
 
   useEffect(() => {
-    if (!isActive || Platform.OS !== 'web') return;
+    if (!isActive || Platform.OS !== 'web' || typeof document === 'undefined') return;
 
     const handleVisibilityChange = async () => {
       if (document.visibilityState !== 'visible') return;

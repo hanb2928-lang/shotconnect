@@ -98,11 +98,14 @@ export function useQueuedJob() {
 
     subRef.current = subscribeToJob(jobId, handleUpdate, () => {
       if (mySubmitId !== submitIdRef.current) return;
-      clearAll();
+      if (subRef.current) {
+        subRef.current.unsubscribe();
+        subRef.current = null;
+      }
       setState((prev) => ({
         ...prev,
-        status: 'error',
-        error: '실시간 연결이 끊겼습니다. 네트워크를 확인 후 다시 시도해주세요.',
+        status: prev.status === 'done' ? prev.status : 'queued',
+        error: '실시간 연결이 끊겼습니다. 백그라운드에서 계속 확인합니다.',
       }));
     });
 

@@ -163,7 +163,8 @@ async function cleanStaleWorkers(timeoutSec: number): Promise<number> {
       },
     );
     if (!resp.ok) return 0;
-    return 1;
+    const data = await resp.json();
+    return typeof data === 'number' ? data : 1;
   } catch {
     return 0;
   }

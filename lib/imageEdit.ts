@@ -80,6 +80,9 @@ export async function removeBackground(
 
   // Fallback for older deployments still returning base64
   const base64 = cleanBase64(data?.imageBase64 ?? '');
+  if (!base64) {
+    throw new Error('배경 제거 응답에 이미지 데이터가 없습니다.');
+  }
   return `data:${data?.mimeType || 'image/png'};base64,${base64}`;
 }
 

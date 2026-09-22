@@ -132,17 +132,12 @@ export async function purchaseCredits(packageId: string): Promise<PurchaseResult
     if (err?.userCancelled) {
       return { success: false, credits: 0, packageId, error: '결제가 취소되었습니다' };
     }
-    try {
-      await addCredits(pkg.credits, 'purchase', `${pkg.name} 구매 (테스트)`, pkg.id);
-      return { success: true, credits: pkg.credits, packageId };
-    } catch (fallbackErr) {
-      return {
-        success: false,
-        credits: 0,
-        packageId,
-        error: fallbackErr instanceof Error ? fallbackErr.message : '충전 중 오류가 발생했습니다',
-      };
-    }
+    return {
+      success: false,
+      credits: 0,
+      packageId,
+      error: err instanceof Error ? err.message : '결제 중 오류가 발생했습니다',
+    };
   } finally {
     pendingPurchase = false;
   }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type ProjectStep = 'idle' | 'uploading' | 'rendering' | 'completed' | 'failed';
 
@@ -14,6 +14,7 @@ interface VideoJobRow {
 export function useProjectPhase(jobId: string | null) {
   const [step, setStep] = useState<ProjectStep>('idle');
   const [data, setData] = useState<VideoJobRow | null>(null);
+  const channelRef = useRef<ReturnType<ReturnType<typeof import('@/lib/supabase').supabase.channel>['subscribe']> | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -54,13 +55,16 @@ export function useProjectPhase(jobId: string | null) {
         )
         .subscribe();
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      channelRef.current = channel;
     })();
 
     return () => {
       cancelled = true;
+      if (channelRef.current) {
+        const { supabase } = require('@/lib/supabase');
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [jobId]);
 

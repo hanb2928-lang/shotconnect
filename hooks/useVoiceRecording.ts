@@ -24,7 +24,7 @@ export function useVoiceRecording(): MediaRecorderLike {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const durationRef = useRef(0);
   const stoppingRef = useRef(false);
-  const pendingStopRef = useRef<((v: string | null) => void) | null>(null);
+  const pendingStopsRef = useRef<Array<(v: string | null) => void>>([]);
   const mountedRef = useRef(true);
 
   const cleanup = useCallback(() => {
@@ -42,7 +42,7 @@ export function useVoiceRecording(): MediaRecorderLike {
     mediaRecorderRef.current = null;
     chunksRef.current = [];
     stoppingRef.current = false;
-    pendingStopRef.current = null;
+    pendingStopsRef.current = [];
     durationRef.current = 0;
   }, []);
 
@@ -101,6 +101,22 @@ export function useVoiceRecording(): MediaRecorderLike {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          cleanup();
+          setState('stopped');
+        };
+        reader.onerror = () => {
+          cleanup();
+          setState('error');
+          setError('녹음 파일을 읽지 못했습니다.');
+        };
+        reader.readAsDataURL(blob);
+      };
+
       recorder.start();
       mediaRecorderRef.current = recorder;
       setState('recording');
@@ -130,10 +146,10 @@ export function useVoiceRecording(): MediaRecorderLike {
       return null;
     }
 
-    // If a stop is already in progress, return the existing promise
+    // If a stop is already in progress, queue the resolver
     if (stoppingRef.current) {
       return new Promise<string | null>((resolve) => {
-        pendingStopRef.current = resolve;
+        pendingStopsRef.current.push(resolve);
       });
     }
 
@@ -148,20 +164,16 @@ export function useVoiceRecording(): MediaRecorderLike {
           cleanup();
           setState('stopped');
           resolve(dataUrl);
-          if (pendingStopRef.current) {
-            pendingStopRef.current(dataUrl);
-            pendingStopRef.current = null;
-          }
+          for (const r of pendingStopsRef.current) r(dataUrl);
+          pendingStopsRef.current = [];
         };
         reader.onerror = () => {
           cleanup();
           setState('error');
           setError('녹음 파일을 읽지 못했습니다.');
           resolve(null);
-          if (pendingStopRef.current) {
-            pendingStopRef.current(null);
-            pendingStopRef.current = null;
-          }
+          for (const r of pendingStopsRef.current) r(null);
+          pendingStopsRef.current = [];
         };
         reader.readAsDataURL(blob);
       };
@@ -172,10 +184,8 @@ export function useVoiceRecording(): MediaRecorderLike {
         cleanup();
         setState('idle');
         resolve(null);
-        if (pendingStopRef.current) {
-          pendingStopRef.current(null);
-          pendingStopRef.current = null;
-        }
+        for (const r of pendingStopsRef.current) r(null);
+        pendingStopsRef.current = [];
       }
     });
   }, [cleanup]);

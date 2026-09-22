@@ -352,7 +352,7 @@ function derToRaw(derSig: Uint8Array): Uint8Array {
   // ECDSA signatures from Web Crypto are in DER format; JWT needs raw r||s
   const rLen = derSig[3];
   const r = derSig.subarray(4, 4 + rLen);
-  const sOffset = 4 + rLen + 2;
+  const sOffset = 4 + rLen + 1;
   const sLen = derSig[sOffset];
   const s = derSig.subarray(sOffset + 1, sOffset + 1 + sLen);
 

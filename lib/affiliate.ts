@@ -61,7 +61,7 @@ export function validateAffiliateUrl(rawUrl: string): UrlValidationResult {
       warning = '아마존 제휴 링크에는 ?tag=YOUR-ID 파라미터가 필요해요. Amazon Associates에서 발급받은 링크를 사용하세요.';
     }
     if (/amazon\.co\.kr/i.test(url)) {
-      warning = '아마존 한국 사이트는 제휴 프로그램이 제한적이에요. 글로벌 amazon.com 링크 사용을 권장해요.';
+      warning = (warning ? warning + ' ' : '') + '아마존 한국 사이트는 제휴 프로그램이 제한적이에요. 글로벌 amazon.com 링크 사용을 권장해요.';
     }
   }
 

@@ -11,6 +11,7 @@ export async function addRevenueRecord(
   const { data, error } = await supabase
     .from('revenue_records')
     .insert({
+      source: platform,
       platform,
       amount,
       period_month: periodMonth,

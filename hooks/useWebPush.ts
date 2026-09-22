@@ -95,12 +95,7 @@ export function useWebPush(): UseWebPushResult {
         return false;
       }
 
-      const sub = await registrationRef.current.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(key).buffer as ArrayBuffer,
-      });
-
-      // Save subscription to database
+      // Check auth before subscribing to avoid orphaned browser subscriptions
       const { supabase } = await import('@/lib/supabase');
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
@@ -108,6 +103,11 @@ export function useWebPush(): UseWebPushResult {
         setError('알림을 구독하려면 로그인이 필요합니다.');
         return false;
       }
+
+      const sub = await registrationRef.current.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key).buffer as ArrayBuffer,
+      });
 
       const subJson = sub.toJSON();
       const { error: dbError } = await supabase
@@ -137,6 +137,7 @@ export function useWebPush(): UseWebPushResult {
 
     try {
       const sub = await registrationRef.current.pushManager.getSubscription();
+      const endpoint = sub?.endpoint;
       if (sub) {
         await sub.unsubscribe();
       }
@@ -144,11 +145,12 @@ export function useWebPush(): UseWebPushResult {
       const { supabase } = await import('@/lib/supabase');
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
-      if (userId) {
+      if (userId && endpoint) {
         await supabase
           .from('push_subscriptions')
           .delete()
-          .eq('user_id', userId);
+          .eq('user_id', userId)
+          .eq('endpoint', endpoint);
       }
 
       setIsSubscribed(false);
