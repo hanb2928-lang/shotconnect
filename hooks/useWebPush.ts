@@ -115,8 +115,7 @@ export function useWebPush(): UseWebPushResult {
         .upsert({
           user_id: userId,
           endpoint: subJson.endpoint,
-          p256dh: subJson.keys?.p256dh ?? '',
-          auth: subJson.keys?.auth ?? '',
+          keys: subJson.keys ?? {},
         }, { onConflict: 'user_id,endpoint' });
 
       if (dbError) {
