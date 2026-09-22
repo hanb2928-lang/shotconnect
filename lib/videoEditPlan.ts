@@ -87,10 +87,32 @@ export async function fetchVideoEditPlan(params: {
         throw new Error(errData.error || `요청 실패 (${resp.status})`);
       }
       const respData = (await resp.json()) as EditPlanResponse;
-      if (!respData.plan) {
+      if (!respData.plan || typeof respData.plan !== 'object') {
         throw new Error('편집 계획을 불러오지 못했습니다.');
       }
-      return respData.plan;
+      const p = respData.plan;
+      if (!Array.isArray(p.segments) || !Array.isArray(p.copyVariants)) {
+        throw new Error('편집 계획 데이터가 올바르지 않습니다.');
+      }
+      return {
+        ...p,
+        segments: p.segments,
+        copyVariants: p.copyVariants.map((v) => ({
+          hook: v.hook ?? '',
+          body: v.body ?? '',
+          cta: v.cta ?? '',
+          hashtags: Array.isArray(v.hashtags) ? v.hashtags : [],
+          disclosure: v.disclosure ?? '',
+        })),
+        hookTiming: p.hookTiming ?? { firstHookSec: 0, reason: '' },
+        psychology: p.psychology ?? { principle: '', application: '', triggerPoint: '' },
+        antiAlgorithm: p.antiAlgorithm ?? { copyVariation: '', pacingStrategy: '', visualChangeStrategy: '', audioChangeStrategy: '' },
+        musicMood: p.musicMood ?? '하이텐션',
+        motionPreset: p.motionPreset ?? 'zoom_in',
+        reason: p.reason ?? '',
+        duration: p.duration ?? params.videoDuration,
+        totalSegments: p.totalSegments ?? p.segments.length,
+      };
     },
     'gpt-4o',
   );

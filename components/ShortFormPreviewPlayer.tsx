@@ -520,12 +520,12 @@ useEffect(() => {
     document.head.appendChild(style);
   }, []);
 
-  const activeSegment = getActiveSegment(editPlan.segments, currentSec);
+  const activeSegment = getActiveSegment(editPlan?.segments ?? [], currentSec);
   const activeCopyOverlay = copyOverlays ? getActiveCopyOverlay(copyOverlays, currentSec) : null;
   const isDisclosureActive =
-    editPlan.disclosureEnabled &&
-    currentSec >= editPlan.disclosureOverlay.startSec &&
-    currentSec < editPlan.disclosureOverlay.endSec;
+    editPlan?.disclosureEnabled &&
+    currentSec >= (editPlan?.disclosureOverlay?.startSec ?? 99) &&
+    currentSec < (editPlan?.disclosureOverlay?.endSec ?? 99);
   const progressPercent = (currentSec / TOTAL_DURATION) * 100;
   const isBgmActive = currentSec > 0 && currentSec < TOTAL_DURATION;
 
@@ -709,14 +709,14 @@ useEffect(() => {
           {isDisclosureActive && (
             <View style={styles.disclosureOverlay}>
               <Text style={styles.disclosureText} numberOfLines={2}>
-                {editPlan.disclosureOverlay.text || '광고·협찬 포함'}
+                {editPlan?.disclosureOverlay?.text || '광고·협찬 포함'}
               </Text>
             </View>
           )}
 
           {hasGeneratedVideo && isBgmActive && (
             <View style={styles.bgmIndicator}>
-              <Text style={styles.bgmText} numberOfLines={1}>{editPlan.bgmTemplate.label}</Text>
+              <Text style={styles.bgmText} numberOfLines={1}>{editPlan?.bgmTemplate?.label ?? 'BGM'}</Text>
             </View>
           )}
 
@@ -756,15 +756,15 @@ useEffect(() => {
           <View style={styles.progressTrack}>
             <View style={styles.progressBackground} />
             <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
-            {editPlan.segments.map((seg) => (
+            {(editPlan?.segments ?? []).map((seg) => (
               <View
                 key={seg.index}
                 style={[styles.segmentMarker, { left: `${(seg.startSec / TOTAL_DURATION) * 100}%` }]}
               />
             ))}
-            {editPlan.disclosureEnabled && (
+            {editPlan?.disclosureEnabled && (
               <View
-                style={[styles.segmentMarker, styles.disclosureMarker, { left: `${(editPlan.disclosureOverlay.startSec / TOTAL_DURATION) * 100}%` }]}
+                style={[styles.segmentMarker, styles.disclosureMarker, { left: `${((editPlan?.disclosureOverlay?.startSec ?? 0) / TOTAL_DURATION) * 100}%` }]}
               />
             )}
           </View>
@@ -773,17 +773,17 @@ useEffect(() => {
 
       {hasGeneratedVideo && (
         <View style={styles.segmentLabels}>
-          {editPlan.segments.map((seg) => (
+          {(editPlan?.segments ?? []).map((seg) => (
             <View key={seg.index} style={[styles.segmentLabelChip, { flex: seg.endSec - seg.startSec }]}>
               <Text style={styles.segmentLabelText} numberOfLines={1}>{seg.label}</Text>
             </View>
           ))}
-          {editPlan.disclosureEnabled ? (
-            <View style={[styles.segmentLabelChip, styles.disclosureChip, { flex: editPlan.disclosureOverlay.durationSec }]}>
+          {editPlan?.disclosureEnabled ? (
+            <View style={[styles.segmentLabelChip, styles.disclosureChip, { flex: editPlan?.disclosureOverlay?.durationSec ?? 2 }]}>
               <Text style={styles.segmentLabelText} numberOfLines={1}>공정위</Text>
             </View>
           ) : (
-            <View style={[styles.segmentLabelChip, styles.extraChip, { flex: editPlan.disclosureOverlay.durationSec }]}>
+            <View style={[styles.segmentLabelChip, styles.extraChip, { flex: editPlan?.disclosureOverlay?.durationSec ?? 2 }]}>
               <Text style={styles.segmentLabelText} numberOfLines={1}>여유</Text>
             </View>
           )}

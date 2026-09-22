@@ -250,8 +250,8 @@ export function VideoEditPlanCard({
           {/* Segments timeline */}
           <Text style={styles.sectionLabel}>컷 편집 타임라인</Text>
           <View style={styles.segmentsWrap}>
-            {plan.segments.map((seg, i) => {
-              const isCtaSegment = seg.label.includes('CTA') && seg.startSec >= plan.duration - 2;
+            {(plan.segments ?? []).map((seg, i) => {
+              const isCtaSegment = (seg.label ?? '').includes('CTA') && seg.startSec >= (plan.duration ?? 15) - 2;
               return (
                 <View key={i} style={[styles.segmentRow, isCtaSegment && styles.segmentRowCta]}>
                   <View style={[styles.segmentTime, isCtaSegment && styles.segmentTimeCta]}>
@@ -273,11 +273,11 @@ export function VideoEditPlanCard({
           <View style={styles.metaRow}>
             <View style={styles.metaChip}>
               <Music size={12} color={theme.colors.dark.textDim} strokeWidth={2} />
-              <Text style={styles.metaChipText}>{plan.musicMood}</Text>
+              <Text style={styles.metaChipText}>{plan.musicMood ?? '하이텐션'}</Text>
             </View>
             <View style={styles.metaChip}>
               <Camera size={12} color={theme.colors.dark.textDim} strokeWidth={2} />
-              <Text style={styles.metaChipText}>{plan.motionPreset}</Text>
+              <Text style={styles.metaChipText}>{plan.motionPreset ?? 'zoom_in'}</Text>
             </View>
             <View style={styles.metaChip}>
               <Zap size={11} color={theme.colors.success[400]} strokeWidth={2.5} />
@@ -432,7 +432,7 @@ export function VideoEditPlanCard({
             <>
               {/* Reason */}
               <View style={styles.reasonBox}>
-                <Text style={styles.reasonText}>{plan.reason}</Text>
+                <Text style={styles.reasonText}>{plan.reason ?? ''}</Text>
               </View>
 
               {/* Hook timing */}
@@ -442,7 +442,7 @@ export function VideoEditPlanCard({
                   <Text style={styles.infoCardTitle}>후킹 타이밍</Text>
                 </View>
                 <Text style={styles.infoCardBody}>
-                  첫 후킹: {plan.hookTiming.firstHookSec}초{'\n'}{plan.hookTiming.reason}
+                  첫 후킹: {plan.hookTiming?.firstHookSec ?? 0}초{'\n'}{plan.hookTiming?.reason ?? ''}
                 </Text>
               </View>
 
@@ -452,9 +452,9 @@ export function VideoEditPlanCard({
                   <Sparkles size={14} color={theme.colors.accent[400]} strokeWidth={2} />
                   <Text style={styles.infoCardTitle}>심리학 적용</Text>
                 </View>
-                <Text style={styles.infoCardLabel}>원리: {plan.psychology.principle}</Text>
-                <Text style={styles.infoCardBody}>{plan.psychology.application}</Text>
-                <Text style={styles.infoCardTrigger}>트리거 지점: {plan.psychology.triggerPoint}</Text>
+                <Text style={styles.infoCardLabel}>원리: {plan.psychology?.principle ?? ''}</Text>
+                <Text style={styles.infoCardBody}>{plan.psychology?.application ?? ''}</Text>
+                <Text style={styles.infoCardTrigger}>트리거 지점: {plan.psychology?.triggerPoint ?? ''}</Text>
               </View>
 
 
@@ -462,14 +462,15 @@ export function VideoEditPlanCard({
           )}
 
           {/* AI recommended copy — single card with shuffle */}
-          {!hideCopyVariants && plan.copyVariants.length > 0 && (() => {
-            const variant = plan.copyVariants[copyIndex % plan.copyVariants.length];
+          {!hideCopyVariants && (plan.copyVariants ?? []).length > 0 && (() => {
+            const variants = plan.copyVariants ?? [];
+            const variant = variants[copyIndex % variants.length];
             const copyKey = `copy-${copyIndex}`;
             const handleShuffle = () => {
               if (plan.copyVariants.length <= 1) return;
               setShuffling(true);
               setTimeout(() => {
-                setCopyIndex((prev) => (prev + 1) % plan.copyVariants.length);
+                setCopyIndex((prev) => (prev + 1) % variants.length);
                 setShuffling(false);
               }, 200);
             };
@@ -477,7 +478,7 @@ export function VideoEditPlanCard({
               <>
                 <View style={styles.copyHeaderRow}>
                   <Text style={styles.sectionLabel}>AI 추천 카피</Text>
-                  {plan.copyVariants.length > 1 && (
+                  {variants.length > 1 && (
                     <TouchableOpacity
                       style={styles.shuffleBtn}
                       onPress={handleShuffle}
@@ -492,23 +493,23 @@ export function VideoEditPlanCard({
                   <View style={styles.copyBody}>
                     <View style={styles.copyField}>
                       <Text style={styles.copyFieldLabel}>후킹</Text>
-                      <Text style={styles.copyFieldText}>{variant.hook}</Text>
+                      <Text style={styles.copyFieldText}>{variant.hook ?? ''}</Text>
                     </View>
                     <View style={styles.copyField}>
                       <Text style={styles.copyFieldLabel}>본문</Text>
-                      <Text style={styles.copyFieldText}>{variant.body}</Text>
+                      <Text style={styles.copyFieldText}>{variant.body ?? ''}</Text>
                     </View>
                     <View style={styles.copyField}>
                       <Text style={styles.copyFieldLabel}>CTA</Text>
-                      <Text style={styles.copyFieldText}>{variant.cta}</Text>
+                      <Text style={styles.copyFieldText}>{variant.cta ?? ''}</Text>
                     </View>
                     <View style={styles.copyField}>
                       <Text style={styles.copyFieldLabel}>해시태그</Text>
-                      <Text style={styles.copyFieldText}>{variant.hashtags.join(' ')}</Text>
+                      <Text style={styles.copyFieldText}>{(variant.hashtags ?? []).join(' ')}</Text>
                     </View>
                     <View style={styles.copyField}>
                       <Text style={styles.copyFieldLabel}>공정위 문구</Text>
-                      <Text style={styles.copyFieldText}>{variant.disclosure}</Text>
+                      <Text style={styles.copyFieldText}>{variant.disclosure ?? ''}</Text>
                     </View>
                     <TouchableOpacity
                       style={styles.copyAllBtn}
