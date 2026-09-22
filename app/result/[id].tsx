@@ -143,7 +143,7 @@ import { useWebPush } from '@/hooks/useWebPush';
 import { DirectShareBridge } from '@/components/DirectShareBridge';
 import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
-import { muxVideoWithAudio } from '@/lib/videoAudioMuxer';
+import { muxVideoWithAudio, probeUrlAccessible } from '@/lib/videoAudioMuxer';
 
 type TargetPlatformKey = 'shorts' | 'tiktok' | 'reels' | 'naverclip' | 'instagramFeed' | 'naverBlog' | 'pinterest' | 'smartstore';
 
@@ -517,6 +517,7 @@ export default function ResultScreen() {
   const [muxedVideoUrl, setMuxedVideoUrl] = useState<string | null>(null);
   const [isMuxing, setIsMuxing] = useState(false);
   const [muxProgress, setMuxProgress] = useState<number>(0);
+  const [muxError, setMuxError] = useState<string | null>(null);
   const muxDoneRef = useRef<string | null>(null);
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
@@ -1446,12 +1447,14 @@ export default function ResultScreen() {
   // Mux TTS narration audio into the AI-generated video.
   // Triggers when both generatedVideoUrl and ttsUrl are available
   // and we haven't already muxed this particular video+audio pair.
+  // Pre-flight probes both URLs to ensure the media files are fully
+  // uploaded and accessible before attempting muxing, preventing
+  // "Audio track not found" crashes from half-uploaded TTS files.
   useEffect(() => {
     if (!generatedVideoUrl || !ttsUrl) return;
     if (isMuxing) return;
     const pairKey = `${generatedVideoUrl}::${ttsUrl}`;
     if (muxDoneRef.current === pairKey) return;
-    muxDoneRef.current = pairKey;
 
     // Only attempt client-side muxing on web — native platforms lack
     // the required Canvas captureStream / MediaRecorder APIs.
@@ -1459,8 +1462,27 @@ export default function ResultScreen() {
 
     let cancelled = false;
     (async () => {
+      // Pre-flight: verify both URLs are accessible. The TTS file may
+      // still be uploading to storage when ttsUrl is first set, so we
+      // probe with retries before committing to muxing.
+      const [videoReady, audioReady] = await Promise.all([
+        probeUrlAccessible(generatedVideoUrl),
+        probeUrlAccessible(ttsUrl),
+      ]);
+      if (cancelled) return;
+      if (!videoReady || !audioReady) {
+        if (!cancelled) {
+          setMuxError(audioReady ? '비디오 파일에 접근할 수 없습니다.' : '나레이션 음성 파일이 아직 준비되지 않았습니다. 잠시 후 자동으로 재시도합니다.');
+        }
+        // Don't mark as done — allow retry when the URL becomes available
+        return;
+      }
+
+      muxDoneRef.current = pairKey;
       setIsMuxing(true);
       setMuxProgress(0);
+      setMuxError(null);
+
       try {
         const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
           if (!cancelled) setMuxProgress(p.progress);
@@ -1497,6 +1519,9 @@ export default function ResultScreen() {
         }
       } catch {
         // Muxing failed — the original silent video is still playable
+        if (!cancelled) {
+          setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
+        }
       } finally {
         if (!cancelled) {
           setIsMuxing(false);
@@ -2809,7 +2834,7 @@ export default function ResultScreen() {
           mediaType: 'video',
           render: () => (
             <DirectShareBridge
-              videoUrl={generatedVideoUrl}
+              videoUrl={muxedVideoUrl || generatedVideoUrl}
               shareText={shareText}
               fileName={activeProductName || 'ai-shortform'}
             />
@@ -3112,7 +3137,7 @@ export default function ResultScreen() {
         )}
         {/* === 1순위: 미리보기 (동영상: 자동 완성 영상 / 이미지: 대형 프리뷰 + 썸네일 스트립) === */}
         <ResultPreviewSection
-          mediaUrl={generatedVideoUrl}
+          mediaUrl={muxedVideoUrl || generatedVideoUrl}
           mediaType={targetMediaType}
           generatedImages={generatedImages}
           selectedImageIndex={selectedImageIndex}
@@ -3275,6 +3300,28 @@ export default function ResultScreen() {
           {videoStage === 'draft_ready' && (
             <View style={styles.draftBadgeRow}>
               <Text style={styles.draftBadgeText}>초안 미리보기</Text>
+            </View>
+          )}
+          {isMuxing && (
+            <View style={styles.hdUpgradingBanner}>
+              <RotatingLoader size={14} color={theme.colors.accent[300]} strokeWidth={2} />
+              <Text style={styles.hdUpgradingText}>
+                나레이션 음성 합성 중... {Math.round(muxProgress * 100)}%
+              </Text>
+            </View>
+          )}
+          {muxedVideoUrl && !isMuxing && (
+            <View style={styles.hdReadyBanner}>
+              <CheckCircle2 size={14} color={theme.colors.success[400]} strokeWidth={2} />
+              <Text style={styles.hdReadyText}>
+                나레이션 음성이 포함된 최종 영상 완성
+              </Text>
+            </View>
+          )}
+          {muxError && !isMuxing && (
+            <View style={styles.draftBadgeRow}>
+              <CircleAlert size={12} color={theme.colors.warning[400]} strokeWidth={2} />
+              <Text style={[styles.draftBadgeText, { color: theme.colors.warning[400] }]}>{muxError}</Text>
             </View>
           )}
           <View style={styles.dualActionRow}>
