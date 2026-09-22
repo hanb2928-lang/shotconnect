@@ -166,6 +166,7 @@ export interface Scan {
   analysis_job_id?: string | null;
   image_hash?: string | null;
   video_url?: string | null;
+  muxed_video_url?: string | null;
   product_vision?: ProductVisionResult | null;
 }
 

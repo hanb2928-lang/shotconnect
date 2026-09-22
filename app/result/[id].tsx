@@ -143,6 +143,7 @@ import { useWebPush } from '@/hooks/useWebPush';
 import { DirectShareBridge } from '@/components/DirectShareBridge';
 import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
+import { muxVideoWithAudio } from '@/lib/videoAudioMuxer';
 
 type TargetPlatformKey = 'shorts' | 'tiktok' | 'reels' | 'naverclip' | 'instagramFeed' | 'naverBlog' | 'pinterest' | 'smartstore';
 
@@ -513,6 +514,10 @@ export default function ResultScreen() {
   const [isCleanVideoMode, setIsCleanVideoMode] = useState(false);
   const [targetMediaType, setTargetMediaType] = useState<TargetMediaType>('video');
   const [bgJobNotice, setBgJobNotice] = useState<string | null>(null);
+  const [muxedVideoUrl, setMuxedVideoUrl] = useState<string | null>(null);
+  const [isMuxing, setIsMuxing] = useState(false);
+  const [muxProgress, setMuxProgress] = useState<number>(0);
+  const muxDoneRef = useRef<string | null>(null);
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
@@ -1437,6 +1442,71 @@ export default function ResultScreen() {
       bgVideoChannelRef.current = null;
     };
   }, [scan, generatedVideoUrl, activePlatform]);
+
+  // Mux TTS narration audio into the AI-generated video.
+  // Triggers when both generatedVideoUrl and ttsUrl are available
+  // and we haven't already muxed this particular video+audio pair.
+  useEffect(() => {
+    if (!generatedVideoUrl || !ttsUrl) return;
+    if (isMuxing) return;
+    const pairKey = `${generatedVideoUrl}::${ttsUrl}`;
+    if (muxDoneRef.current === pairKey) return;
+    muxDoneRef.current = pairKey;
+
+    // Only attempt client-side muxing on web — native platforms lack
+    // the required Canvas captureStream / MediaRecorder APIs.
+    if (Platform.OS !== 'web') return;
+
+    let cancelled = false;
+    (async () => {
+      setIsMuxing(true);
+      setMuxProgress(0);
+      try {
+        const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
+          if (!cancelled) setMuxProgress(p.progress);
+        });
+        if (!result || cancelled) return;
+
+        // Persist the muxed video to Supabase Storage so it can be
+        // shared/downloaded with the narration baked in.
+        const ext = result.blob.type.includes('webm') ? 'webm' : 'mp4';
+        const fileName = `${scan?.id ?? 'unknown'}/${Date.now()}_muxed.${ext}`;
+        const { data: uploadData } = await supabase.storage
+          .from('videos')
+          .upload(fileName, result.blob, {
+            contentType: result.blob.type,
+            upsert: true,
+          });
+
+        let finalUrl = result.url;
+        if (uploadData) {
+          URL.revokeObjectURL(result.url);
+          const { data: urlData } = supabase.storage
+            .from('videos')
+            .getPublicUrl(fileName);
+          if (urlData?.publicUrl) {
+            finalUrl = urlData.publicUrl;
+            await supabase
+              .from('scans')
+              .update({ muxed_video_url: finalUrl })
+              .eq('id', scan?.id ?? '');
+          }
+        }
+        if (!cancelled) {
+          setMuxedVideoUrl(finalUrl);
+        }
+      } catch {
+        // Muxing failed — the original silent video is still playable
+      } finally {
+        if (!cancelled) {
+          setIsMuxing(false);
+          setMuxProgress(0);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id]);
 
   // Realtime subscription on the scans row itself: when the background
   // stereo pipeline (or any other background task) writes text data
