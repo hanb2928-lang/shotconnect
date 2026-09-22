@@ -729,7 +729,7 @@ export default function ResultScreen() {
       parts.push(`${requestedDurationSec}s vertical short-form with loss-aversion hook, before/after contrast, social-proof urgency CTA`);
       videoPromptText = parts.join('. ');
     } else {
-      const baseFallback = activeHookRef.current || sanitizeVideoText(scan.summary) || sanitizeVideoText(scan.one_liner) || (visionData ? `${visionData.suggestedCopyLayers.primary} ${visionData.suggestedCopyLayers.secondary} ${visionData.suggestedCopyLayers.tertiary}` : '') || sanitizeVideoProductName(scan.product_name) || `프리미엄 추천 상품. ${requestedDurationSec}-second vertical short-form with loss-aversion hook, before/after contrast, social-proof urgency CTA.`;
+      const baseFallback = activeHookRef.current || sanitizeVideoText(scan.summary) || sanitizeVideoText(scan.one_liner) || (visionData?.suggestedCopyLayers?.primary) || sanitizeVideoProductName(scan.product_name) || `프리미엄 추천 상품. ${requestedDurationSec}-second vertical short-form with loss-aversion hook, before/after contrast, social-proof urgency CTA.`;
       videoPromptText = inlineEdit.aiPrompt.trim()
         ? `${inlineEdit.aiPrompt.trim()}. ${baseFallback}`
         : baseFallback;
@@ -745,9 +745,9 @@ export default function ResultScreen() {
         if (v.textureDescription) visionParts.push(`texture: ${v.textureDescription}`);
         if (v.orbitalFocusPoint) visionParts.push(`focal: ${v.orbitalFocusPoint}`);
         const copy = v.suggestedCopyLayers;
-        if (copy.primary) visionParts.push(`hook: "${copy.primary}"`);
-        if (copy.secondary) visionParts.push(`benefit: "${copy.secondary}"`);
-        if (copy.tertiary) visionParts.push(`CTA: "${copy.tertiary}"`);
+        if (copy?.primary) visionParts.push(`hook: "${copy.primary}"`);
+        if (copy?.secondary) visionParts.push(`benefit: "${copy.secondary}"`);
+        if (copy?.tertiary) visionParts.push(`CTA: "${copy.tertiary}"`);
         visionParts.push(`${requestedDurationSec}s vertical short-form with loss-aversion hook, before/after contrast, social-proof urgency CTA`);
         videoPromptText = visionParts.join('. ');
       } else if (scan.product_name && sanitizeVideoProductName(scan.product_name) !== '프리미엄 추천 상품') {
@@ -784,7 +784,7 @@ export default function ResultScreen() {
           scanId: scan.id,
           variationSeed: narrativeVariation + 1,
           bgmMood: inlineEdit.bgmMood,
-          captionText: sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || (visionData ? `${visionData.suggestedCopyLayers.primary} ${visionData.suggestedCopyLayers.secondary}` : '') || '시선 집중! 지금 바로 확인하세요'),
+          captionText: sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || (visionData?.suggestedCopyLayers ? `${visionData.suggestedCopyLayers.primary ?? ''} ${visionData.suggestedCopyLayers.secondary ?? ''}` : '') || '시선 집중! 지금 바로 확인하세요'),
           platform: targetPlatform,
           hookCategory: inlineEdit.hookEffect || 'curiosity',
           productVision: visionData,
@@ -870,7 +870,7 @@ export default function ResultScreen() {
             scanId: scan.id,
             variationSeed: narrativeVariation + 1,
             bgmMood: inlineEdit.bgmMood,
-            captionText: sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || (visionData ? `${visionData.suggestedCopyLayers.primary} ${visionData.suggestedCopyLayers.secondary}` : '') || '시선 집중! 지금 바로 확인하세요'),
+            captionText: sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || (visionData?.suggestedCopyLayers ? `${visionData.suggestedCopyLayers.primary ?? ''} ${visionData.suggestedCopyLayers.secondary ?? ''}` : '') || '시선 집중! 지금 바로 확인하세요'),
             platform: targetPlatform,
             hookCategory: inlineEdit.hookEffect || 'curiosity',
             productVision: visionData,
@@ -1735,9 +1735,9 @@ export default function ResultScreen() {
 
   const td = activeTemplateData;
   const platformVariant = td?.platformVariants?.[activePlatform];
-  const activeHook = hookOverride || platformVariant?.hook || td?.hook || productVision?.suggestedCopyLayers.primary || '시선 집중! 하이엔드 럭셔리 컬렉션';
+  const activeHook = hookOverride || platformVariant?.hook || td?.hook || productVision?.suggestedCopyLayers?.primary || '시선 집중! 하이엔드 럭셔리 컬렉션';
   activeHookRef.current = activeHook;
-  const activeCaption = inlineEdit.captionText || (autoMarketingCopy || platformVariant?.caption || td?.caption || productVision?.suggestedCopyLayers.secondary || '내 몸에 완벽하게 감기는 핏');
+  const activeCaption = inlineEdit.captionText || (autoMarketingCopy || platformVariant?.caption || td?.caption || productVision?.suggestedCopyLayers?.secondary || '내 몸에 완벽하게 감기는 핏');
   const activeHashtags = platformVariant?.hashtags || td?.hashtags || [];
   const allDisplayHashtags = [...activeHashtags, ...addedHashtags];
 

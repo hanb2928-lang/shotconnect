@@ -99,8 +99,11 @@ export async function deductCredits(
     }
     throw new Error(`크레딧 차감 실패: ${error.message}`);
   }
-  if (data == null) throw new Error('크레딧 차감 실패: 응답이 없습니다.');
-  return data;
+  if (data === false) {
+    throw new Error('크레딧이 부족합니다. 충전 후 이용해주세요.');
+  }
+  const { balance } = await getCreditBalance();
+  return balance;
 }
 
 export async function addCredits(
@@ -119,7 +122,8 @@ export async function addCredits(
   if (error) {
     throw new Error(`크레딧 충전 실패: ${error.message}`);
   }
-  return data as number;
+  const { balance } = await getCreditBalance();
+  return balance;
 }
 
 export async function checkCredits(feature: CreditFeature): Promise<boolean> {

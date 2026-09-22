@@ -89,7 +89,7 @@ async function doFetch(
 
   if (cacheKey) {
     const cached = await getCached<Response>(cacheKey);
-    if (cached) return cached;
+    if (cached instanceof Response) return cached;
   }
 
   let lastError: unknown = null;

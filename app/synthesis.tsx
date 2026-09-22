@@ -222,7 +222,7 @@ export default function SynthesisScreen() {
       const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
       setVideoProgress((prev) => {
         if (!prev) return prev;
-        const pctMatch = polling.progressMessage.match(/\((\d+)%\)/);
+        const pctMatch = polling.progressMessage?.match(/\((\d+)%\)/);
         const polledProgress = pctMatch ? parseInt(pctMatch[1], 10) / 100 : null;
         const baseProgress = prev.progress;
         const timeBasedProgress = Math.min(0.9, 0.12 + elapsed * 0.005);

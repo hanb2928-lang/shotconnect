@@ -198,7 +198,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     setRecordingDuration(0);
     recorderRef.current = null;
     recordingPromiseRef.current = null;
-  }, [captureMode, isRecording]);
+  }, [captureMode]);
 
   const captureFrame = useCallback(async (): Promise<string | null> => {
     if (!videoRef.current || !cameraReady) return null;
