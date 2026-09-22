@@ -20,7 +20,6 @@
     "android": {
       "package": "com.snapconnect.app",
       "versionCode": 1,
-      "softInputMode": "resize",
       "jsEngine": "hermes",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
