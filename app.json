@@ -48,9 +48,7 @@
       "expo-web-browser",
       "expo-image-picker",
       "expo-camera",
-      "expo-media-library",
-      "expo-system-ui",
-      "expo-linear-gradient"
+      "expo-media-library"
     ]
   }
 }

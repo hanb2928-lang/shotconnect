@@ -12,8 +12,9 @@
     "test:watch": "jest --watch",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "build:android": "eas build --platform android --profile preview --clear-cache --non-interactive",
-    "build:android:dev": "eas build --platform android --profile development --clear-cache --non-interactive"
+    "prebuild:android": "npm install --legacy-peer-deps && npx expo prebuild --platform android --clean",
+    "build:android": "npm install --legacy-peer-deps && eas build --platform android --profile preview --clear-cache --non-interactive",
+    "build:android:dev": "npm install --legacy-peer-deps && eas build --platform android --profile development --clear-cache --non-interactive"
   },
   "dependencies": {
     "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
