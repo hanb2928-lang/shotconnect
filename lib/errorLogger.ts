@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { Alert } from 'react-native';
 
 const APP_VERSION = '1.0.0';
 
@@ -144,6 +145,13 @@ function tryInstallErrorHandler(): boolean {
       const stack = error instanceof Error ? error.stack : undefined;
       if (isFatal) {
         logFatal(msg, { action: 'globalHandler', extra: { isFatal: true, stack } });
+        if (Platform.OS !== 'web' && stack) {
+          Alert.alert(
+            'Fatal Error',
+            msg + '\n\n' + stack.split('\n').slice(0, 8).join('\n'),
+            [{ text: 'OK' }],
+          );
+        }
       } else {
         logError(msg, { action: 'globalHandler', extra: { isFatal: false } });
       }

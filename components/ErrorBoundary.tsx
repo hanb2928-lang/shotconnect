@@ -45,6 +45,11 @@ export class ErrorBoundary extends Component<Props, State> {
                 {this.state.error.message}
               </Text>
             ) : null}
+            {this.state.error?.stack ? (
+              <Text style={styles.errorStack} selectable>
+                {this.state.error.stack.split('\n').slice(0, 12).join('\n')}
+              </Text>
+            ) : null}
             <TouchableOpacity style={styles.button} onPress={this.handleReset} activeOpacity={0.8}>
               <RefreshCw size={18} color="#fff" strokeWidth={2} />
               <Text style={styles.buttonText}>다시 시도</Text>
@@ -101,6 +106,15 @@ const styles = StyleSheet.create({
     color: theme.colors.error[400],
     textAlign: 'center',
     lineHeight: 16,
+  },
+  errorStack: {
+    maxWidth: 360,
+    fontSize: 9,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textFaint,
+    textAlign: 'left',
+    lineHeight: 13,
+    marginTop: 8,
   },
   button: {
     flexDirection: 'row',
