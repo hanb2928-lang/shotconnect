@@ -75,10 +75,13 @@ export function initStorage(): Promise<void> {
 }
 
 export async function getItem(key: string): Promise<string | null> {
-  if (!initDone && !initAttempted) {
-    await initStorage();
+  if (initPromise) {
+    await Promise.race([
+      initPromise,
+      new Promise<void>((resolve) => setTimeout(resolve, STORAGE_INIT_TIMEOUT_MS + 1000)),
+    ]);
   } else if (!initDone) {
-    // Init was attempted but timed out — don't block, proceed with no-op
+    await initStorage();
   }
 
   if (webStorage) {
@@ -99,10 +102,13 @@ export async function getItem(key: string): Promise<string | null> {
 }
 
 export async function setItem(key: string, value: string): Promise<void> {
-  if (!initDone && !initAttempted) {
-    await initStorage();
+  if (initPromise) {
+    await Promise.race([
+      initPromise,
+      new Promise<void>((resolve) => setTimeout(resolve, STORAGE_INIT_TIMEOUT_MS + 1000)),
+    ]);
   } else if (!initDone) {
-    // Init was attempted but timed out — don't block, proceed with no-op
+    await initStorage();
   }
 
   if (webStorage) {

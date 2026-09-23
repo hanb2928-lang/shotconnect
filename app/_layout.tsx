@@ -130,7 +130,14 @@ export default function RootLayout() {
         // storage init failed — app can still run with in-memory state
       }
 
-      preloadTemplates().catch(() => {});
+      try {
+        await Promise.race([
+          preloadTemplates(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('template timeout')), 5000)),
+        ]);
+      } catch {
+        // template preload failed or timed out — app can still run
+      }
 
       clearTimeout(timeoutId);
       setReady('app');

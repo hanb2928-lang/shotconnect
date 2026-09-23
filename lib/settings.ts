@@ -18,11 +18,17 @@ let cachedSettings: UserSettings | null | undefined;
 export async function getUserSettings(): Promise<UserSettings | null> {
   if (cachedSettings !== undefined) return cachedSettings;
 
-  const { data, error } = await supabase
+  const queryPromise = supabase
     .from('user_settings')
     .select('id, coupang_partners_id, naver_shopping_id, toss_share_id, openai_api_key, pexels_api_key, tts_api_key, logo_url, default_video_duration, default_tts_voice, tts_speed, tts_pitch, progress_style, auto_disclosure, brand_persona, mascot_enabled, mascot_style, capture_guide_mode, ui_performance, theme_mode, display_density, theme_preset, app_language, default_caption_tone, fixed_hook_phrase, affiliate_priority_mapping, auto_publish_reels, auto_publish_tiktok, auto_publish_shorts, auto_publish_sandbox_mode, clean_footage_enabled, runway_api_key, updated_at')
     .eq('id', SINGLETON_ID)
     .maybeSingle();
+
+  const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
+    setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 5000),
+  );
+
+  const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
   if (error || !data) {
     const fallback = await loadApiKeysFromLocal();
