@@ -32,11 +32,17 @@ export function useVideoJobRecovery() {
 
     try {
       const { supabase } = await import('@/lib/supabase');
-      const { data, error } = await supabase
+      const queryPromise = supabase
         .from('video_jobs')
         .select('status, step, video_url, error_message')
         .eq('id', jobId)
         .maybeSingle();
+
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 5000),
+      );
+
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
       if (error || !data) {
         clearActiveVideoJob();

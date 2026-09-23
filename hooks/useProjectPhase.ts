@@ -24,11 +24,17 @@ export function useProjectPhase(jobId: string | null) {
       const { supabase } = await import('@/lib/supabase');
       if (cancelled) return;
 
-      supabase
+      const queryPromise = supabase
         .from('video_jobs')
         .select('*')
         .eq('id', jobId)
-        .maybeSingle()
+        .maybeSingle();
+
+      const timeoutPromise = new Promise<{ data: null }>((resolve) =>
+        setTimeout(() => resolve({ data: null }), 5000),
+      );
+
+      Promise.race([queryPromise, timeoutPromise])
         .then(({ data: res }) => {
           if (cancelled || !res) return;
           const row = res as VideoJobRow;
@@ -61,8 +67,7 @@ export function useProjectPhase(jobId: string | null) {
     return () => {
       cancelled = true;
       if (channelRef.current) {
-        const { supabase } = require('@/lib/supabase');
-        supabase.removeChannel(channelRef.current);
+        channelRef.current.unsubscribe();
         channelRef.current = null;
       }
     };
