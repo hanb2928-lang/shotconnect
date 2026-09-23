@@ -264,10 +264,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     minWidth: CARD_MIN_WIDTH,
     flex: 1,
+    flexShrink: 1,
     ...theme.shadows.card,
   },
   cardTextWrap: {
     flex: 1,
+    flexShrink: 1,
     flexDirection: 'column',
     gap: 2,
   },
@@ -286,6 +288,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.dark.surfaceLight,
     justifyContent: 'center',
     alignItems: 'center',
+    flexShrink: 0,
   },
   cardIconWrapActive: {
     backgroundColor: theme.colors.primary[500] + '25',

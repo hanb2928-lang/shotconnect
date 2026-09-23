@@ -1241,8 +1241,8 @@ function ModeCard({ icon, title, desc, gradientColors, glowColor, rippleColor, o
         {icon}
       </LinearGradient>
       <View style={styles.modeCardTextWrap}>
-        <Text style={styles.modeCardTitle}>{title}</Text>
-        <Text style={styles.modeCardDesc}>{desc}</Text>
+        <Text style={styles.modeCardTitle} numberOfLines={1}>{title}</Text>
+        <Text style={styles.modeCardDesc} numberOfLines={2}>{desc}</Text>
       </View>
       <ArrowRight size={20} color={theme.colors.dark.textDim} strokeWidth={2} />
     </Pressable>
@@ -1429,6 +1429,7 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.lg,
     justifyContent: 'center',
     alignItems: 'center',
+    flexShrink: 0,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 16,
@@ -1436,6 +1437,7 @@ const styles = StyleSheet.create({
   },
   modeCardTextWrap: {
     flex: 1,
+    flexShrink: 1,
     gap: 4,
   },
   modeCardTitle: {
