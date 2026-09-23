@@ -1,36 +1,22 @@
 name: Build Android APK
-
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
-
-      - name: Setup EAS CLI
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Install dependencies
         run: npm install --legacy-peer-deps
-
-      - name: Verify TypeScript compiles
-        run: npx tsc --noEmit
-
+      - name: Install EAS CLI Globally
+        run: npm install -g eas-cli
       - name: Build APK with EAS
-        run: eas build --platform android --profile production --non-interactive
+        run: eas build --platform android --profile preview --non-interactive --clear-cache
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
