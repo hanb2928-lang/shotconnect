@@ -38,8 +38,12 @@ export function initStorage(): Promise<void> {
 
   initPromise = (async () => {
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        webStorage = window.localStorage;
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          webStorage = window.localStorage;
+        }
+      } catch {
+        // localStorage access can throw in private browsing or restricted contexts
       }
       initDone = true;
       initAttempted = true;
@@ -60,7 +64,11 @@ export function initStorage(): Promise<void> {
     }
     initDone = true;
     initAttempted = true;
-  })();
+  })().catch(() => {
+    // Ensure initPromise never rejects — callers depend on this
+    initDone = true;
+    initAttempted = true;
+  });
 
   // Safety net: if the init promise itself hangs (e.g. native module deadlock),
   // force initDone so getItem/setItem don't block forever waiting on it.
@@ -75,13 +83,17 @@ export function initStorage(): Promise<void> {
 }
 
 export async function getItem(key: string): Promise<string | null> {
-  if (initPromise) {
-    await Promise.race([
-      initPromise,
-      new Promise<void>((resolve) => setTimeout(resolve, STORAGE_INIT_TIMEOUT_MS + 1000)),
-    ]);
-  } else if (!initDone) {
-    await initStorage();
+  try {
+    if (initPromise) {
+      await Promise.race([
+        initPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, STORAGE_INIT_TIMEOUT_MS + 1000)),
+      ]);
+    } else if (!initDone) {
+      await initStorage();
+    }
+  } catch {
+    // init failed or timed out — proceed with no-op fallback
   }
 
   if (webStorage) {
@@ -102,13 +114,17 @@ export async function getItem(key: string): Promise<string | null> {
 }
 
 export async function setItem(key: string, value: string): Promise<void> {
-  if (initPromise) {
-    await Promise.race([
-      initPromise,
-      new Promise<void>((resolve) => setTimeout(resolve, STORAGE_INIT_TIMEOUT_MS + 1000)),
-    ]);
-  } else if (!initDone) {
-    await initStorage();
+  try {
+    if (initPromise) {
+      await Promise.race([
+        initPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, STORAGE_INIT_TIMEOUT_MS + 1000)),
+      ]);
+    } else if (!initDone) {
+      await initStorage();
+    }
+  } catch {
+    // init failed or timed out — proceed with no-op fallback
   }
 
   if (webStorage) {
