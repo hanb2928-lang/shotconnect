@@ -115,37 +115,34 @@ export default function RootLayout() {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
 
+    const MAX_INIT_MS = 6000;
     const timeoutId = setTimeout(() => {
       setReady('app');
       hideSplash();
-    }, 5000);
+    }, MAX_INIT_MS);
 
     (async () => {
       try {
-        try {
-          await Promise.race([
-            initStorage(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('storage timeout')), 3000)),
-          ]);
-        } catch {
-          // storage init failed — app can still run with in-memory state
-        }
-
-        try {
-          await Promise.race([
-            preloadTemplates(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('template timeout')), 3000)),
-          ]);
-        } catch {
-          // template preload failed or timed out — app can still run
-        }
+        await Promise.race([
+          initStorage(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('storage timeout')), 3000)),
+        ]);
       } catch {
-        // last-resort catch: any unexpected error during init falls back to app mode
-      } finally {
-        clearTimeout(timeoutId);
-        setReady('app');
-        hideSplash();
+        // storage init failed — app can still run with in-memory state
       }
+
+      try {
+        await Promise.race([
+          preloadTemplates(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('template timeout')), 3000)),
+        ]);
+      } catch {
+        // template preload failed or timed out — app can still run
+      }
+
+      clearTimeout(timeoutId);
+      setReady('app');
+      hideSplash();
     })();
 
     return () => clearTimeout(timeoutId);
