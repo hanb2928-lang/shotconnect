@@ -41,38 +41,55 @@ async function getAsyncStorage() {
 
 // Build a storage adapter that lazy-loads AsyncStorage on first call.
 // If AsyncStorage is unavailable, falls back to no-op (in-memory only sessions).
-const authStorage =
-  Platform.OS !== 'web'
-    ? {
-        getItem: async (key: string): Promise<string | null> => {
-          const storage = await getAsyncStorage();
-          if (!storage?.default) return null;
-          try {
-            return await storage.default.getItem(key);
-          } catch {
-            return null;
-          }
-        },
-        setItem: async (key: string, value: string): Promise<void> => {
-          const storage = await getAsyncStorage();
-          if (!storage?.default) return;
-          try {
-            await storage.default.setItem(key, value);
-          } catch {
-            // storage write failed — session won't persist, but app continues
-          }
-        },
-        removeItem: async (key: string): Promise<void> => {
-          const storage = await getAsyncStorage();
-          if (!storage?.default) return;
-          try {
-            await storage.default.removeItem(key);
-          } catch {
-            // best-effort
-          }
-        },
+// On web, provide an explicit safe adapter so localStorage exceptions
+// (private browsing, sandboxed iframes, restricted contexts) don't propagate.
+const authStorage = {
+  getItem: async (key: string): Promise<string | null> => {
+    try {
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          return window.localStorage.getItem(key);
+        }
+        return null;
       }
-    : undefined;
+      const storage = await getAsyncStorage();
+      if (!storage?.default) return null;
+      return await storage.default.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    try {
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, value);
+        }
+        return;
+      }
+      const storage = await getAsyncStorage();
+      if (!storage?.default) return;
+      await storage.default.setItem(key, value);
+    } catch {
+      // storage write failed — session won't persist, but app continues
+    }
+  },
+  removeItem: async (key: string): Promise<void> => {
+    try {
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem(key);
+        }
+        return;
+      }
+      const storage = await getAsyncStorage();
+      if (!storage?.default) return;
+      await storage.default.removeItem(key);
+    } catch {
+      // best-effort
+    }
+  },
+};
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
