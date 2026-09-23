@@ -14,7 +14,7 @@ let initPromise: Promise<void> | null = null;
 let initDone = false;
 let initAttempted = false;
 
-const STORAGE_INIT_TIMEOUT_MS = 5000;
+const STORAGE_INIT_TIMEOUT_MS = 3000;
 
 // Lazy-load AsyncStorage so module-eval never touches the native binding.
 // On native, the native module may not be registered yet at boot.

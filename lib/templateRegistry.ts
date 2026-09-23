@@ -111,18 +111,29 @@ async function fetchAllTemplates(): Promise<TemplateRegistryEntry[]> {
   if (fetchPromise) return fetchPromise;
 
   fetchPromise = (async () => {
-    const { supabase } = await import('@/lib/supabase');
-    const { data, error } = await supabase
-      .from('template_registry')
-      .select('*');
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      const queryPromise = supabase
+        .from('template_registry')
+        .select('*');
 
-    if (error || !data) {
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { message: 'template timeout' } }), 3000),
+      );
+
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+
+      if (error || !data) {
+        fetchPromise = null;
+        return [];
+      }
+
+      cachedTemplates = data as TemplateRegistryEntry[];
+      return cachedTemplates;
+    } catch {
       fetchPromise = null;
       return [];
     }
-
-    cachedTemplates = data as TemplateRegistryEntry[];
-    return cachedTemplates;
   })();
 
   return fetchPromise;
@@ -137,7 +148,12 @@ export async function getTemplate(
   category: string | undefined | null,
   platform: string | undefined | null,
 ): Promise<TemplateRegistryEntry | null> {
-  const templates = await fetchAllTemplates();
+  let templates: TemplateRegistryEntry[] = [];
+  try {
+    templates = await fetchAllTemplates();
+  } catch {
+    templates = [];
+  }
   if (templates.length === 0) return null;
 
   const canonCategory = canonicalizeCategory(category);
