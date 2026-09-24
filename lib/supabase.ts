@@ -17,12 +17,17 @@ export const supabaseAnonKey: string =
 const authStorage = {
   getItem: async (key: string): Promise<string | null> => {
     try {
-      return await getItem(key);
+      const val = await getItem(key);
+      if (val === null || val === undefined) return null;
+      const trimmed = val.trim();
+      if (trimmed === '') return null;
+      return val;
     } catch {
       return null;
     }
   },
   setItem: async (key: string, value: string): Promise<void> => {
+    if (typeof value !== 'string' || value.trim() === '') return;
     try {
       await setItem(key, value);
     } catch {

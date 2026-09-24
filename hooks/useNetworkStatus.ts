@@ -9,7 +9,8 @@ const listeners = new Set<(status: NetworkStatus) => void>();
 
 function notify(status: NetworkStatus) {
   currentStatus = status;
-  for (const cb of listeners) {
+  const snapshot = [...listeners];
+  for (const cb of snapshot) {
     if (typeof cb === 'function') cb(status);
   }
 }
