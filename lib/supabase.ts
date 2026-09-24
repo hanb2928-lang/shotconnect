@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Platform } from 'react-native';
+import { getItem, setItem, removeItem } from '@/lib/storage';
 
 const FALLBACK_URL = 'https://asjqmhuhvmiekdnvddjv.supabase.co';
 const FALLBACK_KEY =
@@ -11,80 +11,27 @@ export const supabaseUrl: string =
 export const supabaseAnonKey: string =
   (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_KEY).trim();
 
-// Lazy-load AsyncStorage so module-eval never touches the native binding.
-// On native, the native module may not be registered yet at boot time.
-let asyncStorageModule: typeof import('@react-native-async-storage/async-storage') | null = null;
-let asyncStorageLoadFailed = false;
-
-async function getAsyncStorage() {
-  if (asyncStorageLoadFailed) return null;
-  if (asyncStorageModule) return asyncStorageModule;
-  try {
-    const timeout = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 5000),
-    );
-    const mod = await Promise.race([
-      import('@react-native-async-storage/async-storage'),
-      timeout,
-    ]);
-    if (!mod) {
-      asyncStorageLoadFailed = true;
-      return null;
-    }
-    asyncStorageModule = mod;
-    return asyncStorageModule;
-  } catch {
-    asyncStorageLoadFailed = true;
-    return null;
-  }
-}
-
-// Build a storage adapter that lazy-loads AsyncStorage on first call.
-// If AsyncStorage is unavailable, falls back to no-op (in-memory only sessions).
-// On web, provide an explicit safe adapter so localStorage exceptions
-// (private browsing, sandboxed iframes, restricted contexts) don't propagate.
+// Delegate to storage.ts which has a unified init sequence with timeout
+// and fallback. This avoids a second independent AsyncStorage load that
+// could race the native bridge and throw TypeError when methods are undefined.
 const authStorage = {
   getItem: async (key: string): Promise<string | null> => {
     try {
-      if (Platform.OS === 'web') {
-        if (typeof window !== 'undefined' && window.localStorage) {
-          return window.localStorage.getItem(key);
-        }
-        return null;
-      }
-      const storage = await getAsyncStorage();
-      if (!storage?.default) return null;
-      return await storage.default.getItem(key);
+      return await getItem(key);
     } catch {
       return null;
     }
   },
   setItem: async (key: string, value: string): Promise<void> => {
     try {
-      if (Platform.OS === 'web') {
-        if (typeof window !== 'undefined' && window.localStorage) {
-          window.localStorage.setItem(key, value);
-        }
-        return;
-      }
-      const storage = await getAsyncStorage();
-      if (!storage?.default) return;
-      await storage.default.setItem(key, value);
+      await setItem(key, value);
     } catch {
-      // storage write failed — session won't persist, but app continues
+      // session won't persist, but app continues
     }
   },
   removeItem: async (key: string): Promise<void> => {
     try {
-      if (Platform.OS === 'web') {
-        if (typeof window !== 'undefined' && window.localStorage) {
-          window.localStorage.removeItem(key);
-        }
-        return;
-      }
-      const storage = await getAsyncStorage();
-      if (!storage?.default) return;
-      await storage.default.removeItem(key);
+      await removeItem(key);
     } catch {
       // best-effort
     }

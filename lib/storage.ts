@@ -14,6 +14,15 @@ let initPromise: Promise<void> | null = null;
 let initDone = false;
 let initAttempted = false;
 
+// In-memory fallback used when both localStorage and AsyncStorage are
+// unavailable (private browsing, sandboxed iframe, native bridge failure).
+// Values are lost on reload but prevent crashes from undefined storage.
+const memoryStore = new Map<string, string>();
+
+export function isStorageReady(): boolean {
+  return initDone;
+}
+
 const STORAGE_INIT_TIMEOUT_MS = 3000;
 
 // Lazy-load AsyncStorage so module-eval never touches the native binding.
@@ -54,10 +63,10 @@ export function initStorage(): Promise<void> {
       const AsyncStorage = await loadAsyncStorage();
       if (AsyncStorage?.default) {
         const impl = AsyncStorage.default;
-        nativeGetItem = (key: string) => impl.getItem(key);
-        nativeSetItem = (key: string, value: string) => impl.setItem(key, value);
-        nativeRemoveItem = (key: string) => impl.removeItem(key);
-        nativeGetAllKeys = () => impl.getAllKeys();
+        if (typeof impl.getItem === 'function') nativeGetItem = (key: string) => impl.getItem(key);
+        if (typeof impl.setItem === 'function') nativeSetItem = (key: string, value: string) => impl.setItem(key, value);
+        if (typeof impl.removeItem === 'function') nativeRemoveItem = (key: string) => impl.removeItem(key);
+        if (typeof impl.getAllKeys === 'function') nativeGetAllKeys = () => impl.getAllKeys();
       }
     } catch {
       // AsyncStorage not available — getItem/setItem will return null/no-op
@@ -100,17 +109,17 @@ export async function getItem(key: string): Promise<string | null> {
     try {
       return webStorage.getItem(key);
     } catch {
-      return null;
+      return memoryStore.get(key) ?? null;
     }
   }
   if (nativeGetItem) {
     try {
       return await nativeGetItem(key);
     } catch {
-      return null;
+      return memoryStore.get(key) ?? null;
     }
   }
-  return null;
+  return memoryStore.get(key) ?? null;
 }
 
 export async function setItem(key: string, value: string): Promise<void> {
@@ -135,7 +144,7 @@ export async function setItem(key: string, value: string): Promise<void> {
         evictOldestCacheEntries();
         webStorage.setItem(key, value);
       } catch {
-        // storage full even after eviction — give up silently
+        memoryStore.set(key, value);
       }
     }
     return;
@@ -148,10 +157,45 @@ export async function setItem(key: string, value: string): Promise<void> {
         await evictOldestCacheEntriesNative();
         await nativeSetItem(key, value);
       } catch {
-        // storage full even after eviction — give up silently
+        memoryStore.set(key, value);
       }
     }
+    return;
   }
+  memoryStore.set(key, value);
+}
+
+export async function removeItem(key: string): Promise<void> {
+  try {
+    if (initPromise) {
+      await Promise.race([
+        initPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, STORAGE_INIT_TIMEOUT_MS + 1000)),
+      ]);
+    } else if (!initDone) {
+      await initStorage();
+    }
+  } catch {
+    // init failed or timed out — proceed with no-op fallback
+  }
+
+  if (webStorage) {
+    try {
+      webStorage.removeItem(key);
+    } catch {
+      memoryStore.delete(key);
+    }
+    return;
+  }
+  if (nativeRemoveItem) {
+    try {
+      await nativeRemoveItem(key);
+    } catch {
+      memoryStore.delete(key);
+    }
+    return;
+  }
+  memoryStore.delete(key);
 }
 
 function evictOldestCacheEntries(): void {

@@ -99,23 +99,19 @@ export default function RootLayout() {
     return () => clearTimeout(id);
   }, [fontsLoaded, fontError]);
 
-  // Init effect: runs exactly once, independent of font state
+  // Init effect: runs exactly once. The finally block is the sole
+  // trigger for setReady('app'). A hard 8s outer timeout prevents
+  // a hung native module from blocking the app forever — but it
+  // races the init promise as a whole, so it can never fire while
+  // initStorage() is mid-flight and let providers mount early.
   useEffect(() => {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
 
-    const timeoutId = setTimeout(() => {
-      setReady('app');
-      hideSplash();
-    }, 5000);
-
-    (async () => {
+    const initPromise = (async () => {
       try {
         try {
-          await Promise.race([
-            initStorage(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('storage timeout')), 3000)),
-          ]);
+          await initStorage();
         } catch {
           // storage init failed — app can still run with in-memory state
         }
@@ -130,14 +126,15 @@ export default function RootLayout() {
         }
       } catch {
         // last-resort catch: any unexpected error during init falls back to app mode
-      } finally {
-        clearTimeout(timeoutId);
-        setReady('app');
-        hideSplash();
       }
     })();
 
-    return () => clearTimeout(timeoutId);
+    const hardTimeout = new Promise<void>((resolve) => setTimeout(resolve, 8000));
+
+    Promise.race([initPromise, hardTimeout]).finally(() => {
+      setReady('app');
+      hideSplash();
+    });
   }, [hideSplash]);
 
   // Deep link handling
