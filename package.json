@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:e2e": "npx playwright test",
+    "test:e2e:report": "npx playwright show-report",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "prebuild:android": "npm install --legacy-peer-deps && npx expo prebuild --platform android --clean",
