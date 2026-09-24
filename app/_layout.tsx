@@ -16,7 +16,6 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { initStorage } from '@/lib/storage';
 import { preloadTemplates } from '@/lib/templateRegistry';
 import { theme } from '@/lib/theme';
-import { LoadingScreen } from '@/components/LoadingScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AffiliateToastProvider } from '@/components/AffiliateToast';
 import { NetworkBanner } from '@/components/NetworkBanner';
@@ -50,7 +49,7 @@ function AppShell() {
   const { t } = useI18n();
 
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}>
+    <Stack screenOptions={{ headerShown: false, animation: Platform.OS === 'web' ? 'fade' : 'slide_from_right', gestureEnabled: Platform.OS !== 'web' }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="editor" options={{ headerShown: false }} />
       <Stack.Screen
@@ -171,20 +170,16 @@ export default function RootLayout() {
   }, []);
 
   const fontsReady = fontsLoaded || fontError || fontTimedOut;
+  const isReady = fontsReady && ready !== 'loading';
 
-  // Font loading gate — shows spinner until fonts resolve or timeout
-  if (!fontsReady) {
+  // Single unified loading gate — covers both font loading and storage/template init
+  if (!isReady) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.dark.bg, gap: theme.spacing.md }}>
         <ActivityIndicator size="large" color={theme.colors.primary[400]} />
         <Text style={{ fontSize: 14, color: theme.colors.dark.textDim }}>{LOADING_TEXT}</Text>
       </View>
     );
-  }
-
-  // Init loading gate — shows loading screen until storage/template init completes
-  if (ready === 'loading') {
-    return <LoadingScreen message={LOADING_TEXT} />;
   }
 
   // Error gate — init failed completely

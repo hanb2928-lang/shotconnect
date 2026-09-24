@@ -50,7 +50,7 @@ import {
   type SharePlatformStat,
   type StyleInsight,
 } from '@/lib/dashboard';
-import { LoadingScreen } from '@/components/LoadingScreen';
+import { AnalyticsSkeleton } from '@/components/AnalyticsSkeleton';
 import { QuestCard } from '@/components/QuestCard';
 import { TierBadge } from '@/components/TierBadge';
 import { LeaderboardCard } from '@/components/LeaderboardCard';
@@ -225,7 +225,7 @@ export default function AnalyticsScreen() {
   }, [data]);
 
   if (loading) {
-    return <LoadingScreen message="성과 데이터를 불러오는 중..." />;
+    return <AnalyticsSkeleton />;
   }
 
   if (loadError || !data) {

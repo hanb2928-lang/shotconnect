@@ -1,17 +1,24 @@
 import { lazy, Suspense } from 'react';
-import { View } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
+import { theme } from '@/lib/theme';
 
 const ScrollableTabBar = lazy(() =>
   import('@/components/ScrollableTabBar').then((m) => ({ default: m.ScrollableTabBar })),
 );
+
+function TabBarFallback() {
+  return (
+    <View style={styles.fallback} />
+  );
+}
 
 export default function TabLayout() {
   return (
     <Tabs
       initialRouteName="index"
       tabBar={(props) => (
-        <Suspense fallback={<View style={{ height: 0 }} />}>
+        <Suspense fallback={<TabBarFallback />}>
           <ScrollableTabBar {...props} badges={{}} />
         </Suspense>
       )}
@@ -26,3 +33,12 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  fallback: {
+    height: 64,
+    backgroundColor: theme.colors.dark.surface,
+    borderTopColor: 'rgba(76, 125, 255, 0.12)',
+    borderTopWidth: 1,
+  },
+});

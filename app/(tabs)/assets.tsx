@@ -23,7 +23,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { theme } from '@/lib/theme';
 import { fetchSavedAssets, deleteSavedAsset, updateAssetUploadStatus } from '@/lib/savedAssets';
 import type { SavedAsset } from '@/types/database';
-import { LoadingScreen } from '@/components/LoadingScreen';
+import { AssetsSkeleton } from '@/components/AssetsSkeleton';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useI18n } from '@/hooks/useI18n';
@@ -356,7 +356,7 @@ export default function AssetsScreen() {
   };
 
   if (loading) {
-    return <LoadingScreen message="제작물을 불러오는 중..." />;
+    return <AssetsSkeleton />;
   }
 
   const uploadedAssets = assets.filter((a) => a.upload_status === 'uploaded');
