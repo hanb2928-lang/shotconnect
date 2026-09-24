@@ -1,5 +1,4 @@
 const { getDefaultConfig } = require('expo/metro-config');
-const { wrapWithReanimatedMetroConfig } = require('react-native-reanimated/metro-config');
 const path = require('path');
 
 const config = getDefaultConfig(__dirname);
@@ -32,4 +31,4 @@ config.transformer.minifierConfig = {
   keep_fnames: true,
 };
 
-module.exports = wrapWithReanimatedMetroConfig(config);
+module.exports = config;

@@ -122,7 +122,7 @@ function tryInstallPromiseHandler(): boolean {
         extra: reason instanceof Error ? { stack: reason.stack } : undefined,
       });
       try {
-        if (origHandler) origHandler(event);
+        if (typeof origHandler === 'function') origHandler(event);
       } catch {
         // swallow
       }
