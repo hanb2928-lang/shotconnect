@@ -9,6 +9,8 @@ import {
   Image,
   Modal,
   ScrollView,
+  Animated as RNAnimated,
+  Easing,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -18,14 +20,7 @@ import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withRepeat,
-  withSequence,
-  cancelAnimation,
-} from 'react-native-reanimated';
+
 import { theme } from '@/lib/theme';
 import { startAsyncAnalysis } from '@/lib/asyncAnalysis';
 import { saveManualScan, uploadImage } from '@/lib/analysis';
@@ -132,7 +127,7 @@ export default function CameraScreen() {
   const cameraRef = useRef<CameraView>(null);
   const webCameraRef = useRef<WebCameraHandle>(null);
   const autoSaveStepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const autoSavePulse = useSharedValue(1);
+  const autoSavePulse = useRef(new RNAnimated.Value(1)).current;
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<'front' | 'back'>('back');
   const [cameraReady, setCameraReady] = useState(false);
@@ -178,16 +173,27 @@ export default function CameraScreen() {
     if (tone !== 'studio') setStudioMode(null);
   }, []);
 
+  const pulseAnimationRef = useRef<ReturnType<typeof RNAnimated.loop> | null>(null);
   const startAutoSaveAnimation = useCallback(() => {
     setAutoSaveStep(1);
-    autoSavePulse.value = withRepeat(
-      withSequence(
-        withTiming(1.15, { duration: 600 }),
-        withTiming(1, { duration: 600 }),
-      ),
-      -1,
-      false,
+    if (pulseAnimationRef.current) pulseAnimationRef.current.stop();
+    pulseAnimationRef.current = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(autoSavePulse, {
+          toValue: 1.15,
+          duration: 600,
+          useNativeDriver: true,
+          easing: Easing.inOut(Easing.ease),
+        }),
+        RNAnimated.timing(autoSavePulse, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+          easing: Easing.inOut(Easing.ease),
+        }),
+      ]),
     );
+    pulseAnimationRef.current.start();
     autoSaveStepTimer.current = setInterval(() => {
       setAutoSaveStep((s) => (s >= 3 ? 3 : s + 1));
     }, 800);
@@ -197,7 +203,11 @@ export default function CameraScreen() {
       clearInterval(autoSaveStepTimer.current);
       autoSaveStepTimer.current = null;
     }
-    autoSavePulse.value = 1;
+    if (pulseAnimationRef.current) {
+      pulseAnimationRef.current.stop();
+      pulseAnimationRef.current = null;
+    }
+    autoSavePulse.setValue(1);
   }, [autoSavePulse]);
 
   useFocusEffect(
@@ -217,7 +227,6 @@ export default function CameraScreen() {
         postCaptureBase64Ref.current = null;
         genIdRef.current += 1;
         stopAutoSaveAnimation();
-        cancelAnimation(autoSavePulse);
       };
     }, [stopAutoSaveAnimation, autoSavePulse]),
   );
@@ -1121,9 +1130,9 @@ export default function CameraScreen() {
       <Modal visible={autoSaving} transparent animationType="fade">
         <View style={styles.autoSavingOverlay}>
           <View style={styles.autoSavingCard}>
-            <Animated.View style={{ transform: [{ scale: autoSavePulse }] }}>
+            <RNAnimated.View style={{ transform: [{ scale: autoSavePulse }] }}>
               <Sparkles size={28} color={theme.colors.primary[400]} strokeWidth={2} />
-            </Animated.View>
+            </RNAnimated.View>
             <Text style={styles.autoSavingTitle}>AI가 메뉴를 분석 중입니다</Text>
             <View style={styles.autoSavingStepRow}>
               <View style={[styles.autoSavingStepDot, autoSaveStep >= 1 && styles.autoSavingStepDotActive]} />
@@ -1192,9 +1201,9 @@ function StereoProgressLightweight({
             </>
           ) : (
             <>
-              <Animated.View style={{ transform: [{ scale: 1 }] }}>
+              <RNAnimated.View style={{ transform: [{ scale: 1 }] }}>
                 <Sparkles size={28} color={theme.colors.primary[400]} strokeWidth={2} />
-              </Animated.View>
+              </RNAnimated.View>
               <Text style={styles.stereoLightTitle}>AI 입체컷 생성 중</Text>
               {currentStep && <Text style={styles.stereoLightStep}>{currentStep.label}</Text>}
               <View style={styles.stereoLightBarWrap}>

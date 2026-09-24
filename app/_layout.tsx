@@ -11,7 +11,6 @@ import {
   PlusJakartaSans_600SemiBold,
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans';
-import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { initStorage } from '@/lib/storage';
 import { preloadTemplates } from '@/lib/templateRegistry';
@@ -36,14 +35,6 @@ const LOADING_TEXT = '로딩 중...';
 const ERROR_TITLE = '문제가 발생했어요';
 const ERROR_DESC = '예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 const RETRY_TEXT = '다시 시도';
-
-function useSafeKeepAwake() {
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    activateKeepAwakeAsync('screen').catch(() => {});
-    return () => {};
-  }, []);
-}
 
 function AppShell() {
   const { t } = useI18n();
@@ -82,7 +73,6 @@ function AppShell() {
 
 export default function RootLayout() {
   useFrameworkReady();
-  useSafeKeepAwake();
   const [ready, setReady] = useState<ReadyState>('loading');
   const [fontTimedOut, setFontTimedOut] = useState(false);
   const initStartedRef = useRef(false);
