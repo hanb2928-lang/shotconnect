@@ -18,12 +18,14 @@ import { Search, Film, Check, X, RefreshCw, Settings, Download, Image as ImageIc
 import { useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
-import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
+import { CameraView, CameraType } from 'expo-camera';
+import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '@/lib/theme';
 import { getThumbnailUrl } from '@/lib/imageUtils';
 import { StockVideoClip, searchStockVideos } from '@/lib/pexelsVideo';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
+import { pickImageWeb } from '@/lib/webImagePicker';
 
 interface StockVideoPickerProps {
   productName?: string;
@@ -191,6 +193,10 @@ export function StockVideoPicker({
     setCameraError(null);
     setCameraReady(false);
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('이 브라우저에서는 카메라를 지원하지 않습니다. HTTPS 환경에서 사용해주세요.');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: getSafeVideoConstraints(face),
         audio: false,
@@ -297,7 +303,7 @@ export function StockVideoPicker({
   }, []);
 
   // ── Mobile camera capture (expo-camera) ──
-  const [mobileCamPermission, requestMobileCamPermission] = useCameraPermissions();
+  const [mobileCamPermission, requestMobileCamPermission] = useCameraPermissionsSafe();
   const [showMobileCamera, setShowMobileCamera] = useState(false);
   const [mobileFacing, setMobileFacing] = useState<CameraType>('back');
   const mobileCameraRef = useRef<React.ComponentRef<typeof CameraView> | null>(null);
@@ -330,6 +336,7 @@ export function StockVideoPicker({
     setMobileCapturing(true);
     try {
       const photo = await mobileCameraRef.current.takePictureAsync({ quality: 0.85, skipProcessing: false });
+      if (!cameraMountedRef.current) return;
       if (photo?.uri) {
         setMobileCapturedUri(photo.uri);
       }
@@ -405,6 +412,26 @@ export function StockVideoPicker({
     if (pickingImage) return;
     setPickingImage(true);
     try {
+      if (Platform.OS === 'web') {
+        const images = await pickImageWeb(false, 1);
+        if (images.length === 0) return;
+        const img = images[0];
+        const uri = img.base64 ? `data:${img.mimeType};base64,${img.base64}` : '';
+        const clip: StockVideoClip = {
+          id: Date.now(),
+          duration: 0,
+          width: 1080,
+          height: 1920,
+          previewUrl: uri,
+          thumbnailUrl: uri,
+          videoUrl: uri,
+          author: '불러온 이미지',
+          ratio: '9:16',
+          mediaType: 'image',
+        };
+        onSelectClip(clip);
+        return;
+      }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.85,
@@ -759,7 +786,7 @@ export function StockVideoPicker({
       )}
 
       {/* ── Mobile camera (expo-camera, native only) ── */}
-      {showMobileCamera && Platform.OS !== 'web' && (
+      {showMobileCamera && Platform.OS !== 'web' && mobileCamPermission?.granted && (
         <View style={styles.cameraSection}>
           {mobileCapturedUri ? (
             <View style={styles.capturePreviewWrap}>
@@ -795,6 +822,7 @@ export function StockVideoPicker({
                 ref={mobileCameraRef as never}
                 facing={mobileFacing}
                 style={styles.mobileCameraView}
+                onMountError={() => { setShowMobileCamera(false); Alert.alert('카메라 오류', '카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
               />
               <View style={styles.cameraActions}>
                 <TouchableOpacity style={styles.cameraFlipBtn} onPress={handleMobileFlipCamera} activeOpacity={0.7}>

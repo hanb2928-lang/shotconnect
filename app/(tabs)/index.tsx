@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView } from 'expo-camera';
+import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
@@ -128,7 +129,7 @@ export default function CameraScreen() {
   const webCameraRef = useRef<WebCameraHandle>(null);
   const autoSaveStepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoSavePulse = useRef(new RNAnimated.Value(1)).current;
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission] = useCameraPermissionsSafe();
   const [facing, setFacing] = useState<'front' | 'back'>('back');
   const [cameraReady, setCameraReady] = useState(false);
   const [isActive, setIsActive] = useState(true);
@@ -372,6 +373,7 @@ export default function CameraScreen() {
   };
 
   const handleMultiAngleComplete = async (shots: AngleShot[]) => {
+    if (stereoOverlayVisible) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     setMultiAngleVisible(false);
     if (!sorted[0]?.base64) return;
@@ -433,12 +435,14 @@ export default function CameraScreen() {
         '다각도 촬영',
       );
       if (!photo?.base64) return null;
+      if (!isMountedRef.current) return null;
       const cleanB64 = cleanBase64(photo.base64);
       const compressedDataUrl = await withTimeout(
         prepareImageForApi(buildDataUrl(cleanB64, 'image/jpeg'), 1080, 0.7, 'none' as MoodFilterType),
         PICK_TIMEOUT_MS,
         '이미지 압축',
       );
+      if (!isMountedRef.current) return null;
       return { base64: cleanBase64(compressedDataUrl), mimeType: getMimeTypeFromDataUrl(compressedDataUrl) };
     } catch {
       return null;
@@ -525,6 +529,7 @@ export default function CameraScreen() {
 
   // ─── Virtual fitting: complete multi-angle guide (async, same pattern as 입체컷 오토) ───
   const handleFittingGuideComplete = useCallback(async (shots: AngleShot[]) => {
+    if (stereoOverlayVisible) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     setFittingGuideVisible(false);
     if (sorted.length < 2) return;
@@ -550,7 +555,7 @@ export default function CameraScreen() {
 
     // Background: run virtual fitting pipeline without blocking UI
     runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders).catch(() => {});
-  }, [router, cleanMode, studioSliders]);
+  }, [router, cleanMode, studioSliders, stereoOverlayVisible]);
 
   const handleModeSelect = useCallback((mode: CaptureMode) => {
     setCaptureMode(mode);
@@ -873,6 +878,7 @@ export default function CameraScreen() {
               style={styles.cameraPreview}
               facing={facing}
               onCameraReady={() => setCameraReady(true)}
+              onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
               mode="video"
             />
           ) : (
@@ -1077,6 +1083,7 @@ export default function CameraScreen() {
             style={styles.cameraPreview}
             facing={facing}
             onCameraReady={() => setCameraReady(true)}
+            onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
             mode="video"
           />
         ) : (

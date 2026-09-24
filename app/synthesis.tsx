@@ -132,6 +132,7 @@ export default function SynthesisScreen() {
   const [jobId, setJobId] = useState<string | null>(null);
 
   const handleGenerate = useCallback(async () => {
+    if (isGenerating) return;
     if (productImages.length < 3) {
       setError('제품 사진을 최소 3컷 등록해주세요.');
       return;
@@ -197,7 +198,7 @@ export default function SynthesisScreen() {
       setVideoProgress(null);
       setError(err instanceof Error ? err.message : 'AI 영상 생성 요청에 실패했습니다.');
     }
-  }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform]);
+  }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating]);
 
   const polling = useResultPolling(jobId, {
     scanId: scanIdRef.current,

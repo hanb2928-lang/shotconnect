@@ -7,7 +7,8 @@ import {
   useState,
 } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, ViewStyle } from 'react-native';
-import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import { CameraView, type CameraType } from 'expo-camera';
+import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { compressCaptureFrameToBlob } from '@/lib/imageEdit';
@@ -47,7 +48,7 @@ export const InlineCameraViewfinder = forwardRef<
 
   const nativeFacing: CameraType = facing === 'environment' ? 'back' : 'front';
 
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission] = useCameraPermissionsSafe();
 
   const stopStream = useCallback(() => {
     if (Platform.OS === 'web' && streamRef.current) {
@@ -66,6 +67,10 @@ export const InlineCameraViewfinder = forwardRef<
     const gen = ++streamGenRef.current;
     setError(null);
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('이 브라우저에서는 카메라를 지원하지 않습니다. HTTPS 환경에서 사용해주세요.');
+        return;
+      }
       const constraints: MediaStreamConstraints = {
         video: getSafeVideoConstraints(facing),
         audio: false,
@@ -181,6 +186,7 @@ export const InlineCameraViewfinder = forwardRef<
         quality: 0.7,
         shutterSound: false,
       });
+      if (!mountedRef.current) return null;
       if (photo?.base64) {
         return await compressCaptureFrameToBlob(photo.base64, 'image/jpeg');
       }
@@ -329,6 +335,7 @@ export const InlineCameraViewfinder = forwardRef<
           style={StyleSheet.absoluteFillObject as ViewStyle}
           facing={nativeFacing}
           onCameraReady={() => setCameraReady(true)}
+          onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
         />
         <View style={styles.guideFrame} pointerEvents="none">
           <View style={[styles.corner, styles.cornerTL]} />

@@ -1,9 +1,9 @@
 import { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, Platform } from 'react-native';
 import { Pencil, Plus, X, Camera } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
-import { Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { pickImageWeb } from '@/lib/webImagePicker';
 
 interface MicroEditSlotProps {
   onReviewLineChange?: (line: string) => void;
@@ -22,6 +22,15 @@ export function MicroEditSlot({ onReviewLineChange, onFootageSelect }: MicroEdit
 
   const handlePickFootage = useCallback(async () => {
     try {
+      if (Platform.OS === 'web') {
+        const images = await pickImageWeb(false, 1);
+        if (images.length > 0 && images[0].base64) {
+          const uri = `data:${images[0].mimeType};base64,${images[0].base64}`;
+          setFootageUri(uri);
+          onFootageSelect?.(uri);
+        }
+        return;
+      }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,

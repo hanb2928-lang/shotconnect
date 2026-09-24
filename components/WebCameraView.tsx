@@ -103,6 +103,11 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     setError(null);
     setCameraReady(false);
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('이 브라우저에서는 카메라를 지원하지 않습니다. HTTPS 환경에서 사용해주세요.');
+        setErrorKind('permission');
+        return;
+      }
       const constraints: MediaStreamConstraints = {
         video: getSafeVideoConstraints(face),
         audio: withAudio,
@@ -228,6 +233,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       canvas.width = 0;
       canvas.height = 0;
       const compressed = await prepareImageForApi(dataUrl, 1280, 0.85);
+      if (!mountedRef.current) return null;
       const b64 = cleanBase64(compressed);
       const mime = getMimeTypeFromDataUrl(compressed);
       return `${mime}|${b64}`;
@@ -284,7 +290,9 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     }
     try {
       const result = await recordingPromiseRef.current;
+      if (!mountedRef.current) return null;
       const { base64, mimeType } = await blobToBase64(result.blob);
+      if (!mountedRef.current) return null;
       isRecordingRef.current = false;
       setIsRecording(false);
       setRecordingDuration(0);
