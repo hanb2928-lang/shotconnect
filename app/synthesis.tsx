@@ -64,6 +64,7 @@ export default function SynthesisScreen() {
   const [videoProgress, setVideoProgress] = useState<VideoGenProgress | null>(null);
   const scanIdRef = useRef<string | null>(null);
   const genStartRef = useRef<number>(0);
+  const progressMsgRef = useRef<string>('');
 
   const productInputRef = useRef<HTMLInputElement | null>(null);
   const modelInputRef = useRef<HTMLInputElement | null>(null);
@@ -216,23 +217,26 @@ export default function SynthesisScreen() {
     },
   });
 
+  progressMsgRef.current = polling.progressMessage;
+
   useEffect(() => {
     if (!isGenerating) return;
     const timer = setInterval(() => {
       const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
       setVideoProgress((prev) => {
         if (!prev) return prev;
-        const pctMatch = polling.progressMessage?.match(/\((\d+)%\)/);
+        const msg = progressMsgRef.current;
+        const pctMatch = msg?.match(/\((\d+)%\)/);
         const parsed = pctMatch ? parseInt(pctMatch[1], 10) : NaN;
         const polledProgress = !isNaN(parsed) ? parsed / 100 : null;
         const baseProgress = prev.progress;
         const timeBasedProgress = Math.min(0.9, 0.12 + elapsed * 0.005);
         const nextProgress = polledProgress ?? Math.max(baseProgress, timeBasedProgress);
-        return { ...prev, message: polling.progressMessage || prev.message, elapsedSec: elapsed, progress: nextProgress };
+        return { ...prev, message: msg || prev.message, elapsedSec: elapsed, progress: nextProgress };
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [isGenerating, polling.progressMessage]);
+  }, [isGenerating]);
 
   const handleDownload = useCallback(() => {
     setIsExporting(true);

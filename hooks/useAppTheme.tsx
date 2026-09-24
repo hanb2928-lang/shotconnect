@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getItem, setItem } from '@/lib/storage';
 import {
   theme as baseTheme,
@@ -93,20 +93,20 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const setMode = (m: ThemeMode) => {
+  const setMode = useCallback((m: ThemeMode) => {
     setModeState(m);
     setItem('theme_mode', m);
-  };
+  }, []);
 
-  const setDensity = (d: DisplayDensity) => {
+  const setDensity = useCallback((d: DisplayDensity) => {
     setDensityState(d);
     setItem('display_density', d);
-  };
+  }, []);
 
-  const setPreset = (p: ThemePreset) => {
+  const setPreset = useCallback((p: ThemePreset) => {
     setPresetState(p);
     setItem('theme_preset', p);
-  };
+  }, []);
 
   const { spacing, typography } = useMemo(() => resolveDensity(density), [density]);
 
@@ -127,7 +127,7 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
       baseTheme,
       presetColors,
     }),
-    [mode, density, preset, spacing, typography, presetColors],
+    [mode, density, preset, spacing, typography, presetColors, setMode, setDensity, setPreset],
   );
 
   return <AppThemeContext.Provider value={value}>{children}</AppThemeContext.Provider>;

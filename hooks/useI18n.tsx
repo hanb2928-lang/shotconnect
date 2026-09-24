@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import { I18nManager, Platform } from 'react-native';
 import type { AppLanguage } from '@/lib/i18n';
 import { translations, detectSystemLanguage, translate, RTL_LANGUAGES } from '@/lib/i18n';
@@ -70,8 +70,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [language],
   );
 
+  const value = useMemo(
+    () => ({ language, setLanguage, t, isReady, isRTL }),
+    [language, setLanguage, t, isReady, isRTL],
+  );
+
   return (
-    <I18nContext.Provider value={{ language, setLanguage, t, isReady, isRTL }}>
+    <I18nContext.Provider value={value}>
       {children}
     </I18nContext.Provider>
   );
