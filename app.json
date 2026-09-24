@@ -48,18 +48,7 @@
       "expo-web-browser",
       "expo-image-picker",
       "expo-camera",
-      "expo-media-library",
-      "expo-linear-gradient",
-      "expo-blur",
-      "expo-keep-awake",
-      "expo-image-manipulator",
-      "expo-sharing",
-      [
-        "react-native-view-shot",
-        {
-          "fadeAndroid": true
-        }
-      ]
+      "expo-media-library"
     ]
   }
 }
