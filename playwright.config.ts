@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const DIST_DIR = 'dist';
+const PORT = 8081;
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
@@ -8,7 +11,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:8081',
+    baseURL: `http://localhost:${PORT}`,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -24,8 +27,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npx serve dist --listen 8081 --single',
-    url: 'http://localhost:8081',
+    command: `npx serve ${DIST_DIR} --listen ${PORT} --single`,
+    url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 30 * 1000,
   },
