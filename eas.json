@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 12.0.0",
-    "appVersionSource": "local",
+    "appVersionSource": "remote",
     "requireCommit": false
   },
   "build": {
@@ -20,7 +20,6 @@
       }
     },
     "preview": {
-      "developmentClient": false,
       "distribution": "internal",
       "android": {
         "buildType": "apk"
@@ -34,10 +33,8 @@
       }
     },
     "production": {
-      "developmentClient": false,
-      "distribution": "internal",
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       },
       "image": "latest",
       "nodeVersion": "20",
@@ -48,5 +45,8 @@
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
       }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }
