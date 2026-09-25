@@ -4,6 +4,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GRADLE_DAEMON: "false"
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Xmx4096m"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

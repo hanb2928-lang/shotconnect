@@ -15,6 +15,8 @@
       "nodeVersion": "20",
       "env": {
         "EAS_NO_VCS": "1",
+        "GRADLE_DAEMON": "false",
+        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Xmx4096m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
       }
@@ -28,6 +30,8 @@
       "nodeVersion": "20",
       "env": {
         "EAS_NO_VCS": "1",
+        "GRADLE_DAEMON": "false",
+        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Xmx4096m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
       }
@@ -41,6 +45,8 @@
       "channel": "production",
       "env": {
         "EAS_NO_VCS": "1",
+        "GRADLE_DAEMON": "false",
+        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Xmx4096m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
       }
