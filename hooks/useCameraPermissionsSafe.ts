@@ -17,9 +17,22 @@ const webPermission: PermissionResponse = {
 
 const webRequest = () => Promise.resolve(webPermission);
 
+const unsupportedPermission: PermissionResponse = {
+  granted: false,
+  status: 'denied',
+  canAskAgain: false,
+  expires: 'never',
+} as unknown as PermissionResponse;
+
+const unsupportedRequest = () => Promise.resolve(unsupportedPermission);
+
 export function useCameraPermissionsSafe(): PermissionHookReturn {
+  const nativeResult = useCameraPermissions();
+
   if (Platform.OS === 'web') {
     return [webPermission, webRequest, webRequest];
   }
-  return useCameraPermissions() as PermissionHookReturn;
+
+  const requestPermission = nativeResult?.[1] ?? unsupportedRequest;
+  return [nativeResult?.[0] ?? null, requestPermission, requestPermission];
 }

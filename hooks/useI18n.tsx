@@ -29,9 +29,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const isRTL = RTL_LANGUAGES.includes(language);
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       try {
         const stored = await getItem(STORAGE_KEY);
+        if (!mounted) return;
         if (stored && stored in translations) {
           setLanguageState(stored as AppLanguage);
         } else {
@@ -39,11 +41,15 @@ export function I18nProvider({ children }: { children: ReactNode }) {
           setLanguageState(detected);
         }
       } catch {
+        if (!mounted) return;
         const detected = detectSystemLanguage();
         setLanguageState(detected);
       }
-      setIsReady(true);
+      if (mounted) setIsReady(true);
     })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {

@@ -62,17 +62,21 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   const [preset, setPresetState] = useState<ThemePreset>('cinematic-dark');
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       try {
         const cachedMode = await getItem('theme_mode');
+        if (!mounted) return;
         if (cachedMode === 'dark' || cachedMode === 'light') setModeState(cachedMode);
 
         const cachedDensity = await getItem('display_density');
+        if (!mounted) return;
         if (cachedDensity === 'compact' || cachedDensity === 'standard' || cachedDensity === 'wide') {
           setDensityState(cachedDensity);
         }
 
         const cachedPreset = await getItem('theme_preset');
+        if (!mounted) return;
         if (cachedPreset && VALID_PRESETS.includes(cachedPreset as ThemePreset)) {
           setPresetState(cachedPreset as ThemePreset);
         }
@@ -80,6 +84,7 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
 
       try {
         const s = await getUserSettings();
+        if (!mounted) return;
         const tm = (s?.theme_mode as ThemeMode) || 'dark';
         const dn = (s?.display_density as DisplayDensity) || 'standard';
         const tp = (s?.theme_preset as ThemePreset) || 'cinematic-dark';
@@ -91,6 +96,9 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
         await setItem('theme_preset', tp);
       } catch {}
     })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const setMode = useCallback((m: ThemeMode) => {
