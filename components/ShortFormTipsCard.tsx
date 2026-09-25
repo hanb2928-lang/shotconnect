@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity, LayoutAnimation, Platform } from 'react-native';
 import { Sparkles, Zap, Lightbulb, TrendingUp, ChevronDown, ChevronUp, Check } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -23,6 +24,7 @@ export function ShortFormTipsCard({
   platform,
   onApplyPlatform,
 }: ShortFormTipsCardProps) {
+  const mounted = useMountedRef();
   const [expanded, setExpanded] = useState(true);
   const [applied, setApplied] = useState(false);
 
@@ -49,7 +51,7 @@ export function ShortFormTipsCard({
     }
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setApplied(true);
-    setTimeout(() => setApplied(false), 2500);
+    setTimeout(() => { if (mounted.current) setApplied(false); }, 2500);
   }, [platform, onApplyPlatform]);
 
   const toggleExpand = () => {

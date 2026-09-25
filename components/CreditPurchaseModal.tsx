@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Coins, X, Check, Zap, TrendingUp, History } from 'lucide-react-native';
@@ -22,6 +23,7 @@ interface CreditPurchaseModalProps {
 
 export function CreditPurchaseModal({ visible, onClose, onPurchased }: CreditPurchaseModalProps) {
   const insets = useSafeAreaInsets();
+  const mounted = useMountedRef();
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export function CreditPurchaseModal({ visible, onClose, onPurchased }: CreditPur
       await loadData();
       setSuccess(true);
       onPurchased?.();
-      setTimeout(() => setSuccess(false), 2500);
+      setTimeout(() => { if (mounted.current) setSuccess(false); }, 2500);
     } catch (err) {
       setError(err instanceof Error ? err.message : '충전 중 오류가 발생했습니다');
     }

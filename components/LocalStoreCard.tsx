@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -37,6 +38,7 @@ function extractRegion(address: string): string {
 }
 
 export function LocalStoreCard({ value, onChange }: LocalStoreCardProps) {
+  const mounted = useMountedRef();
   const [expanded, setExpanded] = useState(false);
   const [info, setInfo] = useState<LocalStoreInfo>(value ?? DEFAULT_INFO);
   const [saved, setSaved] = useState(false);
@@ -61,7 +63,7 @@ export function LocalStoreCard({ value, onChange }: LocalStoreCardProps) {
   const handleSave = () => {
     onChange(info);
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setTimeout(() => { if (mounted.current) setSaved(false); }, 2000);
   };
 
   const hasStoreData = info.storeName || info.address || info.phone || info.todayOffer;

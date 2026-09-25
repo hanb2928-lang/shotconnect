@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -54,6 +55,7 @@ export function HumanTtsProfileCard({
     MOOD_STYLE_MAP[moodLabelToVisionMoodLocal(moodLabel)] ? moodLabelToVisionMoodLocal(moodLabel) : 'trendy',
   );
   const [showDetail, setShowDetail] = useState(false);
+  const mounted = useMountedRef();
   const [generated, setGenerated] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -78,6 +80,7 @@ export function HumanTtsProfileCard({
     if (!narrationText.trim()) return;
     setLoading(true);
     setTimeout(() => {
+      if (!mounted.current) return;
       setLoading(false);
       setGenerated(true);
       if (profile) {

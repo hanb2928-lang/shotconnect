@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Zap, Volume2, Film, RefreshCw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -40,6 +41,7 @@ export function HyperHumanEngineCard({
   hashtags,
   videoDurationSec = 15,
 }: HyperHumanEngineCardProps) {
+  const mounted = useMountedRef();
   const [selectedHookType, setSelectedHookType] = useState<HookType>('reversal');
   const [hookResult, setHookResult] = useState<HookResult | null>(null);
   const [regenerating, setRegenerating] = useState(false);
@@ -57,6 +59,7 @@ export function HyperHumanEngineCard({
   const regenerateHook = useCallback(() => {
     setRegenerating(true);
     setTimeout(() => {
+      if (!mounted.current) return;
       const result = generateHook(selectedHookType, productName, caption, hashtags);
       setHookResult(result);
       setRegenerating(false);

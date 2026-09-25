@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -58,6 +59,7 @@ const SEARCH_PLATFORMS = [
 ];
 
 export function OcrTextExtractor({ imageUrl, onSearchTermSelected }: OcrTextExtractorProps) {
+  const mounted = useMountedRef();
   const [result, setResult] = useState<OcrResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +111,7 @@ export function OcrTextExtractor({ imageUrl, onSearchTermSelected }: OcrTextExtr
       await Clipboard.setStringAsync(text);
     }
     setCopiedTerm(text);
-    setTimeout(() => setCopiedTerm(null), 2000);
+    setTimeout(() => { if (mounted.current) setCopiedTerm(null); }, 2000);
   }, []);
 
   const handleSearch = useCallback((url: string) => {

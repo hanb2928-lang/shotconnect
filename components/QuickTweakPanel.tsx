@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -45,6 +46,7 @@ export function QuickTweakPanel({
   onProductNameChange,
   onPriceChange,
 }: QuickTweakProps) {
+  const mounted = useMountedRef();
   const [expanded, setExpanded] = useState(true);
   const [editingField, setEditingField] = useState<EditField>(null);
   const [hookInput, setHookInput] = useState(hook);
@@ -73,7 +75,7 @@ export function QuickTweakPanel({
     }
     setEditingField(null);
     setSavedField(field);
-    setTimeout(() => setSavedField(null), 2000);
+    setTimeout(() => { if (mounted.current) setSavedField(null); }, 2000);
   }, [hookInput, productInput, priceInput, onHookChange, onProductNameChange, onPriceChange]);
 
   const hasAllContent = !!(hook && productName);

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -59,6 +60,7 @@ export function InteractiveSlideshowViewer({
   disclosureText,
   affiliateUrl,
 }: InteractiveSlideshowViewerProps) {
+  const mounted = useMountedRef();
   const [currentIdx, setCurrentIdx] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
@@ -109,7 +111,7 @@ export function InteractiveSlideshowViewer({
           } catch { /* skip failed download */ }
         }
         setDownloaded(true);
-        setTimeout(() => setDownloaded(false), 3000);
+        setTimeout(() => { if (mounted.current) setDownloaded(false); }, 3000);
       }
     } catch {
       // download failed

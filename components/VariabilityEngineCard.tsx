@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -53,6 +54,7 @@ const TABS: TabDef[] = [
 ];
 
 export function VariabilityEngineCard() {
+  const mounted = useMountedRef();
   const [activeTab, setActiveTab] = useState<TabKey>('visual');
   const [visualParams, setVisualParams] = useState<VisualRandomizationParams | null>(null);
   const [captionInput, setCaptionInput] = useState('');
@@ -98,7 +100,7 @@ export function VariabilityEngineCard() {
     try {
       await Clipboard.setStringAsync(text);
       setCopiedIdx(idx);
-      setTimeout(() => setCopiedIdx(null), 2000);
+      setTimeout(() => { if (mounted.current) setCopiedIdx(null); }, 2000);
     } catch {
       // clipboard may be unavailable on some platforms
     }

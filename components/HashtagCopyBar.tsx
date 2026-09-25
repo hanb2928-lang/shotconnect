@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { Hash, Copy, Check, TrendingUp, Shuffle } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -47,6 +48,7 @@ function matchCategoryKey(category: string): string | null {
 }
 
 export function HashtagCopyBar({ hashtags, productCategory, platform }: HashtagCopyBarProps) {
+  const mounted = useMountedRef();
   const [copied, setCopied] = useState(false);
   const [mixed, setMixed] = useState(false);
   const [mixCount, setMixCount] = useState(0);
@@ -102,7 +104,7 @@ export function HashtagCopyBar({ hashtags, productCategory, platform }: HashtagC
         await Clipboard.setStringAsync(text);
       }
       setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      setTimeout(() => { if (mounted.current) setCopied(false); }, 2500);
     } catch {
       // clipboard failed silently
     }

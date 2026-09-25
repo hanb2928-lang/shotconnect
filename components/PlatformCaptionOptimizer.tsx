@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Check, Copy, Link2, Hash, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -36,6 +37,7 @@ export function PlatformCaptionOptimizer({
   isActive,
   onCopy,
 }: PlatformCaptionOptimizerProps) {
+  const mounted = useMountedRef();
   const [expanded, setExpanded] = useState(isActive);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
 
@@ -54,7 +56,7 @@ export function PlatformCaptionOptimizer({
   const handleCopy = (section: string, text: string) => {
     onCopy(text);
     setCopiedSection(section);
-    setTimeout(() => setCopiedSection(null), 2000);
+    setTimeout(() => { if (mounted.current) setCopiedSection(null); }, 2000);
   };
 
   const titleLen = built.title.length;

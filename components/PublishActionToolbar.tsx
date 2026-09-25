@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -42,6 +43,7 @@ export function PublishActionToolbar({
   onCopyLink,
   isPublishing,
 }: PublishActionToolbarProps) {
+  const mounted = useMountedRef();
   const [publishingPlatform, setPublishingPlatform] = useState<PlatformKey | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -54,7 +56,7 @@ export function PublishActionToolbar({
   const handleCopyLink = () => {
     onCopyLink();
     setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
+    setTimeout(() => { if (mounted.current) setLinkCopied(false); }, 2000);
   };
 
   return (
