@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "snapconnect",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.snapconnect.app"
@@ -33,7 +33,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "여기에-UUID-입력"
+        "projectId": "4dfcf36f-1af0-409a-8c1d-25e107415ba1"
       },
       "supabaseUrl": "https://asjqmhuhvmiekdnvddjv.supabase.co",
       "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
