@@ -44,8 +44,12 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-system-ui",
+      "expo-router",
       "expo-font",
       "expo-web-browser",
+      "expo-file-system",
+      "expo-splash-screen",
       "expo-image-picker",
       "expo-camera",
       "expo-media-library",
