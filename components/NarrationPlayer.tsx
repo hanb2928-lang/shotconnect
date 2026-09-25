@@ -23,6 +23,7 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const fallbackUtterRef = useRef<SpeechSynthesisUtterance | null>(null);
   const onEndedCallbackRef = useRef<(() => void) | null>(null);
+  const mountedRef = useRef(true);
 
   const notifyPlayState = useCallback((playing: boolean) => {
     setIsPlaying(playing);
@@ -30,7 +31,9 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
   }, [onPlayStateChange]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
@@ -65,10 +68,11 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
     utter.pitch = 1.0;
     utter.volume = 1.0;
     utter.onend = () => {
-      notifyPlayState(false);
+      if (mountedRef.current) notifyPlayState(false);
       onEndedCallbackRef.current?.();
     };
     utter.onerror = () => {
+      if (!mountedRef.current) return;
       notifyPlayState(false);
       setPlayError('폴백 음성 재생에 실패했습니다');
     };
@@ -157,11 +161,11 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
       audio.preload = 'auto';
       audioRef.current = audio;
       if (!audio.src) throw new Error('audio.src assignment failed');
-      audio.onended = () => notifyPlayState(false);
+      audio.onended = () => { if (mountedRef.current) notifyPlayState(false); };
       audio.onpause = () => {
-        if (audioRef.current === audio && !audio.ended) notifyPlayState(false);
+        if (mountedRef.current && audioRef.current === audio && !audio.ended) notifyPlayState(false);
       };
-      audio.onerror = () => { setIsLoading(false); notifyPlayState(false); setPlayError('오디오 재생에 실패했습니다'); };
+      audio.onerror = () => { if (mountedRef.current) { setIsLoading(false); notifyPlayState(false); setPlayError('오디오 재생에 실패했습니다'); } };
       if (ctx && masterGainRef.current) {
         try {
           if (sourceNodeRef.current) { try { sourceNodeRef.current.disconnect(); } catch { /* ignore */ } }
@@ -171,9 +175,11 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
         } catch { /* fallback to plain playback */ }
       }
       await playWhenReady(audio);
+      if (!mountedRef.current) return;
       setIsLoading(false);
       notifyPlayState(true);
     } catch (err) {
+      if (!mountedRef.current) return;
       setIsLoading(false);
       notifyPlayState(false);
       const errMsg = err instanceof Error ? err.message : String(err);

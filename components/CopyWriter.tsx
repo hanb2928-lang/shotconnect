@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform, LayoutAnimation, UIManager, TextInput } from 'react-native';
 import { Sparkles, Copy, Check, Flame, Heart, BookOpen, Zap, ChevronDown, ChevronUp, RefreshCw, Crown, Shuffle, PenLine } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -73,6 +73,12 @@ export function CopyWriter({
   const [spinningKey, setSpinningKey] = useState<string | null>(null);
   const [spunVariations, setSpunVariations] = useState<Record<string, CaptionVariation>>({});
   const [customPrompt, setCustomPrompt] = useState('');
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const handleGenerate = useCallback(async () => {
     if (!productName) return;
@@ -112,15 +118,15 @@ export function CopyWriter({
       catch { throw new Error('서버 응답을 해석하지 못했습니다'); }
       if (data.error) throw new Error(data.error);
       if (data.groups && Array.isArray(data.groups)) {
-        setGroups(data.groups);
+        if (mountedRef.current) setGroups(data.groups);
       } else if (data.copies && Array.isArray(data.copies)) {
-        setGroups([{ type: 'viral', label: '감성형', copies: data.copies }]);
+        if (mountedRef.current) setGroups([{ type: 'viral', label: '감성형', copies: data.copies }]);
       }
-      setIsFallback(!!data.isFallback);
+      if (mountedRef.current) setIsFallback(!!data.isFallback);
     } catch {
-      setError(true);
+      if (mountedRef.current) setError(true);
     }
-    setGenerating(false);
+    if (mountedRef.current) setGenerating(false);
   }, [productName, productCategory, priceEstimate, oneLiner, productAdvantages, platform, count, brandPersona, customPrompt, contentTone]);
 
   const handleCopy = useCallback(async (item: CopyItem, cardKey: string) => {

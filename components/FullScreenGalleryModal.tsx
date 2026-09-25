@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -93,9 +93,15 @@ export function FullScreenGalleryModal({
   const hasBeforeAfter = !!(beforeImage || afterImage);
   const hasComic = total > 0;
 
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   const handleClose = useCallback(() => {
     opacity.value = withTiming(0, { duration: 150 }, () => {
-      onClose();
+      if (mountedRef.current && typeof onClose === 'function') onClose();
     });
   }, [onClose]);
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -69,6 +69,22 @@ export function GlobalLocalizer({
   const [koreanTtsPlaying, setKoreanTtsPlaying] = useState(false);
   const [showGlobalOnly, setShowGlobalOnly] = useState(false);
 
+  const mountedRef = useRef(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.onended = null;
+        audioRef.current.onpause = null;
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
   const handlePlayKoreanTTS = useCallback(async () => {
     if (!preloadedKoreanTtsUrl) return;
     if (Platform.OS !== 'web') return;
@@ -76,12 +92,12 @@ export function GlobalLocalizer({
       if (audioRef.current) { audioRef.current.pause(); }
       const audio = new Audio(preloadedKoreanTtsUrl);
       audioRef.current = audio;
-      audio.onended = () => setKoreanTtsPlaying(false);
-      audio.onpause = () => setKoreanTtsPlaying(false);
+      audio.onended = () => { if (mountedRef.current) setKoreanTtsPlaying(false); };
+      audio.onpause = () => { if (mountedRef.current) setKoreanTtsPlaying(false); };
       await audio.play();
-      setKoreanTtsPlaying(true);
+      if (mountedRef.current) setKoreanTtsPlaying(true);
     } catch {
-      setKoreanTtsPlaying(false);
+      if (mountedRef.current) setKoreanTtsPlaying(false);
     }
   }, [preloadedKoreanTtsUrl]);
 
@@ -253,11 +269,11 @@ export function GlobalLocalizer({
     }
   }, [ttsResults]);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const handlePlayTTS = useCallback(async (langCode: string) => {
     const dataUrl = ttsResults[langCode];
     if (!dataUrl) return;
     if (Platform.OS !== 'web') return;
+    if (!mountedRef.current) return;
     try {
       if (audioRef.current) { audioRef.current.pause(); }
       const audio = new Audio(dataUrl);

@@ -333,7 +333,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     if (!cameraReady || autoSaving) return;
     if (isRecording) {
       const result = await stopRecording();
-      if (result) {
+      if (result && mountedRef.current) {
         onCapture(result.base64, result.mimeType);
       }
     } else {
@@ -352,13 +352,13 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       return;
     }
     const result = await captureFrame();
-    if (!result) return;
+    if (!result || !mountedRef.current) return;
     const [mime, b64] = result.split('|');
     onCapture(b64, mime);
   }, [cameraReady, capturing, autoSaving, captureMode, captureFrame, onCapture, onMultiAnglePress, handleVideoCapture]);
 
   const handleConfirm = useCallback(() => {
-    if (previewBase64) {
+    if (previewBase64 && mountedRef.current) {
       onCapture(previewBase64, previewMime);
       setPreviewBase64(null);
     }

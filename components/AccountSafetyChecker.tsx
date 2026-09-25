@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { Shield, ShieldCheck, ShieldAlert, Clock, X, Info, RefreshCw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -37,6 +37,11 @@ export function AccountSafetyChecker({
   onClose,
   onProceed,
 }: AccountSafetyCheckerProps) {
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [records, setRecords] = useState<UploadRecord[]>([]);
   const [visualRandomized, setVisualRandomized] = useState(true);
   const [captionSpun, setCaptionSpun] = useState(true);
@@ -70,8 +75,9 @@ export function AccountSafetyChecker({
     const updated = recordUpload(platform, records);
     setRecords(updated);
     await setItem(STORAGE_KEY, JSON.stringify(updated));
-    onClose();
-    onProceed?.();
+    if (!mountedRef.current) return;
+    if (typeof onClose === 'function') onClose();
+    if (typeof onProceed === 'function') onProceed();
   }, [platform, records, onClose, onProceed]);
 
   const levelConfig = {

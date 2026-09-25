@@ -429,7 +429,7 @@ export function StockVideoPicker({
           ratio: '9:16',
           mediaType: 'image',
         };
-        onSelectClip(clip);
+        if (cameraMountedRef.current) onSelectClip(clip);
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -453,7 +453,7 @@ export function StockVideoPicker({
           : '9:16',
         mediaType: 'image',
       };
-      onSelectClip(clip);
+      if (cameraMountedRef.current) onSelectClip(clip);
     } catch {
       Alert.alert('오류', '이미지를 불러오는 중 문제가 발생했습니다.');
     } finally {

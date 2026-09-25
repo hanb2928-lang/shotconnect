@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -309,7 +309,7 @@ export function ShoppingMatchCard({
       setError(result.error || '링크 저장 중 오류가 발생했어요');
       return;
     }
-    if (onMarketingCopyGenerated && detected.isAffiliate) {
+    if (mountedRef.current && typeof onMarketingCopyGenerated === 'function' && detected.isAffiliate) {
       onMarketingCopyGenerated(detected.marketingCopy);
     }
     if (!propShortUrl) {
@@ -330,6 +330,12 @@ export function ShoppingMatchCard({
     setInputPlatformName('');
     setError(null);
   };
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const handleRemoveLink = async () => {
     const result = await onRemoveCustomLink?.(selectedProductIndex);

@@ -90,6 +90,12 @@ export function MultiAngleCaptureGuide({
   const pickLockRef = useRef(false);
   const shotsRef = useRef<Record<string, AngleShot>>({});
   const viewfinderRefs = useRef<Record<string, InlineViewfinderHandle | null>>({});
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const effectiveMinShots = minShots ?? guides.length;
   const effectiveAccent = accentColor ?? theme.colors.primary[400];
@@ -149,15 +155,16 @@ export function MultiAngleCaptureGuide({
       setCaptureError(null);
       try {
         const result = await onPickImage(angleId);
+        if (!mountedRef.current) return;
         if (result?.base64) {
           await handleAddShot(angleId, result.base64, result.mimeType);
         } else {
           setCaptureError('이미지를 불러오지 못했습니다. 다시 시도해 주세요.');
         }
       } catch {
-        setCaptureError('갤러리에서 이미지를 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.');
+        if (mountedRef.current) setCaptureError('갤러리에서 이미지를 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.');
       }
-      setProcessing(false);
+      if (mountedRef.current) setProcessing(false);
       setTimeout(() => { pickLockRef.current = false; }, 300);
     },
     [onPickImage, handleAddShot],
@@ -181,12 +188,12 @@ export function MultiAngleCaptureGuide({
         if (result?.base64) {
           await handleAddShot(angleId, result.base64, result.mimeType);
         } else {
-          setCaptureError('카메라 캡처에 실패했습니다. 다시 촬영해 주세요.');
+          if (mountedRef.current) setCaptureError('카메라 캡처에 실패했습니다. 다시 촬영해 주세요.');
         }
       } catch {
-        setCaptureError('카메라 캡처 중 오류가 발생했습니다. 다시 촬영해 주세요.');
+        if (mountedRef.current) setCaptureError('카메라 캡처 중 오류가 발생했습니다. 다시 촬영해 주세요.');
       }
-      setProcessing(false);
+      if (mountedRef.current) setProcessing(false);
       setTimeout(() => { pickLockRef.current = false; }, 300);
     },
     [onCaptureImage, handleAddShot],
@@ -209,6 +216,7 @@ export function MultiAngleCaptureGuide({
       return { ...shot, orderIndex: idx };
     }).filter(Boolean) as AngleShot[];
     if (ordered.length === 0) return;
+    if (!mountedRef.current) return;
     onComplete(ordered);
     setShots({});
     shotsRef.current = {};

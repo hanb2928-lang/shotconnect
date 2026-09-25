@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Coins, Plus } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -12,20 +12,25 @@ interface CreditBalanceBadgeProps {
 
 export function CreditBalanceBadge({ onPress, compact = false, layout = 'horizontal' }: CreditBalanceBadgeProps) {
   const [balance, setBalance] = useState<CreditBalance | null>(null);
+  const mountedRef = useRef(true);
 
   const loadBalance = useCallback(async () => {
     try {
       const data = await getCreditBalance();
-      setBalance(data);
+      if (mountedRef.current) setBalance(data);
     } catch {
       // keep last known balance on transient error
     }
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     loadBalance();
     const interval = setInterval(loadBalance, 15000);
-    return () => clearInterval(interval);
+    return () => {
+      mountedRef.current = false;
+      clearInterval(interval);
+    };
   }, [loadBalance]);
 
   const isLow = balance !== null && balance.balance <= 3;

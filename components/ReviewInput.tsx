@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform } from 'react-native';
 import { Star, Save, RotateCcw, MessageSquare, Check, Sparkles, Loader as Loader2 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -29,6 +29,12 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState(false);
   const [reviewIsFallback, setReviewIsFallback] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (review && review.text) {
@@ -49,12 +55,13 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
         rating,
         updatedAt: new Date().toISOString(),
       });
+      if (!mountedRef.current) return;
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => { if (mountedRef.current) setSaved(false); }, 2500);
     } catch {
       // error handled by parent
     }
-    setSaving(false);
+    if (mountedRef.current) setSaving(false);
   }, [text, rating, onSave]);
 
   const handleClear = useCallback(async () => {
@@ -85,13 +92,14 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
       if (!response.ok) throw new Error('generation failed');
       const data = await response.json();
       if (data.error) throw new Error(data.error);
+      if (!mountedRef.current) return;
       setText(String(data.text || '').slice(0, 300));
       setRating(Math.min(Math.max(Math.round(Number(data.rating) || 5), 1), 5));
       setReviewIsFallback(!!data.isFallback);
     } catch {
-      setGenError(true);
+      if (mountedRef.current) setGenError(true);
     }
-    setGenerating(false);
+    if (mountedRef.current) setGenerating(false);
   }, [productData, brandPersona]);
 
   return (

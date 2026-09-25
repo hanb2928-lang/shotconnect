@@ -156,7 +156,11 @@ export function PostCaptureWorkflow({
   const [linkPanelExpanded, setLinkPanelExpanded] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   const prevVisibleRef = useRef(false);
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
   useEffect(() => {
     if (visible && !prevVisibleRef.current) {
       setUploadDone(false);
@@ -483,7 +487,8 @@ export function PostCaptureWorkflow({
         }
       }
 
-      onProceedToAnalysis(customPrompt.trim(), selectedPlatformKey, editPlan);
+      if (!mountedRef.current) return;
+      if (typeof onProceedToAnalysis === 'function') onProceedToAnalysis(customPrompt.trim(), selectedPlatformKey, editPlan);
     } catch {
       setFallbackUsed(true);
     } finally {
