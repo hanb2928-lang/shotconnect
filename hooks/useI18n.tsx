@@ -81,6 +81,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [language, setLanguage, t, isReady, isRTL],
   );
 
+  if (!isReady) {
+    return null;
+  }
+
   return (
     <I18nContext.Provider value={value}>
       {children}

@@ -61,6 +61,8 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   const [density, setDensityState] = useState<DisplayDensity>('standard');
   const [preset, setPresetState] = useState<ThemePreset>('cinematic-dark');
 
+  const [themeReady, setThemeReady] = useState(false);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -95,6 +97,8 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
         await setItem('display_density', dn);
         await setItem('theme_preset', tp);
       } catch {}
+
+      if (mounted) setThemeReady(true);
     })();
     return () => {
       mounted = false;
@@ -137,6 +141,8 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     }),
     [mode, density, preset, spacing, typography, presetColors, setMode, setDensity, setPreset],
   );
+
+  if (!themeReady) return null;
 
   return <AppThemeContext.Provider value={value}>{children}</AppThemeContext.Provider>;
 }
