@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIndicator, Linking, RefreshControl } from 'react-native';
 import { ShoppingBag, ExternalLink, Link2 } from 'lucide-react-native';
 import { useLocalSearchParams } from 'expo-router';
@@ -7,6 +8,7 @@ import { getLinkInBioBySlug, getProductsForLinkInBio, type LinkInBioPage, type L
 
 export default function LinkInBioPage() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
+  const mounted = useMountedRef();
   const [page, setPage] = useState<LinkInBioPage | null>(null);
   const [products, setProducts] = useState<LinkInBioProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,13 +28,17 @@ export default function LinkInBioPage() {
       // But we can prefetch images in parallel once products are loaded
       const p = await getLinkInBioBySlug(slug);
       if (!p) {
-        setLoading(false);
-        setRefreshing(false);
+        if (mounted.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
         return;
       }
+      if (!mounted.current) return;
       setPage(p);
 
       const prods = await getProductsForLinkInBio(p.scan_ids);
+      if (!mounted.current) return;
       setProducts(prods);
 
       // Prefetch images for faster rendering
@@ -44,15 +50,15 @@ export default function LinkInBioPage() {
     } catch {
       // silent fail
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [slug]);
 
   useEffect(() => {
-    let mounted = true;
-    loadData().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadData();
   }, [loadData]);
 
   const handleImageLoad = useCallback((scanId: string) => {

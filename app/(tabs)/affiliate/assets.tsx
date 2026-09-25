@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -44,6 +45,7 @@ const TEMPLATES = [
 export default function AssetsScreen() {
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
+  const mounted = useMountedRef();
   const [snippets, setSnippets] = useState<MarketingSnippet[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -57,18 +59,18 @@ export default function AssetsScreen() {
   const load = useCallback(async () => {
     try {
       const data = await fetchSnippets();
+      if (!mounted.current) return;
       setSnippets(data);
     } catch {
+      if (!mounted.current) return;
       setSnippets([]);
     } finally {
-      setRefreshing(false);
+      if (mounted.current) setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    load().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    load();
   }, [load]);
 
   const handleRefresh = () => {

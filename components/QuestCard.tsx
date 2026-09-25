@@ -1,28 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Target, Gift, Check, Zap, ChevronRight } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { getActiveQuests, claimQuestReward, type Quest } from '@/lib/quests';
 
 export function QuestCard() {
+  const mounted = useMountedRef();
   const [quests, setQuests] = useState<Quest[]>([]);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState<string | null>(null);
 
   const loadQuests = useCallback(async () => {
     const q = await getActiveQuests();
+    if (!mounted.current) return;
     setQuests(q);
-    setLoading(false);
+    if (mounted.current) setLoading(false);
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    loadQuests().then(() => {
-      if (!mounted) return;
-    });
-    return () => {
-      mounted = false;
-    };
+    loadQuests();
   }, [loadQuests]);
 
   const handleClaim = useCallback(async (questId: string) => {

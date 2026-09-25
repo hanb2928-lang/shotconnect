@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -86,6 +87,7 @@ export function SmartScheduler({
   affiliateUrl,
   platform = 'shortform',
 }: SmartSchedulerProps) {
+  const mounted = useMountedRef();
   const [schedules, setSchedules] = useState<UploadSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,25 +134,21 @@ export function SmartScheduler({
         .select('*')
         .eq('scan_id', scanId)
         .order('scheduled_time', { ascending: true });
+      if (!mounted.current) return;
       if (queryErr) {
         setError('알림 일정을 불러오지 못했어요.');
       } else {
         setSchedules((data || []) as UploadSchedule[]);
       }
     } catch {
+      if (!mounted.current) return;
       setError('네트워크 오류가 발생했어요.');
     }
-    setLoading(false);
+    if (mounted.current) setLoading(false);
   }, [scanId]);
 
   useEffect(() => {
-    let mounted = true;
-    loadSchedules().then(() => {
-      if (!mounted) return;
-    });
-    return () => {
-      mounted = false;
-    };
+    loadSchedules();
   }, [loadSchedules]);
 
   // Check for due schedules and fire notifications

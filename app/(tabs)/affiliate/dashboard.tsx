@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -17,6 +18,7 @@ import { friendlyError } from '@/lib/errors';
 export default function DashboardScreen() {
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
+  const mounted = useMountedRef();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -27,20 +29,22 @@ export default function DashboardScreen() {
     setLoadError(null);
     try {
       const data = await fetchDashboardSummary();
+      if (!mounted.current) return;
       setSummary(data);
     } catch (err) {
+      if (!mounted.current) return;
       setSummary(null);
       setLoadError(friendlyError(err, '성과 데이터를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    load().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    load();
   }, [load]);
 
   const handleRefresh = () => {

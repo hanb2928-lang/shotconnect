@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -24,6 +25,7 @@ import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 export function ArchiveSection() {
   const router = useRouter();
   const tabBarHeight = useTabBarHeight();
+  const mounted = useMountedRef();
   const [items, setItems] = useState<ArchiveItem[]>([]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -41,6 +43,7 @@ export function ArchiveSection() {
         setRefreshing(true);
       } else {
         const cached = await fetchArchiveListCached();
+        if (!mounted.current) return;
         if (cached) {
           setItems(cached.items);
           setTotal(cached.total);
@@ -49,27 +52,25 @@ export function ArchiveSection() {
       }
 
       const result = await fetchArchiveList(0, sort);
+      if (!mounted.current) return;
       setItems(result.items);
       setTotal(result.total);
       setHasMore(result.hasMore);
       setPage(0);
     } catch {
+      if (!mounted.current) return;
       setError('보관함을 불러올 수 없습니다.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingMore(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+        setLoadingMore(false);
+      }
     }
   }, [sort]);
 
   useEffect(() => {
-    let mounted = true;
-    loadFirstPage().then(() => {
-      if (!mounted) return;
-    });
-    return () => {
-      mounted = false;
-    };
+    loadFirstPage();
   }, [loadFirstPage]);
 
   const loadMore = useCallback(async () => {

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -28,6 +29,7 @@ export default function HistoryScreen() {
   const router = useRouter();
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
+  const mounted = useMountedRef();
   const [scans, setScans] = useState<ScanListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,6 +39,7 @@ export default function HistoryScreen() {
   const fetchScans = useCallback(async (force = false) => {
     if (!force) {
       const cached = await getCached<ScanListItem[]>(CACHE_KEY);
+      if (!mounted.current) return;
       if (cached && cached.length > 0) {
         setScans(cached);
         setUsingCache(true);
@@ -51,8 +54,10 @@ export default function HistoryScreen() {
         .order('created_at', { ascending: false })
         .limit(100);
 
+      if (!mounted.current) return;
       if (err) {
         const stale = await getStaleCached<ScanListItem[]>(CACHE_KEY);
+        if (!mounted.current) return;
         if (stale && stale.length > 0) {
           setScans(stale);
           setUsingCache(true);
@@ -68,7 +73,9 @@ export default function HistoryScreen() {
         await setCached(CACHE_KEY, items);
       }
     } catch {
+      if (!mounted.current) return;
       const stale = await getStaleCached<ScanListItem[]>(CACHE_KEY);
+      if (!mounted.current) return;
       if (stale && stale.length > 0) {
         setScans(stale);
         setUsingCache(true);
@@ -77,15 +84,15 @@ export default function HistoryScreen() {
         setError('네트워크 연결을 확인해주세요');
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    fetchScans().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    fetchScans();
   }, [fetchScans]);
 
   const handleRefresh = () => {

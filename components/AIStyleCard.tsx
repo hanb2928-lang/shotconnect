@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Sparkles, Check, RefreshCw, CircleAlert as AlertCircle, Film, Music, Move, Monitor, Clock } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -58,6 +59,7 @@ export function AIStyleCard({
   platform,
   onApply,
 }: AIStyleCardProps) {
+  const mounted = useMountedRef();
   const [recommendation, setRecommendation] = useState<StyleRecommendation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,22 +96,18 @@ export function AIStyleCard({
         oneLiner,
         platform,
       });
+      if (!mounted.current) return;
       setRecommendation(rec);
     } catch (err) {
+      if (!mounted.current) return;
       setError(friendlyError(err, 'AI 스타일 추천을 불러올 수 없습니다. 잠시 후 다시 시도해주세요.'));
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   }, [productName, productCategory, accentColor, hook, oneLiner, platform]);
 
   useEffect(() => {
-    let mounted = true;
-    load().then(() => {
-      if (!mounted) return;
-    });
-    return () => {
-      mounted = false;
-    };
+    load();
   }, [load]);
 
   useEffect(() => {

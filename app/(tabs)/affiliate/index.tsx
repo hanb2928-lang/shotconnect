@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -241,6 +242,7 @@ export default function AffiliateScreen() {
   const tabBarHeight = useSubTabBarHeight();
   const scrollRef = useRef<ScrollView>(null);
   const stepRefs = useRef<Record<number, View | null>>({});
+  const mounted = useMountedRef();
 
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [revenue, setRevenue] = useState<RevenueRecord[]>([]);
@@ -366,20 +368,20 @@ export default function AffiliateScreen() {
     setLoadError(null);
     try {
       const [s, r] = await Promise.all([getUserSettings(), fetchRevenueRecords(10)]);
+      if (!mounted.current) return;
       setSettings(s);
       setRevenue(r);
       if (s?.auto_disclosure != null) setAutoDisclosure(s.auto_disclosure);
     } catch (err) {
+      if (!mounted.current) return;
       setLoadError(friendlyError(err, '제휴 마케팅 데이터를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'));
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    loadData().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadData();
   }, [loadData]);
 
   useEffect(() => {

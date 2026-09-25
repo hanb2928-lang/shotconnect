@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { Flame, Zap, Check, ChevronDown, ChevronUp, TrendingUp } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -21,6 +22,7 @@ interface TrendCopyBarProps {
 }
 
 export function TrendCopyBar({ productName, productCategory, tags, platform, onApplyTrend }: TrendCopyBarProps) {
+  const mounted = useMountedRef();
   const [trends, setTrends] = useState<TrendCopy[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -47,29 +49,26 @@ export function TrendCopyBar({ productName, productCategory, tags, platform, onA
       });
       if (resp.ok) {
         const data = await resp.json();
+        if (!mounted.current) return;
         if (data.trends && Array.isArray(data.trends)) {
           setTrends(data.trends);
         } else {
           setError(true);
         }
       } else {
+        if (!mounted.current) return;
         setError(true);
       }
     } catch {
+      if (!mounted.current) return;
       setError(true);
     }
-    setLoading(false);
+    if (mounted.current) setLoading(false);
   }, [productName, productCategory, tags, platform]);
 
   useEffect(() => {
     if (productName || productCategory) {
-      let mounted = true;
-      fetchTrends().then(() => {
-        if (!mounted) return;
-      });
-      return () => {
-        mounted = false;
-      };
+      fetchTrends();
     }
   }, [fetchTrends]);
 

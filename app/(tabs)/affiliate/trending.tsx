@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -126,6 +127,7 @@ export default function TrendingScreen() {
   const tabBarHeight = useSubTabBarHeight();
   const router = useRouter();
   const safeTop = useSafeTop();
+  const mounted = useMountedRef();
   const [viewMode, setViewMode] = useState<ViewMode>('products');
   const [marketplace, setMarketplace] = useState<Marketplace>('coupang');
   const [activeProductPlatform, setActiveProductPlatform] = useState<ProductPlatformKey>('coupang');
@@ -174,13 +176,17 @@ export default function TrendingScreen() {
       if (fetchedCategories.length === 0) throw new Error('인기 상품을 불러올 수 없습니다.');
 
       productCache.set(mp, { data: fetchedCategories, ts: Date.now() });
+      if (!mounted.current) return;
       setCategories(fetchedCategories);
       setActiveCategory(0);
     } catch (err) {
+      if (!mounted.current) return;
       setError(err instanceof Error ? err.message : '인기 상품 로딩 실패');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
@@ -197,22 +203,22 @@ export default function TrendingScreen() {
       });
       if (!resp.ok) throw new Error('키워드 트렌드 로딩 실패');
       const data = await resp.json();
+      if (!mounted.current) return;
       setKeywordGroups(data.groups || []);
     } catch (err) {
+      if (!mounted.current) return;
       setKeywordError(err instanceof Error ? err.message : '키워드 트렌드 로딩 실패');
     } finally {
-      setKeywordLoading(false);
+      if (mounted.current) setKeywordLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
     if (viewMode === 'products') {
-      fetchTrending(marketplace).then(() => { if (!mounted) return; });
+      fetchTrending(marketplace);
     } else if (viewMode === 'keywords' && keywordGroups.length === 0) {
-      fetchKeywordTrends().then(() => { if (!mounted) return; });
+      fetchKeywordTrends();
     }
-    return () => { mounted = false; };
   }, [marketplace, viewMode, fetchTrending, fetchKeywordTrends, keywordGroups.length]);
 
   const handleMarketplaceChange = (mp: Marketplace) => {

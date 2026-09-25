@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -112,6 +113,7 @@ export default function AssetsScreen() {
   const [remixing, setRemixing] = useState(false);
   const [remixDone, setRemixDone] = useState(false);
   const remixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mounted = useMountedRef();
 
   const sortedAssets = useMemo(() => {
     const sorted = [...assets];
@@ -131,19 +133,21 @@ export default function AssetsScreen() {
   const fetchAssets = useCallback(async () => {
     try {
       const data = await fetchSavedAssets();
+      if (!mounted.current) return;
       setAssets(data);
     } catch {
+      if (!mounted.current) return;
       setAssets([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    fetchAssets().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    fetchAssets();
   }, [fetchAssets]);
 
   // Garbage collection: on screen focus, filter out assets whose file_url

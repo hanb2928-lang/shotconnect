@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -82,6 +83,7 @@ interface DaySlide {
 export default function WarmupScreen() {
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
+  const mounted = useMountedRef();
   const [schedules, setSchedules] = useState<WarmupScheduleWithTasks[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -114,6 +116,7 @@ export default function WarmupScreen() {
     setLoadError(null);
     try {
       const data = await fetchActiveSchedules();
+      if (!mounted.current) return;
       setSchedules(data);
       if (data.length > 0 && !selectedScheduleIdRef.current) {
         setSelectedScheduleId(data[0].id);
@@ -123,18 +126,19 @@ export default function WarmupScreen() {
         setSelectedScheduleId(null);
       }
     } catch (err) {
+      if (!mounted.current) return;
       setSchedules([]);
       setLoadError(friendlyError(err, '육성 스케줄을 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    loadData().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadData();
   }, [loadData]);
 
   const handleRefresh = () => {

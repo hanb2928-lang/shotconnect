@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import { useRouter } from 'expo-router';
 import {
   View,
@@ -60,6 +61,7 @@ import { fetchRecentLogs, SESSION_ID } from '@/lib/errorLogger';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const mounted = useMountedRef();
   const { t, language, setLanguage } = useI18n();
   const { setPreset: applyThemePreset, setMode: applyThemeMode, colors: dynamicColors, baseTheme: dynamicBaseTheme, spacing: dynamicSpacing, typography: dynamicTypography, presetColors } = useAppTheme();
   const theme = {
@@ -158,6 +160,7 @@ export default function SettingsScreen() {
   const loadSettings = useCallback(async () => {
     try {
       const data = await getUserSettings();
+      if (!mounted.current) return;
       setSettings(data);
       setCoupangId(data?.coupang_partners_id || '');
       setNaverId(data?.naver_shopping_id || '');
@@ -191,77 +194,78 @@ export default function SettingsScreen() {
       setAutoPublishShorts(data?.auto_publish_shorts ?? false);
       setSandboxMode(data?.auto_publish_sandbox_mode ?? true);
     } catch {
+      if (!mounted.current) return;
       setSettings(null);
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   }, []);
 
   const loadRevenues = useCallback(async () => {
     try {
       const data = await fetchRevenueRecords(20);
+      if (!mounted.current) return;
       setRevenues(data);
     } catch {
+      if (!mounted.current) return;
       setRevenues([]);
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    loadSettings().then(() => { if (!mounted) return; });
-    loadRevenues().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadSettings();
+    loadRevenues();
   }, [loadSettings, loadRevenues]);
 
   const loadPlatforms = useCallback(async () => {
     setPlatformsLoading(true);
     try {
       const data = await fetchManagedPlatforms();
+      if (!mounted.current) return;
       setManagedPlatforms(data);
     } catch {
+      if (!mounted.current) return;
       setManagedPlatforms([]);
     }
-    setPlatformsLoading(false);
+    if (mounted.current) setPlatformsLoading(false);
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    loadPlatforms().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadPlatforms();
   }, [loadPlatforms]);
 
   const loadAffiliatePlatforms = useCallback(async () => {
     setAffiliatePlatformsLoading(true);
     try {
       const data = await fetchAffiliatePlatforms();
+      if (!mounted.current) return;
       setAffiliatePlatforms(data);
     } catch {
+      if (!mounted.current) return;
       setAffiliatePlatforms([]);
     }
-    setAffiliatePlatformsLoading(false);
+    if (mounted.current) setAffiliatePlatformsLoading(false);
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    loadAffiliatePlatforms().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadAffiliatePlatforms();
   }, [loadAffiliatePlatforms]);
 
   const loadCredits = useCallback(async () => {
     try {
       const [bal, hist] = await Promise.all([getCreditBalance(), getCreditHistory(10)]);
+      if (!mounted.current) return;
       setCreditBalance(bal);
       setCreditHistory(hist);
     } catch {
+      if (!mounted.current) return;
       setCreditBalance(null);
       setCreditHistory([]);
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    loadCredits().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadCredits();
   }, [loadCredits]);
 
   const handleRestorePurchases = async () => {

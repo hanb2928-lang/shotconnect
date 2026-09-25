@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -106,17 +107,20 @@ export default function AnalyticsScreen() {
   const [calcCvr, setCalcCvr] = useState('3');
   const [calcCommission, setCalcCommission] = useState('3000');
   const prevNonEmpty = useRef(false);
+  const mounted = useMountedRef();
 
   const loadData = useCallback(async () => {
     try {
       setLoadError(null);
       const d = await fetchDashboardSummary();
+      if (!mounted.current) return;
       setData(d);
       setLastUpdated(Date.now());
       setUsingCache(false);
       await setCached('dashboard_summary', d);
     } catch {
       const stale = await getStaleCached<DashboardSummary>('dashboard_summary');
+      if (!mounted.current) return;
       if (stale) {
         setData(stale);
         setUsingCache(true);
@@ -125,15 +129,15 @@ export default function AnalyticsScreen() {
         setLoadError(t('analytics.error.load'));
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [t]);
 
   useEffect(() => {
-    let mounted = true;
-    loadData().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    loadData();
   }, [loadData]);
 
   const handleRefresh = () => {

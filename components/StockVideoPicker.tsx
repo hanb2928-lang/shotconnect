@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -44,6 +45,7 @@ export function StockVideoPicker({
   selectedClip,
   onSelectClip,
 }: StockVideoPickerProps) {
+  const mounted = useMountedRef();
   const [clips, setClips] = useState<StockVideoClip[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,15 +112,19 @@ export function StockVideoPicker({
     startProgress();
     try {
       const results = await searchStockVideos(query, orientation, 12, mediaType);
+      if (!mounted.current) return;
       setClips(results);
       if (results.length === 0) {
         setError(mediaType === 'image' ? '검색된 이미지가 없습니다. 다른 키워드로 시도해보세요.' : '검색된 영상이 없습니다. 다른 키워드로 시도해보세요.');
       }
     } catch (err) {
+      if (!mounted.current) return;
       setError(err instanceof Error ? err.message : (mediaType === 'image' ? '이미지 검색에 실패했습니다.' : '영상 검색에 실패했습니다.'));
     } finally {
-      finishProgress();
-      setLoading(false);
+      if (mounted.current) {
+        finishProgress();
+        setLoading(false);
+      }
     }
   }, [buildQuery, orientation, startProgress, finishProgress, mediaType]);
 
@@ -470,13 +476,7 @@ export function StockVideoPicker({
     if (query && autoSearchedRef.current !== `${query}:${mediaType}` && !loading) {
       autoSearchedRef.current = `${query}:${mediaType}`;
       setSearchQuery('');
-      let mounted = true;
-      handleSearch().then(() => {
-        if (!mounted) return;
-      });
-      return () => {
-        mounted = false;
-      };
+      handleSearch();
     }
   }, [productName, productCategory, handleSearch, loading, mediaType]);
 

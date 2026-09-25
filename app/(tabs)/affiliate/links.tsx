@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -45,6 +46,7 @@ const PLATFORM_OPTIONS = [
 export default function LinksScreen() {
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
+  const mounted = useMountedRef();
   const [bookmarks, setBookmarks] = useState<LinkBookmark[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -63,20 +65,22 @@ export default function LinksScreen() {
     setLoadError(null);
     try {
       const data = await fetchLinkBookmarks();
+      if (!mounted.current) return;
       setBookmarks(data);
     } catch (err) {
+      if (!mounted.current) return;
       setLoadError(friendlyError(err, '링크 목록을 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'));
       setBookmarks([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    load().then(() => { if (!mounted) return; });
-    return () => { mounted = false; };
+    load();
   }, [load]);
 
   const handleRefresh = () => {
