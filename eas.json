@@ -11,12 +11,12 @@
       "android": {
         "buildType": "apk"
       },
-      "image": "latest",
+      "image": "ubuntu-22.04-android-36-ndk-r27c",
       "nodeVersion": "20",
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
-        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Xmx4096m",
+        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Dorg.gradle.caching=false -Dorg.gradle.parallel=false -Xmx4096m -XX:MaxMetaspaceSize=1024m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
       }
@@ -26,12 +26,12 @@
       "android": {
         "buildType": "apk"
       },
-      "image": "latest",
+      "image": "ubuntu-22.04-android-36-ndk-r27c",
       "nodeVersion": "20",
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
-        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Xmx4096m",
+        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Dorg.gradle.caching=false -Dorg.gradle.parallel=false -Xmx4096m -XX:MaxMetaspaceSize=1024m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
       }
@@ -40,13 +40,13 @@
       "android": {
         "buildType": "app-bundle"
       },
-      "image": "latest",
+      "image": "ubuntu-22.04-android-36-ndk-r27c",
       "nodeVersion": "20",
       "channel": "production",
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
-        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Xmx4096m",
+        "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Dorg.gradle.caching=false -Dorg.gradle.parallel=false -Xmx4096m -XX:MaxMetaspaceSize=1024m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzanFtaHVodm1pZWtkbnZkZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NzEsImV4cCI6MjEwNTU1ODY3MX0.tJOzPnjVlxXAqOYbZpf-WVzN8j6NoVNspxepkLVU5Yc"
       }

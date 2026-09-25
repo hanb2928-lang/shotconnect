@@ -11,6 +11,8 @@ tests/
 supabase/tests/
 supabase/functions/_shared/
 playwright.config.ts
+playwright-report/
+test-results/
 jest.config.js
 jest.setup.ts
 eslint.config.js
@@ -18,3 +20,4 @@ eslint.config.js
 .git/
 .gitignore
 .easignore
+scripts/

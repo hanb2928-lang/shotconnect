@@ -14,11 +14,15 @@ module.exports = function withGradleJvmArgs(config) {
     };
 
     set('org.gradle.jvmargs', '-Xmx4096m -XX:MaxMetaspaceSize=1024m -Dorg.gradle.daemon=false -XX:+UseParallelGC');
+    set('org.gradle.parallel', 'false');
     set('org.gradle.workers.max', '4');
     set('org.gradle.configureondemand', 'false');
     set('org.gradle.configuration-cache', 'false');
-    set('org.gradle.caching', 'true');
+    set('org.gradle.caching', 'false');
     set('android.suppressUnsupportedCompileSdk', '36');
+    set('android.builder.sdkDownload', 'true');
+
+    set('AsyncStorage_next_kspVersion', '2.1.20-2.0.1');
 
     return config;
   });
