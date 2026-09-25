@@ -98,17 +98,17 @@ export function useVideoJobRecovery() {
 
   useEffect(() => {
     // Check on mount in case app was backgrounded and reopened
-    runRecovery();
+    runRecovery().catch(() => {});
 
     const handleVisibility = () => {
       if (typeof document === 'undefined') return;
       if (!document.hidden) {
-        runRecovery();
+        runRecovery().catch(() => {});
       }
     };
 
     const handleOnline = () => {
-      runRecovery();
+      runRecovery().catch(() => {});
     };
 
     let cleanupFns: (() => void)[] = [];
