@@ -90,7 +90,6 @@ export default function LinksScreen() {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(copyText);
       } else {
-        const { default: Clipboard } = await import('expo-clipboard');
         await Clipboard.setStringAsync(copyText);
       }
       setCopiedId(bookmark.id);

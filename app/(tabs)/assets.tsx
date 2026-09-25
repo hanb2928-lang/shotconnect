@@ -32,6 +32,7 @@ import {
   type UploadPlatformKey,
 } from '@/lib/platformUpload';
 import { getTrendingSuggestions } from '@/lib/trendingHashtags';
+import * as Clipboard from 'expo-clipboard';
 
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -256,7 +257,6 @@ export default function AssetsScreen() {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(text);
       } else {
-        const { default: Clipboard } = await import('expo-clipboard');
         await Clipboard.setStringAsync(text);
       }
       return true;

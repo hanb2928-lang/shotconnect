@@ -26,6 +26,7 @@ import { theme } from '@/lib/theme';
 import { useSubTabBarHeight } from '@/hooks/useSubTabBarHeight';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { fetchSnippets, addSnippet, deleteSnippet } from '@/lib/marketingSnippets';
+import * as Clipboard from 'expo-clipboard';
 import type { MarketingSnippet } from '@/types/database';
 
 const SNIPPET_TYPES = [
@@ -80,7 +81,6 @@ export default function AssetsScreen() {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(snippet.content);
       } else {
-        const { default: Clipboard } = await import('expo-clipboard');
         await Clipboard.setStringAsync(snippet.content);
       }
       setCopiedId(snippet.id);

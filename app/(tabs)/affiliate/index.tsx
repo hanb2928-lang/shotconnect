@@ -27,7 +27,7 @@ import { CapturePreviewModal } from '@/components/CapturePreviewModal';
 import { UploadPreviewModal, type UploadPreviewData } from '@/components/UploadPreviewModal';
 import { ClipboardAffiliateBanner } from '@/components/ClipboardAffiliateBanner';
 import { ShortLinkCopyBar } from '@/components/ShortLinkCopyBar';
-import { buildDataUrl, cleanBase64 } from '@/lib/base64';
+import { buildDataUrl, cleanBase64, urlToDataUrl } from '@/lib/base64';
 import { compressImageToBase64 } from '@/lib/imageEdit';
 import { pickImageWeb, isWebPlatform } from '@/lib/webImagePicker';
 import { saveManualScan, uploadImage, analyzeImage, analyzeImageWithProductContext, extractProductMeta, updateScanWithAnalysis } from '@/lib/analysis';
@@ -54,6 +54,7 @@ import type { EditPlan } from '@/lib/videoEditPlan';
 import { MessageSquare } from 'lucide-react-native';
 import type { UserSettings, RevenueRecord } from '@/types/database';
 import { GENERATE_IMAGE_URL, supabaseAnonKey } from '@/lib/supabase';
+import * as Clipboard from 'expo-clipboard';
 
 const PLATFORMS = [
   { key: 'Coupang', label: '쿠팡 파트너스', icon: ShoppingBag, color: '#FF3E3E', signupUrl: 'https://partners.coupang.com/', desc: '쿠팡 상품 링크를 공유하고 수수료를 받으세요' },
@@ -424,7 +425,6 @@ export default function AffiliateScreen() {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(url);
       } else {
-        const { default: Clipboard } = await import('expo-clipboard');
         await Clipboard.setStringAsync(url);
       }
       setCopiedPlatform(platform);
@@ -547,7 +547,6 @@ export default function AffiliateScreen() {
       } else if (newMeta.image) {
         // Fallback: try browser-side fetch (may fail due to CORS)
         try {
-          const { urlToDataUrl } = await import('@/lib/base64');
           const dataUrl = await urlToDataUrl(newMeta.image);
           setSelectedImage(cleanBase64(dataUrl));
           setSelectedImageMime('image/jpeg');
@@ -911,7 +910,6 @@ export default function AffiliateScreen() {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(text);
       } else {
-        const { default: Clipboard } = await import('expo-clipboard');
         await Clipboard.setStringAsync(text);
       }
     } catch {
@@ -933,7 +931,6 @@ export default function AffiliateScreen() {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(script);
       } else {
-        const { default: Clipboard } = await import('expo-clipboard');
         await Clipboard.setStringAsync(script);
       }
       setCopyFeedback(key);

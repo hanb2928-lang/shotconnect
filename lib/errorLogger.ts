@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { Alert } from 'react-native';
+import { supabase } from '@/lib/supabase';
 
 const APP_VERSION = '1.0.0';
 
@@ -41,7 +42,6 @@ async function flushQueue(): Promise<void> {
   isFlushing = true;
   const batch = pendingQueue.splice(0, 10);
   try {
-    const { supabase } = await import('@/lib/supabase');
     const rows = batch.map((item) => ({
       level: item.level,
       message: item.message,
@@ -216,7 +216,6 @@ export async function fetchRecentLogs(limit = 50): Promise<{
   session_id: string | null;
   created_at: string;
 }[]> {
-  const { supabase } = await import('@/lib/supabase');
   const { data, error } = await supabase
     .from('error_logs')
     .select('id, level, message, stack, context, platform, app_version, session_id, created_at')

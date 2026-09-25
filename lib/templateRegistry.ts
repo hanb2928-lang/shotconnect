@@ -1,4 +1,5 @@
 import type { TemplateRegistryEntry, CardStyleKey, PlatformKey } from '@/types/database';
+import { supabase } from '@/lib/supabase';
 
 const CATEGORY_ALIASES: Record<string, string> = {
   '뷰티': 'beauty',
@@ -112,7 +113,6 @@ async function fetchAllTemplates(): Promise<TemplateRegistryEntry[]> {
 
   fetchPromise = (async () => {
     try {
-      const { supabase } = await import('@/lib/supabase');
       const queryPromise = supabase
         .from('template_registry')
         .select('*');

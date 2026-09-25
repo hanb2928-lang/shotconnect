@@ -315,7 +315,6 @@ export function ShoppingMatchCard({
     if (!propShortUrl) {
       setGeneratingShortUrl(true);
       try {
-        const { createShortLink } = await import('@/lib/shortUrl');
         const short = await createShortLink(trimmed, scanId);
         setLocalShortUrl(short);
       } catch {

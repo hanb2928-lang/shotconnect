@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Platform } from 'react-native';
+import { supabase } from '@/lib/supabase';
 
 type PermissionState = 'default' | 'granted' | 'denied' | 'unsupported';
 
@@ -96,7 +97,6 @@ export function useWebPush(): UseWebPushResult {
       }
 
       // Check auth before subscribing to avoid orphaned browser subscriptions
-      const { supabase } = await import('@/lib/supabase');
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       if (!userId) {
@@ -142,7 +142,6 @@ export function useWebPush(): UseWebPushResult {
         await sub.unsubscribe();
       }
 
-      const { supabase } = await import('@/lib/supabase');
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       if (userId && endpoint) {
@@ -167,7 +166,6 @@ export function useWebPush(): UseWebPushResult {
 
 async function fetchVapidKey(): Promise<string | null> {
   try {
-    const { supabase } = await import('@/lib/supabase');
     const { data, error } = await supabase.functions.invoke('send-push', {
       method: 'GET',
     });
