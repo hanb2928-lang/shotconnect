@@ -56,10 +56,15 @@ export function GpuAutoscaleCard() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       await loadConfig();
+      if (!mounted) return;
       setLoading(false);
     })();
+    return () => {
+      mounted = false;
+    };
   }, [loadConfig]);
 
   const handleToggle = async () => {

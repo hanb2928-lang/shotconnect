@@ -20,7 +20,14 @@ export function ShareCooldownModal({ visible, onClose, onProceed, platform }: Sh
 
   useEffect(() => {
     if (visible) {
-      checkShareCooldown().then(setCooldown);
+      let mounted = true;
+      checkShareCooldown().then((result) => {
+        if (!mounted) return;
+        setCooldown(result);
+      });
+      return () => {
+        mounted = false;
+      };
     }
   }, [visible]);
 

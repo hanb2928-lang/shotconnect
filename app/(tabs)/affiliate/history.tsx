@@ -83,7 +83,9 @@ export default function HistoryScreen() {
   }, []);
 
   useEffect(() => {
-    fetchScans();
+    let mounted = true;
+    fetchScans().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [fetchScans]);
 
   const handleRefresh = () => {

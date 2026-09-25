@@ -8,10 +8,15 @@ export function TierBadge() {
   const [tier, setTier] = useState<CreatorTier | null>(null);
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       const t = await getOrCreateTier();
+      if (!mounted) return;
       setTier(t);
     })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   if (!tier) return null;

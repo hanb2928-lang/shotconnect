@@ -1694,8 +1694,10 @@ export default function ResultScreen() {
   }, [scan?.analysis_job_id, analysisStatus]);
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       const saved = await getItem('preferred_template_style');
+      if (!mounted) return;
       if (saved) {
         setActivePlatform(saved as PlatformKey);
         setActiveBoard(getPlatformMediaType(saved as PlatformKey));
@@ -1704,6 +1706,9 @@ export default function ResultScreen() {
       // Studio tone no longer auto-enables clean video mode — overlays should be visible
       // Users can still manually toggle clean mode via the UI switch
     })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handlePlatformChange = useCallback((key: PlatformKey) => {

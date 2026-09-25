@@ -103,7 +103,13 @@ export function AIStyleCard({
   }, [productName, productCategory, accentColor, hook, oneLiner, platform]);
 
   useEffect(() => {
-    load();
+    let mounted = true;
+    load().then(() => {
+      if (!mounted) return;
+    });
+    return () => {
+      mounted = false;
+    };
   }, [load]);
 
   useEffect(() => {

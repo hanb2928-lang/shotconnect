@@ -21,8 +21,10 @@ export function CreatorPersonaCard() {
   const [color, setColor] = useState('');
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       const p = await getOrCreatePersona();
+      if (!mounted) return;
       if (p) {
         setPersona(p);
         setOpening(p.signature_opening ?? '');
@@ -32,6 +34,9 @@ export function CreatorPersonaCard() {
       }
       setLoading(false);
     })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleSave = useCallback(async () => {

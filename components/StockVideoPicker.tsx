@@ -470,7 +470,13 @@ export function StockVideoPicker({
     if (query && autoSearchedRef.current !== `${query}:${mediaType}` && !loading) {
       autoSearchedRef.current = `${query}:${mediaType}`;
       setSearchQuery('');
-      handleSearch();
+      let mounted = true;
+      handleSearch().then(() => {
+        if (!mounted) return;
+      });
+      return () => {
+        mounted = false;
+      };
     }
   }, [productName, productCategory, handleSearch, loading, mediaType]);
 

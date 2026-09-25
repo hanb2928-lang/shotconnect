@@ -206,11 +206,13 @@ export default function TrendingScreen() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
     if (viewMode === 'products') {
-      fetchTrending(marketplace);
+      fetchTrending(marketplace).then(() => { if (!mounted) return; });
     } else if (viewMode === 'keywords' && keywordGroups.length === 0) {
-      fetchKeywordTrends();
+      fetchKeywordTrends().then(() => { if (!mounted) return; });
     }
+    return () => { mounted = false; };
   }, [marketplace, viewMode, fetchTrending, fetchKeywordTrends, keywordGroups.length]);
 
   const handleMarketplaceChange = (mp: Marketplace) => {

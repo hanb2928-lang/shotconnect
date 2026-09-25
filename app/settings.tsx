@@ -207,8 +207,10 @@ export default function SettingsScreen() {
   }, []);
 
   useEffect(() => {
-    loadSettings();
-    loadRevenues();
+    let mounted = true;
+    loadSettings().then(() => { if (!mounted) return; });
+    loadRevenues().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [loadSettings, loadRevenues]);
 
   const loadPlatforms = useCallback(async () => {
@@ -222,7 +224,11 @@ export default function SettingsScreen() {
     setPlatformsLoading(false);
   }, []);
 
-  useEffect(() => { loadPlatforms(); }, [loadPlatforms]);
+  useEffect(() => {
+    let mounted = true;
+    loadPlatforms().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
+  }, [loadPlatforms]);
 
   const loadAffiliatePlatforms = useCallback(async () => {
     setAffiliatePlatformsLoading(true);
@@ -235,7 +241,11 @@ export default function SettingsScreen() {
     setAffiliatePlatformsLoading(false);
   }, []);
 
-  useEffect(() => { loadAffiliatePlatforms(); }, [loadAffiliatePlatforms]);
+  useEffect(() => {
+    let mounted = true;
+    loadAffiliatePlatforms().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
+  }, [loadAffiliatePlatforms]);
 
   const loadCredits = useCallback(async () => {
     try {
@@ -249,7 +259,9 @@ export default function SettingsScreen() {
   }, []);
 
   useEffect(() => {
-    loadCredits();
+    let mounted = true;
+    loadCredits().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [loadCredits]);
 
   const handleRestorePurchases = async () => {

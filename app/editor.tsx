@@ -193,6 +193,7 @@ export default function EditorScreen() {
 
   useEffect(() => {
     if (!id) return;
+    let mounted = true;
     (async () => {
       try {
         const { data, error: err } = await supabase
@@ -201,6 +202,7 @@ export default function EditorScreen() {
           .eq('id', id)
           .maybeSingle();
 
+        if (!mounted) return;
         if (err) {
           setError(err.message);
           setLoading(false);
@@ -244,6 +246,7 @@ export default function EditorScreen() {
           }
         }
 
+        if (!mounted) return;
         setImageUri(uri);
         setOriginalUri(scanData.image_url);
         // Build all-images list: primary + additional
@@ -251,19 +254,22 @@ export default function EditorScreen() {
         setAllImages([scanData.image_url, ...additional]);
         try {
           const size = await getImageSize(uri);
+          if (!mounted) return;
           setImageSize(size);
         } catch {
           // size detection will retry — use a safe default so layout doesn't jump
           setImageSize({ width: imageDisplayWidth, height: imageDisplayHeight });
         }
       } catch (err) {
+        if (!mounted) return;
         setError(err instanceof Error ? err.message : '데이터를 불러올 수 없습니다');
       } finally {
-        // Small delay lets the Image component begin decoding before we reveal,
-        // avoiding a flash of empty layout on native.
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     })();
+    return () => {
+      mounted = false;
+    };
   }, [id]);
 
   // Reset is handled inline; no separate imageLoaded flag needed.

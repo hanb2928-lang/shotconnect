@@ -163,9 +163,14 @@ export default function CameraScreen() {
   const postCaptureVideoUriRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
     getItem('content_tone').then((saved) => {
+      if (!mounted) return;
       if (saved === 'studio' || saved === 'raw') setContentTone(saved as ContentTone);
     });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleContentToneChange = useCallback((tone: ContentTone) => {

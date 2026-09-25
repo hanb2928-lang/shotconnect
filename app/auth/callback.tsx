@@ -13,6 +13,7 @@ export default function AuthCallback() {
   useEffect(() => {
     if (redirectedRef.current) return;
     redirectedRef.current = true;
+    let mounted = true;
 
     const access_token = Array.isArray(params.access_token) ? params.access_token[0] : params.access_token;
     const refresh_token = Array.isArray(params.refresh_token) ? params.refresh_token[0] : params.refresh_token;
@@ -26,13 +27,18 @@ export default function AuthCallback() {
 
     if (access_token && refresh_token) {
       supabase.auth.setSession({ access_token, refresh_token }).then(() => {
+        if (!mounted) return;
         router.replace('/(tabs)/index');
       }).catch(() => {
+        if (!mounted) return;
         setError('세션 설정에 실패했습니다. 다시 시도해주세요.');
       });
     } else {
       setError('인증 정보를 받지 못했습니다. 다시 시도해주세요.');
     }
+    return () => {
+      mounted = false;
+    };
   }, [params, router]);
 
   if (error) {

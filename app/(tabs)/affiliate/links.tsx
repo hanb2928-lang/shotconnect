@@ -74,7 +74,9 @@ export default function LinksScreen() {
   }, []);
 
   useEffect(() => {
-    load();
+    let mounted = true;
+    load().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [load]);
 
   const handleRefresh = () => {

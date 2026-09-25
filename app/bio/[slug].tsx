@@ -50,7 +50,9 @@ export default function LinkInBioPage() {
   }, [slug]);
 
   useEffect(() => {
-    loadData();
+    let mounted = true;
+    loadData().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [loadData]);
 
   const handleImageLoad = useCallback((scanId: string) => {

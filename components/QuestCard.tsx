@@ -16,7 +16,13 @@ export function QuestCard() {
   }, []);
 
   useEffect(() => {
-    loadQuests();
+    let mounted = true;
+    loadQuests().then(() => {
+      if (!mounted) return;
+    });
+    return () => {
+      mounted = false;
+    };
   }, [loadQuests]);
 
   const handleClaim = useCallback(async (questId: string) => {

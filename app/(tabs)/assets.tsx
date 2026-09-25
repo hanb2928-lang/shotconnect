@@ -139,7 +139,11 @@ export default function AssetsScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchAssets(); }, [fetchAssets]);
+  useEffect(() => {
+    let mounted = true;
+    fetchAssets().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
+  }, [fetchAssets]);
 
   // Garbage collection: on screen focus, filter out assets whose file_url
   // is expired or invalid (e.g. blob: URIs from a previous session that no longer exist).

@@ -63,7 +63,13 @@ export function TrendCopyBar({ productName, productCategory, tags, platform, onA
 
   useEffect(() => {
     if (productName || productCategory) {
-      fetchTrends();
+      let mounted = true;
+      fetchTrends().then(() => {
+        if (!mounted) return;
+      });
+      return () => {
+        mounted = false;
+      };
     }
   }, [fetchTrends]);
 

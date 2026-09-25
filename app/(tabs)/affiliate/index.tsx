@@ -376,7 +376,9 @@ export default function AffiliateScreen() {
   }, []);
 
   useEffect(() => {
-    loadData();
+    let mounted = true;
+    loadData().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [loadData]);
 
   useEffect(() => {

@@ -132,7 +132,9 @@ export default function WarmupScreen() {
   }, []);
 
   useEffect(() => {
-    loadData();
+    let mounted = true;
+    loadData().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [loadData]);
 
   const handleRefresh = () => {

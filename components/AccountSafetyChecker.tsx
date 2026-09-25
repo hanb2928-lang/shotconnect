@@ -49,8 +49,10 @@ export function AccountSafetyChecker({
 
   useEffect(() => {
     if (!visible) return;
+    let mounted = true;
     (async () => {
       const stored = await getItem(STORAGE_KEY);
+      if (!mounted) return;
       if (stored) {
         try {
           setRecords(JSON.parse(stored));
@@ -59,6 +61,9 @@ export function AccountSafetyChecker({
         }
       }
     })();
+    return () => {
+      mounted = false;
+    };
   }, [visible]);
 
   const assessment: SafetyAssessment = useMemo(

@@ -98,9 +98,11 @@ export default function MarketingScreen() {
   const lastActionRef = useRef(0);
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       try {
         const settings = await getUserSettings();
+        if (!mounted) return;
         if (settings?.default_caption_tone) {
           const toneMap: Record<string, string> = {
             casual: 'hook',
@@ -113,11 +115,15 @@ export default function MarketingScreen() {
         const savedStoreName = await getItem('marketing_store_name');
         const savedMenu = await getItem('marketing_signature_menu');
         const savedPromo = await getItem('marketing_promo_text');
+        if (!mounted) return;
         if (savedStoreName) setStoreName(savedStoreName);
         if (savedMenu) setSignatureMenu(savedMenu);
         if (savedPromo) setPromoText(savedPromo);
       } catch {}
     })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useFocusEffect(

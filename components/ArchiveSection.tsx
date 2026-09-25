@@ -63,7 +63,13 @@ export function ArchiveSection() {
   }, [sort]);
 
   useEffect(() => {
-    loadFirstPage();
+    let mounted = true;
+    loadFirstPage().then(() => {
+      if (!mounted) return;
+    });
+    return () => {
+      mounted = false;
+    };
   }, [loadFirstPage]);
 
   const loadMore = useCallback(async () => {

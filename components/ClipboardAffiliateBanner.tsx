@@ -83,10 +83,15 @@ export function ClipboardAffiliateBanner({ onInsert, currentUrl }: ClipboardAffi
   }, [currentUrl]);
 
   useEffect(() => {
+    let mounted = true;
     const timer = setTimeout(() => {
+      if (!mounted) return;
       checkClipboard();
     }, 600);
-    return () => clearTimeout(timer);
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
   }, [checkClipboard]);
 
   const handleInsert = () => {

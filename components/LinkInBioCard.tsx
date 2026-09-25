@@ -26,8 +26,10 @@ export function LinkInBioCard({ scanId, scanTitle }: LinkInBioCardProps) {
   const [included, setIncluded] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       const p = await getOrCreateLinkInBio();
+      if (!mounted) return;
       if (p) {
         setPage(p);
         setIncluded(p.scan_ids.includes(scanId));
@@ -35,6 +37,9 @@ export function LinkInBioCard({ scanId, scanTitle }: LinkInBioCardProps) {
       }
       setLoading(false);
     })();
+    return () => {
+      mounted = false;
+    };
   }, [scanId]);
 
   const bioUrl = page ? buildLinkInBioUrl(page.slug) : '';

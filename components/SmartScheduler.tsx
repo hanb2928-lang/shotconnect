@@ -144,7 +144,13 @@ export function SmartScheduler({
   }, [scanId]);
 
   useEffect(() => {
-    loadSchedules();
+    let mounted = true;
+    loadSchedules().then(() => {
+      if (!mounted) return;
+    });
+    return () => {
+      mounted = false;
+    };
   }, [loadSchedules]);
 
   // Check for due schedules and fire notifications

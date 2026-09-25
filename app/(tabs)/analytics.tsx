@@ -131,7 +131,9 @@ export default function AnalyticsScreen() {
   }, [t]);
 
   useEffect(() => {
-    loadData();
+    let mounted = true;
+    loadData().then(() => { if (!mounted) return; });
+    return () => { mounted = false; };
   }, [loadData]);
 
   const handleRefresh = () => {
