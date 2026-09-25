@@ -11,6 +11,7 @@
       "android": {
         "buildType": "apk"
       },
+      "image": "latest",
       "env": {
         "EAS_NO_VCS": "1",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
@@ -23,6 +24,7 @@
       "android": {
         "buildType": "apk"
       },
+      "image": "latest",
       "env": {
         "EAS_NO_VCS": "1",
         "EXPO_PUBLIC_SUPABASE_URL": "https://asjqmhuhvmiekdnvddjv.supabase.co",
@@ -35,6 +37,7 @@
       "android": {
         "buildType": "apk"
       },
+      "image": "latest",
       "channel": "production",
       "env": {
         "EAS_NO_VCS": "1",
