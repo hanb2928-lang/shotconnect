@@ -146,13 +146,18 @@ export default function RootLayout() {
       }
     };
 
-    const sub = Linking.addEventListener('url', ({ url }) => handleDeepLink(url));
-    Linking.getInitialURL().then((url) => {
-      if (url) handleDeepLink(url);
-    });
+    let sub: { remove: () => void } | null = null;
+    if (typeof Linking.addEventListener === 'function') {
+      sub = Linking.addEventListener('url', ({ url }) => handleDeepLink(url));
+    }
+    if (typeof Linking.getInitialURL === 'function') {
+      Linking.getInitialURL().then((url) => {
+        if (url) handleDeepLink(url);
+      }).catch(() => {});
+    }
 
     return () => {
-      sub.remove();
+      sub?.remove();
     };
   }, []);
 

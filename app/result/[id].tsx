@@ -1208,22 +1208,25 @@ export default function ResultScreen() {
   // Re-check TTS URL when app returns to foreground
   useEffect(() => {
     if (!scan || scan.tts_url || ttsUrl) return;
-    const subscription = AppState.addEventListener('change', (nextAppState: string) => {
-      if (nextAppState === 'active' && mountedRef.current) {
-        Promise.resolve(
-          supabase
-            .from('scans')
-            .select('tts_url')
-            .eq('id', scan.id)
-            .maybeSingle()
-        ).then(({ data }) => {
-          if (data?.tts_url && mountedRef.current) {
-            setTtsUrl(data.tts_url);
-          }
-        }).catch(() => {});
-      }
-    });
-    return () => subscription.remove();
+    let subscription: { remove: () => void } | null = null;
+    if (typeof AppState.addEventListener === 'function') {
+      subscription = AppState.addEventListener('change', (nextAppState: string) => {
+        if (nextAppState === 'active' && mountedRef.current) {
+          Promise.resolve(
+            supabase
+              .from('scans')
+              .select('tts_url')
+              .eq('id', scan.id)
+              .maybeSingle()
+          ).then(({ data }) => {
+            if (data?.tts_url && mountedRef.current) {
+              setTtsUrl(data.tts_url);
+            }
+          }).catch(() => {});
+        }
+      });
+    }
+    return () => subscription?.remove();
   }, [scan, ttsUrl]);
 
   // Resume polling for in-progress video generation jobs on mount
@@ -1668,23 +1671,26 @@ export default function ResultScreen() {
     if (!scan?.analysis_job_id) return;
     if (analysisStatus !== 'processing') return;
 
-    const subscription = AppState.addEventListener('change', (nextAppState: string) => {
-      if (nextAppState === 'active' && mountedRef.current) {
-        Promise.resolve(
-          supabase
-            .from('render_jobs')
-            .select('*')
-            .eq('id', scan.analysis_job_id!)
-            .maybeSingle()
-        ).then(({ data }) => {
-          if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
-            handleJobUpdateRef.current?.(data as RenderJob);
-          }
-        }).catch(() => {});
-      }
-    });
+    let subscription: { remove: () => void } | null = null;
+    if (typeof AppState.addEventListener === 'function') {
+      subscription = AppState.addEventListener('change', (nextAppState: string) => {
+        if (nextAppState === 'active' && mountedRef.current) {
+          Promise.resolve(
+            supabase
+              .from('render_jobs')
+              .select('*')
+              .eq('id', scan.analysis_job_id!)
+              .maybeSingle()
+          ).then(({ data }) => {
+            if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
+              handleJobUpdateRef.current?.(data as RenderJob);
+            }
+          }).catch(() => {});
+        }
+      });
+    }
 
-    return () => subscription.remove();
+    return () => subscription?.remove();
   }, [scan?.analysis_job_id, analysisStatus]);
 
   useEffect(() => {

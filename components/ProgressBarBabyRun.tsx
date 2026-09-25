@@ -121,8 +121,11 @@ export function ProgressBarBabyRun({ progressSV, step, text }: ProgressBarBabyRu
         cancelAnimation(headBob);
       }
     };
-    const sub = AppState.addEventListener('change', handleAppStateChange);
-    return () => { sub.remove(); };
+    let sub: { remove: () => void } | null = null;
+    if (typeof AppState.addEventListener === 'function') {
+      sub = AppState.addEventListener('change', handleAppStateChange);
+    }
+    return () => { sub?.remove(); };
   }, [bodyBob, armLeft, armRight, legLeft, legRight, headBob]);
 
   useEffect(() => {
