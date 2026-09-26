@@ -37,6 +37,8 @@ const pendingQueue: Array<{
 
 let isFlushing = false;
 
+const FLUSH_TIMEOUT_MS = 5000;
+
 async function flushQueue(): Promise<void> {
   if (isFlushing || pendingQueue.length === 0) return;
   isFlushing = true;
@@ -53,7 +55,11 @@ async function flushQueue(): Promise<void> {
       session_id: SESSION_ID,
       created_at: item.timestamp,
     }));
-    await supabase.from('error_logs').insert(rows);
+    const insertPromise = supabase.from('error_logs').insert(rows);
+    const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) =>
+      setTimeout(() => resolve({ error: { message: 'flush timeout' } }), FLUSH_TIMEOUT_MS),
+    );
+    await Promise.race([insertPromise, timeoutPromise]);
   } catch {
     if (pendingQueue.length < 50) {
       pendingQueue.unshift(...batch);

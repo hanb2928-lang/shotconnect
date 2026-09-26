@@ -164,43 +164,6 @@ export default function RootLayout() {
   const fontsReady = fontsLoaded || fontError || fontTimedOut;
   const isReady = fontsReady && ready !== 'loading';
 
-  // Single unified loading gate — covers both font loading and storage/template init
-  if (!isReady) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.dark.bg, gap: theme.spacing.md }}>
-        <ActivityIndicator size="large" color={theme.colors.primary[400]} />
-        <Text style={{ fontSize: 14, color: theme.colors.dark.textDim }}>{LOADING_TEXT}</Text>
-      </View>
-    );
-  }
-
-  // Error gate — init failed completely
-  if (ready === 'error') {
-    const retryInit = () => {
-      initStartedRef.current = false;
-      setReady('loading');
-    };
-    return (
-      <ErrorBoundary>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.dark.bg, paddingHorizontal: 40, gap: 12 }}>
-          <Text style={{ fontSize: 18, fontFamily: theme.typography.fontFamily.bold, color: theme.colors.dark.text, marginBottom: 4 }}>
-            {ERROR_TITLE}
-          </Text>
-          <Text style={{ fontSize: 14, fontFamily: theme.typography.fontFamily.regular, color: theme.colors.dark.textDim, textAlign: 'center', lineHeight: 22 }}>
-            {ERROR_DESC}
-          </Text>
-          <TouchableOpacity
-            style={{ marginTop: 12, paddingVertical: 12, paddingHorizontal: 28, borderRadius: 10, backgroundColor: theme.colors.primary[500] }}
-            onPress={retryInit}
-            activeOpacity={0.8}
-          >
-            <Text style={{ fontSize: 15, fontFamily: theme.typography.fontFamily.bold, color: '#fff' }}>{RETRY_TEXT}</Text>
-          </TouchableOpacity>
-        </View>
-      </ErrorBoundary>
-    );
-  }
-
   return (
     <ErrorBoundary>
       <I18nProvider>

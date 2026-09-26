@@ -181,6 +181,8 @@ async function doFetch(
   throw lastError || new Error('요청에 실패했습니다.');
 }
 
+const SUPABASE_OP_TIMEOUT_MS = 15000;
+
 export async function safeSupabaseCall<T>(
   operation: () => Promise<{ data: T | null; error: { message: string } | null }>,
   retries = 1,
@@ -189,7 +191,10 @@ export async function safeSupabaseCall<T>(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const result = await operation();
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), SUPABASE_OP_TIMEOUT_MS),
+      );
+      const result = await Promise.race([operation(), timeoutPromise]);
       if (result.error) {
         const msg = result.error?.message ?? String(result.error);
         if (msg.includes('JWT') || msg.includes('token') || msg.includes('auth')) {
