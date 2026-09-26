@@ -11,8 +11,6 @@
       "android": {
         "buildType": "apk"
       },
-      "image": "ubuntu-22.04-android-36-ndk-r27c",
-      "nodeVersion": "20",
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
@@ -26,8 +24,6 @@
       "android": {
         "buildType": "apk"
       },
-      "image": "ubuntu-22.04-android-36-ndk-r27c",
-      "nodeVersion": "20",
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
@@ -40,8 +36,6 @@
       "android": {
         "buildType": "app-bundle"
       },
-      "image": "ubuntu-22.04-android-36-ndk-r27c",
-      "nodeVersion": "20",
       "channel": "production",
       "env": {
         "EAS_NO_VCS": "1",
