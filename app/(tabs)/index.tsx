@@ -605,21 +605,21 @@ export default function CameraScreen() {
 
         <View style={styles.modeCardsWrap}>
           <ModeCard
-            icon={<Orbit size={28} color="#040B1B" strokeWidth={2.2} />}
+            icon={<Orbit size={28} color="#0A0A0B" strokeWidth={2.2} />}
             title="입체컷 오토"
             desc="정면·좌측·우측·후면·상부를 순차 촬영해 AI 입체적인 숏폼 완성"
-            gradientColors={['rgba(252, 211, 77, 0.9)', '#D4AF37']}
-            glowColor="rgba(212, 175, 55, 0.25)"
-            rippleColor="rgba(212, 175, 55, 0.15)"
+            gradientColors={['#C084FC', '#A855F7']}
+            glowColor="rgba(168, 85, 247, 0.25)"
+            rippleColor="rgba(168, 85, 247, 0.15)"
             onPress={() => handleModeCardPress('single')}
           />
           <ModeCard
             icon={<Layers size={28} color="#FFFFFF" strokeWidth={2.2} />}
             title="AI 범용 합성"
             desc="최소 3컷부터 최대 5컷까지 다각도 촬영으로 제품을 배경·모델에 자연스럽게 합성"
-            gradientColors={['#5A8AFF', '#3A66E8']}
-            glowColor="rgba(76, 125, 255, 0.25)"
-            rippleColor="rgba(76, 125, 255, 0.15)"
+            gradientColors={['#9333EA', '#6B21A8']}
+            glowColor="rgba(168, 85, 247, 0.25)"
+            rippleColor="rgba(168, 85, 247, 0.15)"
             onPress={() => handleModeCardPress('fitting')}
           />
         </View>
@@ -659,10 +659,10 @@ export default function CameraScreen() {
                   contentTone === 'studio' && styles.toneIconBadgeActive,
                   contentTone === 'studio' && styles.toneIconBadgeGoldGlow,
                 ]}>
-                  <Diamond size={18} color={contentTone === 'studio' ? '#FCD33C' : theme.colors.primary[400]} strokeWidth={2.2} />
+                  <Diamond size={18} color={contentTone === 'studio' ? '#C084FC' : theme.colors.primary[400]} strokeWidth={2.2} />
                   {contentTone === 'studio' && (
-                    <View style={styles.toneSparkleOverlay}>
-                      <Sparkles size={8} color="#FCD33C" strokeWidth={2.5} />
+                    <View style={styles.toneIconBadgeGoldGlow}>
+                      <Sparkles size={8} color="#C084FC" strokeWidth={2.5} />
                     </View>
                   )}
                 </View>
@@ -690,7 +690,7 @@ export default function CameraScreen() {
                   contentTone === 'raw' && styles.toneIconBadgeActiveRaw,
                   contentTone === 'raw' && styles.toneIconBadgeBlueGlow,
                 ]}>
-                  <Zap size={18} color={contentTone === 'raw' ? '#2DD4BF' : theme.colors.accent[400]} strokeWidth={2.2} />
+                  <Zap size={18} color={contentTone === 'raw' ? '#C084FC' : theme.colors.primary[400]} strokeWidth={2.2} />
                 </View>
                 <Text
                   style={[
@@ -1282,6 +1282,9 @@ const styles = StyleSheet.create({
   },
   modeSelectContent: {
     paddingBottom: theme.spacing.xxl,
+    maxWidth: 640,
+    alignSelf: 'center' as const,
+    width: '100%',
   },
   modeSelectHeader: {
     flexDirection: 'row',
@@ -1324,7 +1327,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   cleanModeSwitchActive: {
-    backgroundColor: theme.colors.accent[500],
+    backgroundColor: theme.colors.primary[500],
   },
   cleanModeKnob: {
     width: 22,
@@ -1380,14 +1383,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   toneIconBadgeGoldGlow: {
-    shadowColor: '#D4AF37',
+    shadowColor: '#A855F7',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 8,
     elevation: 0,
   },
   toneIconBadgeBlueGlow: {
-    shadowColor: '#4C7DFF',
+    shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 8,
@@ -1403,9 +1406,11 @@ const styles = StyleSheet.create({
   },
   toneSegmentActive: {
     backgroundColor: theme.colors.primary[600],
+    borderColor: theme.colors.primary[400],
   },
   toneSegmentActiveRaw: {
-    backgroundColor: theme.colors.accent[500],
+    backgroundColor: theme.colors.accent[600],
+    borderColor: theme.colors.accent[400],
   },
   toneSegmentText: {
     width: '100%',
@@ -1435,14 +1440,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.spacing.md,
     backgroundColor: theme.colors.dark.surface,
-    borderRadius: theme.radius.xl,
+    borderRadius: theme.radius.lg,
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md + 2,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   modeCardPressed: {
-    borderColor: 'rgba(76, 125, 255, 0.5)',
+    borderColor: 'rgba(168, 85, 247, 0.5)',
   },
   modeCardIcon: {
     width: 48,
@@ -1491,7 +1496,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: theme.spacing.sm,
-    backgroundColor: theme.colors.primary[600],
+    backgroundColor: theme.colors.primary[500],
     borderRadius: theme.radius.lg,
     paddingVertical: theme.spacing.md,
     ...theme.shadows.glowPrimary,
@@ -1523,7 +1528,7 @@ const styles = StyleSheet.create({
   permissionBtn: {
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: theme.colors.primary[600],
+    backgroundColor: theme.colors.primary[500],
     borderRadius: theme.radius.lg,
   },
   permissionBtnText: {
@@ -1600,11 +1605,11 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: theme.radius.full,
-    backgroundColor: theme.colors.primary[600],
+    backgroundColor: theme.colors.primary[500],
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 4,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   shutterBtnDisabled: {
     backgroundColor: theme.colors.dark.surfaceLight,
@@ -1737,7 +1742,7 @@ const styles = StyleSheet.create({
   stereoLightBarFill: {
     height: '100%',
     borderRadius: 3,
-    backgroundColor: theme.colors.primary[500],
+    backgroundColor: theme.colors.primary[400],
   },
   stereoLightPct: {
     fontSize: 13,
