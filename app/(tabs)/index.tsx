@@ -615,7 +615,7 @@ export default function CameraScreen() {
 
         <View style={styles.modeCardsWrap}>
           <ModeCard
-            icon={<Orbit size={28} color="#0A0A0B" strokeWidth={2.2} />}
+            icon={<Orbit size={28} color="#FFFFFF" strokeWidth={2.2} />}
             title="입체컷 오토"
             desc="정면·좌측·우측·후면·상부를 순차 촬영해 AI 입체적인 숏폼 완성"
             gradientColors={['#C084FC', '#A855F7']}
@@ -1390,7 +1390,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary[600] + '22',
   },
   toneIconBadgeActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(168, 85, 247, 0.12)',
   },
   toneIconBadgeGoldGlow: {
     shadowColor: '#A855F7',
@@ -1412,7 +1412,7 @@ const styles = StyleSheet.create({
     right: -3,
   },
   toneIconBadgeActiveRaw: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(168, 85, 247, 0.12)',
   },
   toneSegmentActive: {
     backgroundColor: theme.colors.primary[600],
@@ -1443,7 +1443,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
   toneHintTextActive: {
-    color: 'rgba(255, 255, 255, 0.78)',
+    color: 'rgba(255, 255, 255, 0.85)',
   },
   modeCard: {
     flexDirection: 'row',
@@ -1454,7 +1454,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md + 2,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(15, 23, 42, 0.08)',
   },
   modeCardPressed: {
     borderColor: 'rgba(168, 85, 247, 0.5)',
@@ -1479,13 +1479,13 @@ const styles = StyleSheet.create({
   modeCardTitle: {
     fontSize: 17,
     fontFamily: theme.typography.fontFamily.bold,
-    color: '#FFFFFF',
+    color: theme.colors.dark.text,
     letterSpacing: -0.3,
   },
   modeCardDesc: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.regular,
-    color: '#A6B0CF',
+    color: theme.colors.dark.textDim,
     lineHeight: 17,
   },
   modeSelectErrorInline: {
@@ -1570,7 +1570,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: theme.radius.full,
-    backgroundColor: 'rgba(10, 15, 30, 0.6)',
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1619,11 +1619,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 4,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: 'rgba(15, 23, 42, 0.15)',
   },
   shutterBtnDisabled: {
     backgroundColor: theme.colors.dark.surfaceLight,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(15, 23, 42, 0.1)',
   },
   shutterBtnCapturing: {
     opacity: 0.6,
@@ -1664,7 +1664,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(5, 8, 18, 0.7)',
+    backgroundColor: 'rgba(248, 250, 252, 0.8)',
   },
   autoSavingCard: {
     backgroundColor: theme.colors.dark.surface,
@@ -1704,7 +1704,7 @@ const styles = StyleSheet.create({
   // Stereo progress
   stereoLightOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(3, 5, 15, 0.88)',
+    backgroundColor: 'rgba(248, 250, 252, 0.88)',
     justifyContent: 'center',
     alignItems: 'center',
   },

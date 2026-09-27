@@ -75,16 +75,16 @@ const styles = StyleSheet.create({
   workspaceRoot: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#0A0A0B',
+    backgroundColor: '#F8FAFC',
   },
   fallback: {
     width: 64,
-    backgroundColor: '#131316',
+    backgroundColor: '#FFFFFF',
   },
   inspector: {
-    backgroundColor: '#131316',
+    backgroundColor: '#FFFFFF',
     borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255, 255, 255, 0.08)',
+    borderLeftColor: 'rgba(15, 23, 42, 0.08)',
     overflow: 'hidden',
   },
   inspectorOpen: {
@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   inspectorTitle: {
     fontSize: 13,
