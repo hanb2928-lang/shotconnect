@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
 import { Tabs } from 'expo-router';
 import { theme } from '@/lib/theme';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react-native';
-import { InspectorPanel } from '@/components/InspectorPanel';
+import { InspectorPanel, type BoundAffiliateLink } from '@/components/InspectorPanel';
+import { InspectorContext, type InspectorContextValue } from '@/lib/inspectorContext';
 
 const ScrollableTabBar = lazy(() =>
   import('@/components/ScrollableTabBar').then((m) => ({ default: m.ScrollableTabBar })),
@@ -17,57 +18,72 @@ const isWeb = Platform.OS === 'web';
 
 export default function TabLayout() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [boundLinks, setBoundLinks] = useState<BoundAffiliateLink[]>([]);
+  const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
   const toggleInspector = useCallback(() => setInspectorOpen((v) => !v), []);
 
-  return (
-    <View style={styles.workspaceRoot}>
-      {/* Left sidebar + center canvas — managed by Tabs + custom tabBar */}
-      <Tabs
-        initialRouteName="index"
-        tabBar={(props) => (
-          <Suspense fallback={<TabBarFallback />}>
-            <ScrollableTabBar {...props} badges={{}} />
-          </Suspense>
-        )}
-        screenOptions={{
-          headerShown: false,
-          tabBarStyle: { display: 'none' },
-        }}
-      >
-        <Tabs.Screen name="index" />
-        <Tabs.Screen name="marketing" />
-        <Tabs.Screen name="assets" />
-        <Tabs.Screen name="affiliate" options={{ href: null }} />
-        <Tabs.Screen name="analytics" options={{ href: null }} />
-      </Tabs>
+  const handleLinkBound = useCallback((link: BoundAffiliateLink) => {
+    setBoundLinks((prev) => [...prev.filter((b) => b.productId !== link.productId), link]);
+  }, []);
 
-      {/* Right inspector — collapsible, web only */}
-      {isWeb && (
-        <View style={[styles.inspector, inspectorOpen ? styles.inspectorOpen : styles.inspectorCollapsed]}>
-          {inspectorOpen ? (
-            <View style={styles.inspectorInner}>
-              <View style={styles.inspectorHeader}>
-                <Text style={styles.inspectorTitle}>다이나믹 인스펙터</Text>
-                <Pressable onPress={toggleInspector} hitSlop={12}>
-                  <PanelRightClose size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
-                </Pressable>
-              </View>
-              <View style={styles.inspectorContent}>
-                <InspectorPanel
-                  visible
-                  onClose={toggleInspector}
-                  currentCutLabel="현재 워크스페이스"
-                />
-              </View>
-            </View>
-          ) : (
-            <Pressable onPress={toggleInspector} style={styles.inspectorExpandBtn} hitSlop={12}>
-              <PanelRightOpen size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
-            </Pressable>
+  const ctxValue: InspectorContextValue = {
+    boundLinks,
+    selectedCutId,
+    setSelectedCutId,
+  };
+
+  return (
+    <InspectorContext.Provider value={ctxValue}>
+      <View style={styles.workspaceRoot}>
+        {/* Left sidebar + center canvas — managed by Tabs + custom tabBar */}
+        <Tabs
+          initialRouteName="index"
+          tabBar={(props) => (
+            <Suspense fallback={<TabBarFallback />}>
+              <ScrollableTabBar {...props} badges={{}} />
+            </Suspense>
           )}
-        </View>
-      )}
-    </View>
+          screenOptions={{
+            headerShown: false,
+            tabBarStyle: { display: 'none' },
+          }}
+        >
+          <Tabs.Screen name="index" />
+          <Tabs.Screen name="marketing" />
+          <Tabs.Screen name="assets" />
+          <Tabs.Screen name="affiliate" options={{ href: null }} />
+          <Tabs.Screen name="analytics" options={{ href: null }} />
+        </Tabs>
+
+        {/* Right inspector — collapsible, web only */}
+        {isWeb && (
+          <View style={[styles.inspector, inspectorOpen ? styles.inspectorOpen : styles.inspectorCollapsed]}>
+            {inspectorOpen ? (
+              <View style={styles.inspectorInner}>
+                <View style={styles.inspectorHeader}>
+                  <Text style={styles.inspectorTitle}>다이나믹 인스펙터</Text>
+                  <Pressable onPress={toggleInspector} hitSlop={12}>
+                    <PanelRightClose size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
+                  </Pressable>
+                </View>
+                <View style={styles.inspectorContent}>
+                  <InspectorPanel
+                    visible
+                    onClose={toggleInspector}
+                    currentCutLabel={selectedCutId ? `만화 컷 ${selectedCutId}` : '현재 워크스페이스'}
+                    onLinkBound={handleLinkBound}
+                  />
+                </View>
+              </View>
+            ) : (
+              <Pressable onPress={toggleInspector} style={styles.inspectorExpandBtn} hitSlop={12}>
+                <PanelRightOpen size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+    </InspectorContext.Provider>
   );
 }
 

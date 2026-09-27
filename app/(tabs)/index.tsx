@@ -19,7 +19,7 @@ import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
-import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap } from 'lucide-react-native';
+import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, BookOpen } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { theme } from '@/lib/theme';
@@ -41,6 +41,8 @@ import { StudioPremiumAccordion, type StudioSliderValues } from '@/components/St
 import { PostCaptureWorkflow } from '@/components/PostCaptureWorkflow';
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
 import { runStereoPipeline, createScanFromAngleShots, makeInitialProgress, type StereoPipelineProgress } from '@/lib/stereoPipeline';
+import { ToonModeEditor, type ToonCut } from '@/components/ToonModeEditor';
+import { useInspectorContext } from '@/lib/inspectorContext';
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -104,7 +106,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-type ScreenPhase = 'mode_select' | 'camera' | 'fitting_capture';
+type ScreenPhase = 'mode_select' | 'camera' | 'fitting_capture' | 'toon';
 type CaptureMode = 'single' | 'fitting';
 type ContentTone = 'studio' | 'raw';
 
@@ -154,6 +156,7 @@ export default function CameraScreen() {
   const [cleanMode, setCleanMode] = useState(false);
   const [studioMode, setStudioMode] = useState<PanelMode>(null);
   const [studioSliders, setStudioSliders] = useState<StudioSliderValues>({ facetSparkle: 60, fabricDetail: 45, blendStrength: 70, smartFit: true });
+  const inspectorCtx = useInspectorContext();
 
   // Virtual fitting state
   const [fittingGuideVisible, setFittingGuideVisible] = useState(false);
@@ -615,6 +618,15 @@ export default function CameraScreen() {
 
         <View style={styles.modeCardsWrap}>
           <ModeCard
+            icon={<BookOpen size={28} color="#FFFFFF" strokeWidth={2.2} />}
+            title="만화모드 (Toon Mode)"
+            desc="만화 컷 그리드로 제휴 상품을 자연스럽게 매칭, 말풍선과 함께 숏툰 콘텐츠 제작"
+            gradientColors={['#A855F7', '#7C3AED']}
+            glowColor="rgba(168, 85, 247, 0.25)"
+            rippleColor="rgba(168, 85, 247, 0.15)"
+            onPress={() => setScreenPhase('toon')}
+          />
+          <ModeCard
             icon={<Orbit size={28} color="#FFFFFF" strokeWidth={2.2} />}
             title="입체컷 오토"
             desc="정면·좌측·우측·후면·상부를 순차 촬영해 AI 입체적인 숏폼 완성"
@@ -745,6 +757,31 @@ export default function CameraScreen() {
           </View>
         )}
       </ScrollView>
+    );
+  }
+
+  // ─── Toon Mode Screen ───
+  if (screenPhase === 'toon') {
+    return (
+      <View style={styles.container}>
+        <View style={[styles.toonScreenInner, { paddingTop: safeTop + theme.spacing.md }]}>
+          <ToonModeEditor
+            visible
+            onClose={() => setScreenPhase('mode_select')}
+            boundLinks={inspectorCtx.boundLinks}
+            onCutSelected={(cutId) => inspectorCtx.setSelectedCutId(cutId)}
+          />
+        </View>
+        {error && (
+          <View style={styles.modeSelectErrorInline}>
+            <Text style={styles.modeSelectErrorText}>{error}</Text>
+          </View>
+        )}
+        <CreditPurchaseModal
+          visible={creditModalVisible}
+          onClose={() => setCreditModalVisible(false)}
+        />
+      </View>
     );
   }
 
@@ -1284,6 +1321,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.dark.bg,
+  },
+  toonScreenInner: {
+    flex: 1,
+    maxWidth: 640,
+    alignSelf: 'center' as const,
+    width: '100%',
   },
   // Mode selection screen
   modeSelectContainer: {
