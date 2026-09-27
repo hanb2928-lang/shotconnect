@@ -286,7 +286,7 @@ export function ToonModeEditor({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#18181B',
   },
   header: {
     flexDirection: 'row',
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -372,8 +372,8 @@ const styles = StyleSheet.create({
     minHeight: 170,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: '#18181B',
     overflow: 'hidden',
   },
   cutCardSelected: {
@@ -391,7 +391,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(15, 23, 42, 0.05)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   cutLabel: {
     fontSize: 11,
@@ -408,7 +408,7 @@ const styles = StyleSheet.create({
   },
   cutImageArea: {
     height: 70,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#1F1F23',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -426,8 +426,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(15, 23, 42, 0.05)',
-    borderTopColor: 'rgba(15, 23, 42, 0.05)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
     minHeight: 38,
     justifyContent: 'center',
   },
@@ -484,9 +484,9 @@ const styles = StyleSheet.create({
     marginTop: 16,
     padding: 14,
     borderRadius: 10,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#1F1F23',
     borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
     gap: 8,
   },
   detailTitle: {
@@ -507,9 +507,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#18181B',
     borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   detailLinkInfo: {
     flex: 1,

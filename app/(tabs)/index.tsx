@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Pressable,
   Platform,
   Image,
   Modal,
@@ -20,7 +19,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, BookOpen } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { theme } from '@/lib/theme';
 import { startAsyncAnalysis } from '@/lib/asyncAnalysis';
@@ -616,35 +614,40 @@ export default function CameraScreen() {
 
         <TriggerBanner />
 
-        <View style={styles.modeCardsWrap}>
-          <ModeCard
-            icon={<BookOpen size={28} color="#FFFFFF" strokeWidth={2.2} />}
-            title="만화모드 (Toon Mode)"
-            desc="만화 컷 그리드로 제휴 상품을 자연스럽게 매칭, 말풍선과 함께 숏툰 콘텐츠 제작"
-            gradientColors={['#A855F7', '#7C3AED']}
-            glowColor="rgba(168, 85, 247, 0.25)"
-            rippleColor="rgba(168, 85, 247, 0.15)"
+        {/* ─── Ultra-slim mode toolbar ─── */}
+        <View style={styles.modeToolbar}>
+          <TouchableOpacity
+            style={[styles.modeTab, 'toon' === 'toon' && styles.modeTabActive]}
             onPress={() => setScreenPhase('toon')}
-          />
-          <ModeCard
-            icon={<Orbit size={28} color="#FFFFFF" strokeWidth={2.2} />}
-            title="입체컷 오토"
-            desc="정면·좌측·우측·후면·상부를 순차 촬영해 AI 입체적인 숏폼 완성"
-            gradientColors={['#C084FC', '#A855F7']}
-            glowColor="rgba(168, 85, 247, 0.25)"
-            rippleColor="rgba(168, 85, 247, 0.15)"
+            activeOpacity={0.7}
+          >
+            <BookOpen size={15} color={theme.colors.primary[400]} strokeWidth={2.2} />
+            <Text style={styles.modeTabText}>만화모드</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeTab, contentTone === 'studio' && studioMode === 'auto-3d' && styles.modeTabActive]}
             onPress={() => handleModeCardPress('single')}
-          />
-          <ModeCard
-            icon={<Layers size={28} color="#FFFFFF" strokeWidth={2.2} />}
-            title="AI 범용 합성"
-            desc="최소 3컷부터 최대 5컷까지 다각도 촬영으로 제품을 배경·모델에 자연스럽게 합성"
-            gradientColors={['#9333EA', '#6B21A8']}
-            glowColor="rgba(168, 85, 247, 0.25)"
-            rippleColor="rgba(168, 85, 247, 0.15)"
+            activeOpacity={0.7}
+          >
+            <Orbit size={15} color={theme.colors.primary[400]} strokeWidth={2.2} />
+            <Text style={styles.modeTabText}>입체컷 오토</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeTab, contentTone === 'studio' && studioMode === 'ai-blend' && styles.modeTabActive]}
             onPress={() => handleModeCardPress('fitting')}
-          />
+            activeOpacity={0.7}
+          >
+            <Layers size={15} color={theme.colors.primary[400]} strokeWidth={2.2} />
+            <Text style={styles.modeTabText}>AI 합성</Text>
+          </TouchableOpacity>
         </View>
+
+        {/* ─── Selected mode description (single line) ─── */}
+        <Text style={styles.modeDescText} numberOfLines={1}>
+          {studioMode === 'auto-3d' ? '정면·좌측·우측·후면·상부 순차 촬영 → AI 입체 숏폼'
+            : studioMode === 'ai-blend' ? '3~5컷 다각도 촬영 → 배경·모델 자연 합성'
+            : '만화 컷 그리드 + 제휴 상품 자동 매칭 숏툰'}
+        </Text>
 
         <StudioPremiumAccordion
           visible={contentTone === 'studio' && studioMode !== null}
@@ -653,98 +656,50 @@ export default function CameraScreen() {
         />
 
         {contentTone === 'studio' && studioMode !== null && (
-          <View style={styles.modeConfirmWrap}>
-            <TouchableOpacity
-              style={styles.modeConfirmBtn}
-              onPress={handleModeConfirm}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.modeConfirmText}>
-                {studioMode === 'auto-3d' ? '입체컷 오토 시작' : 'AI 범용 합성 시작'}
-              </Text>
-              <ArrowRight size={18} color="#fff" strokeWidth={2.5} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity style={styles.modeConfirmSlim} onPress={handleModeConfirm} activeOpacity={0.85}>
+            <Text style={styles.modeConfirmSlimText}>
+              {studioMode === 'auto-3d' ? '입체컷 시작' : 'AI 합성 시작'}
+            </Text>
+            <ArrowRight size={14} color="#fff" strokeWidth={2.5} />
+          </TouchableOpacity>
         )}
 
-        <View style={styles.toneSelectorWrap}>
-          <Text style={styles.toneSelectorLabel}>콘텐츠 톤앤매너</Text>
-          <View style={styles.toneSegmented}>
-            <TouchableOpacity
-              style={[styles.toneSegment, contentTone === 'studio' && styles.toneSegmentActive]}
-              onPress={() => handleContentToneChange('studio')}
-              activeOpacity={0.8}
-            >
-              <View style={styles.toneSegmentHeader}>
-                <View style={[
-                  styles.toneIconBadge,
-                  contentTone === 'studio' && styles.toneIconBadgeActive,
-                  contentTone === 'studio' && styles.toneIconBadgeGoldGlow,
-                ]}>
-                  <Diamond size={18} color={contentTone === 'studio' ? '#C084FC' : theme.colors.primary[400]} strokeWidth={2.2} />
-                  {contentTone === 'studio' && (
-                    <View style={styles.toneIconBadgeGoldGlow}>
-                      <Sparkles size={8} color="#C084FC" strokeWidth={2.5} />
-                    </View>
-                  )}
-                </View>
-                <Text
-                  style={[
-                    styles.toneSegmentText,
-                    contentTone === 'studio' && styles.toneSegmentTextActive,
-                  ]}
-                >
-                  스튜디오 프리미엄
-                </Text>
-              </View>
-              <Text style={[styles.toneHintText, contentTone === 'studio' && styles.toneHintTextActive]}>
-                화장품 · 주얼리 · 패션 · 전자기기 · 홈데코 · 럭셔리 식품
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.toneSegment, contentTone === 'raw' && styles.toneSegmentActiveRaw]}
-              onPress={() => handleContentToneChange('raw')}
-              activeOpacity={0.8}
-            >
-              <View style={styles.toneSegmentHeader}>
-                <View style={[
-                  styles.toneIconBadge,
-                  contentTone === 'raw' && styles.toneIconBadgeActiveRaw,
-                  contentTone === 'raw' && styles.toneIconBadgeBlueGlow,
-                ]}>
-                  <Zap size={18} color={contentTone === 'raw' ? '#C084FC' : theme.colors.primary[400]} strokeWidth={2.2} />
-                </View>
-                <Text
-                  style={[
-                    styles.toneSegmentText,
-                    contentTone === 'raw' && styles.toneSegmentTextActive,
-                  ]}
-                >
-                  날것의 심리자극
-                </Text>
-              </View>
-              <Text style={[styles.toneHintText, contentTone === 'raw' && styles.toneHintTextActive]}>
-                생활용품 · 식품 · 가성비 전자기기 · 패션 액세서리 · 다이어트
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.cleanModeWrap}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cleanModeLabel}>✨ 클린 모드 (자막·문구 제외)</Text>
-            <Text style={styles.cleanModeSub}>체크 시 훅, 자막, 마케팅 문구를 생성하지 않고 순수 영상/이미지 원본만 추출합니다</Text>
-          </View>
+        {/* ─── Compact tone chips ─── */}
+        <View style={styles.toneChipRow}>
+          <Text style={styles.toneChipLabel}>톤</Text>
           <TouchableOpacity
-            onPress={() => setCleanMode((v) => !v)}
+            style={[styles.toneChip, contentTone === 'studio' && styles.toneChipActive]}
+            onPress={() => handleContentToneChange('studio')}
             activeOpacity={0.7}
-            hitSlop={12}
           >
-            <View style={[styles.cleanModeSwitch, cleanMode && styles.cleanModeSwitchActive]}>
-              <View style={[styles.cleanModeKnob, cleanMode && styles.cleanModeKnobActive]} />
-            </View>
+            <Diamond size={12} color={contentTone === 'studio' ? '#fff' : theme.colors.dark.textDim} strokeWidth={2.2} />
+            <Text style={[styles.toneChipText, contentTone === 'studio' && styles.toneChipTextActive]}>
+              스튜디오
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toneChip, contentTone === 'raw' && styles.toneChipActive]}
+            onPress={() => handleContentToneChange('raw')}
+            activeOpacity={0.7}
+          >
+            <Zap size={12} color={contentTone === 'raw' ? '#fff' : theme.colors.dark.textDim} strokeWidth={2.2} />
+            <Text style={[styles.toneChipText, contentTone === 'raw' && styles.toneChipTextActive]}>
+              심리자극
+            </Text>
           </TouchableOpacity>
         </View>
+
+        {/* ─── Compact clean mode toggle (single line) ─── */}
+        <TouchableOpacity
+          style={styles.cleanModeSlim}
+          onPress={() => setCleanMode((v) => !v)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.cleanModeSlimLabel}>클린 모드 · 자막/문구 제외</Text>
+          <View style={[styles.cleanModeSwitchSlim, cleanMode && styles.cleanModeSwitchSlimActive]}>
+            <View style={[styles.cleanModeKnobSlim, cleanMode && styles.cleanModeKnobSlimActive]} />
+          </View>
+        </TouchableOpacity>
 
         <CreditPurchaseModal
           visible={creditModalVisible}
@@ -1279,48 +1234,10 @@ function StereoProgressLightweight({
   );
 }
 
-// ─── Mode Card Component ───
-interface ModeCardProps {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-  gradientColors: [string, string];
-  glowColor: string;
-  rippleColor: string;
-  onPress: () => void;
-}
-
-function ModeCard({ icon, title, desc, gradientColors, glowColor, rippleColor, onPress }: ModeCardProps) {
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.modeCard,
-        pressed && styles.modeCardPressed,
-      ]}
-      onPress={onPress}
-      android_ripple={{ color: rippleColor, radius: 200 }}
-    >
-      <LinearGradient
-        colors={gradientColors}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={[styles.modeCardIcon, { shadowColor: glowColor }]}
-      >
-        {icon}
-      </LinearGradient>
-      <View style={styles.modeCardTextWrap}>
-        <Text style={styles.modeCardTitle} numberOfLines={1}>{title}</Text>
-        <Text style={styles.modeCardDesc} numberOfLines={2}>{desc}</Text>
-      </View>
-      <ArrowRight size={20} color={theme.colors.dark.textDim} strokeWidth={2} />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.dark.bg,
+    backgroundColor: '#121214',
   },
   toonScreenInner: {
     flex: 1,
@@ -1331,11 +1248,11 @@ const styles = StyleSheet.create({
   // Mode selection screen
   modeSelectContainer: {
     flex: 1,
-    backgroundColor: theme.colors.dark.bg,
+    backgroundColor: '#121214',
   },
   modeSelectContent: {
-    paddingBottom: theme.spacing.xxl,
-    maxWidth: 640,
+    paddingBottom: theme.spacing.lg,
+    maxWidth: 720,
     alignSelf: 'center' as const,
     width: '100%',
   },
@@ -1346,218 +1263,136 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     marginBottom: theme.spacing.sm,
   },
-  modeCardsWrap: {
-    paddingHorizontal: theme.spacing.lg,
-    gap: theme.spacing.md,
-    marginBottom: theme.spacing.lg,
+  // ─── Ultra-slim mode toolbar ───
+  modeToolbar: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: 6,
   },
-  cleanModeWrap: {
+  modeTab: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
-    gap: theme.spacing.md,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
   },
-  cleanModeLabel: {
-    fontSize: 14,
-    fontFamily: theme.typography.fontFamily.semiBold,
+  modeTabActive: {
+    backgroundColor: '#A855F7',
+    borderColor: '#A855F7',
+  },
+  modeTabText: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.medium,
     color: theme.colors.dark.text,
   },
-  cleanModeSub: {
+  modeDescText: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.dark.textDim,
-    lineHeight: 16,
-    marginTop: 2,
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: 8,
   },
-  cleanModeSwitch: {
-    width: 44,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: theme.colors.dark.border,
+  // ─── Compact tone chips ───
+  toneChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: 6,
+  },
+  toneChipLabel: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.textFaint,
+    marginRight: 2,
+  },
+  toneChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  toneChipActive: {
+    backgroundColor: '#A855F7',
+    borderColor: '#A855F7',
+  },
+  toneChipText: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.dark.textDim,
+  },
+  toneChipTextActive: {
+    color: '#fff',
+  },
+  // ─── Compact clean mode ───
+  cleanModeSlim: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 7,
+    marginBottom: 6,
+  },
+  cleanModeSlimLabel: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.dark.textDim,
+  },
+  cleanModeSwitchSlim: {
+    width: 32,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     paddingHorizontal: 2,
   },
-  cleanModeSwitchActive: {
-    backgroundColor: theme.colors.primary[500],
+  cleanModeSwitchSlimActive: {
+    backgroundColor: '#A855F7',
   },
-  cleanModeKnob: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+  cleanModeKnobSlim: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: theme.colors.dark.textDim,
+  },
+  cleanModeKnobSlimActive: {
     backgroundColor: '#fff',
-    transform: [{ translateX: 0 }],
+    transform: [{ translateX: 14 }],
   },
-  cleanModeKnobActive: {
-    transform: [{ translateX: 18 }],
-  },
-  toneSelectorWrap: {
-    paddingHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.md,
-  },
-  toneSelectorLabel: {
-    fontSize: 22,
-    lineHeight: 28,
-    fontFamily: theme.typography.fontFamily.bold,
-    color: theme.colors.dark.text,
-    marginBottom: theme.spacing.md,
-    letterSpacing: -0.4,
-  },
-  toneSegmented: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
-  toneSegment: {
-    flex: 1,
-    minHeight: 106,
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.dark.surface,
-    borderRadius: theme.radius.lg,
-    padding: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.dark.border,
-  },
-  toneSegmentHeader: {
-    width: '100%',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  toneIconBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.primary[600] + '22',
-  },
-  toneIconBadgeActive: {
-    backgroundColor: 'rgba(168, 85, 247, 0.12)',
-  },
-  toneIconBadgeGoldGlow: {
-    shadowColor: '#A855F7',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 0,
-  },
-  toneIconBadgeBlueGlow: {
-    shadowColor: '#7C3AED',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 0,
-  },
-  toneSparkleOverlay: {
-    position: 'absolute',
-    top: -2,
-    right: -3,
-  },
-  toneIconBadgeActiveRaw: {
-    backgroundColor: 'rgba(168, 85, 247, 0.12)',
-  },
-  toneSegmentActive: {
-    backgroundColor: theme.colors.primary[600],
-    borderColor: theme.colors.primary[400],
-  },
-  toneSegmentActiveRaw: {
-    backgroundColor: theme.colors.accent[600],
-    borderColor: theme.colors.accent[400],
-  },
-  toneSegmentText: {
-    width: '100%',
-    fontSize: 14,
-    lineHeight: 19,
-    fontFamily: theme.typography.fontFamily.bold,
-    color: theme.colors.dark.text,
-    textAlign: 'center',
-  },
-  toneSegmentTextActive: {
-    color: '#fff',
-  },
-  toneHintText: {
-    width: '100%',
-    fontSize: 10,
-    lineHeight: 15,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
-    textAlign: 'center',
-    letterSpacing: 0.1,
-  },
-  toneHintTextActive: {
-    color: 'rgba(255, 255, 255, 0.85)',
-  },
-  modeCard: {
+  // ─── Slim confirm button ───
+  modeConfirmSlim: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.md,
-    backgroundColor: theme.colors.dark.surface,
-    borderRadius: theme.radius.lg,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md + 2,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  modeCardPressed: {
-    borderColor: 'rgba(168, 85, 247, 0.5)',
-  },
-  modeCardIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: theme.radius.lg,
     justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 16,
-    elevation: 0,
+    gap: 6,
+    marginHorizontal: theme.spacing.md,
+    marginBottom: 8,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#A855F7',
   },
-  modeCardTextWrap: {
-    flex: 1,
-    flexShrink: 1,
-    gap: 4,
-  },
-  modeCardTitle: {
-    fontSize: 17,
-    fontFamily: theme.typography.fontFamily.bold,
-    color: theme.colors.dark.text,
-    letterSpacing: -0.3,
-  },
-  modeCardDesc: {
+  modeConfirmSlimText: {
     fontSize: 12,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
-    lineHeight: 17,
-  },
-  modeSelectErrorInline: {
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.lg,
-    backgroundColor: theme.colors.error[500] + '18',
-    borderRadius: theme.radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  modeConfirmWrap: {
-    paddingHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-  },
-  modeConfirmBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.sm,
-    backgroundColor: theme.colors.primary[500],
-    borderRadius: theme.radius.lg,
-    paddingVertical: theme.spacing.md,
-    ...theme.shadows.glowPrimary,
-  },
-  modeConfirmText: {
-    fontSize: 15,
     fontFamily: theme.typography.fontFamily.semiBold,
     color: '#fff',
+  },
+  modeSelectErrorInline: {
+    marginHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    backgroundColor: theme.colors.error[500] + '18',
+    borderRadius: theme.radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   modeSelectErrorText: {
     fontSize: 12,
@@ -1613,7 +1448,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: theme.radius.full,
-    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1662,11 +1497,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 4,
-    borderColor: 'rgba(15, 23, 42, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   shutterBtnDisabled: {
     backgroundColor: theme.colors.dark.surfaceLight,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   shutterBtnCapturing: {
     opacity: 0.6,

@@ -101,13 +101,13 @@ export const theme = {
       950: '#020617',
     },
     dark: {
-      bg: '#F8FAFC',
-      surface: '#FFFFFF',
-      surfaceLight: '#F1F5F9',
-      border: 'rgba(15, 23, 42, 0.08)',
-      text: '#0f172a',
-      textDim: '#475569',
-      textFaint: '#94a3b8',
+      bg: '#121214',
+      surface: '#18181B',
+      surfaceLight: '#1F1F23',
+      border: 'rgba(255, 255, 255, 0.08)',
+      text: '#E4E4E7',
+      textDim: '#A1A1AA',
+      textFaint: '#71717A',
     },
     light: {
       bg: '#f0f4fa',
@@ -193,26 +193,26 @@ export const theme = {
   },
   glass: _isLowEnd
     ? {
-        surface: '#FFFFFF',
-        surfaceLight: '#F1F5F9',
-        border: 'rgba(15, 23, 42, 0.08)',
+        surface: '#18181B',
+        surfaceLight: '#1F1F23',
+        border: 'rgba(255, 255, 255, 0.08)',
         borderActive: 'rgba(168, 85, 247, 0.25)',
-        highlight: '#F1F5F9',
+        highlight: '#1F1F23',
       }
     : _isWeb
       ? {
-          surface: 'rgba(255, 255, 255, 0.82)',
-          surfaceLight: 'rgba(241, 245, 249, 0.7)',
-          border: 'rgba(15, 23, 42, 0.08)',
+          surface: 'rgba(24, 24, 27, 0.82)',
+          surfaceLight: 'rgba(31, 31, 35, 0.7)',
+          border: 'rgba(255, 255, 255, 0.08)',
           borderActive: 'rgba(168, 85, 247, 0.25)',
-          highlight: 'rgba(15, 23, 42, 0.03)',
+          highlight: 'rgba(255, 255, 255, 0.04)',
         }
       : {
-          surface: '#FFFFFF',
-          surfaceLight: '#F1F5F9',
-          border: 'rgba(15, 23, 42, 0.08)',
+          surface: '#18181B',
+          surfaceLight: '#1F1F23',
+          border: 'rgba(255, 255, 255, 0.08)',
           borderActive: 'rgba(168, 85, 247, 0.25)',
-          highlight: '#F1F5F9',
+          highlight: '#1F1F23',
         },
   glassLight: _isLowEnd
     ? {

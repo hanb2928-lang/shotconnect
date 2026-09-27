@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
     width: 64,
     backgroundColor: theme.colors.dark.surface,
     borderRightWidth: 1,
-    borderRightColor: 'rgba(15, 23, 42, 0.06)',
+    borderRightColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
     paddingTop: 16,
     paddingBottom: 16,
@@ -236,14 +236,14 @@ const styles = StyleSheet.create({
   sidebarBottom: {
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(15, 23, 42, 0.06)',
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
     width: '100%',
     alignItems: 'center',
   },
   // ─── Mobile Bottom Bar ───
   container: {
     backgroundColor: theme.colors.dark.surface,
-    borderTopColor: 'rgba(15, 23, 42, 0.06)',
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
     borderTopWidth: 1,
     paddingTop: 10,
     paddingBottom: 8,
