@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   Dimensions,
   Modal,
+  ScrollView,
+  Platform,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -253,16 +255,17 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleSkip}>
       <Animated.View style={[styles.overlay, mountStyle]}>
         <View style={styles.card}>
+          <TouchableOpacity style={styles.skipButton} onPress={handleSkip} activeOpacity={0.7}>
+            <Text style={styles.skipText}>건너뛰기</Text>
+          </TouchableOpacity>
+
+          <View style={styles.progressTrack}>
+            <Animated.View style={[styles.progressBar, phase === 'intro' ? progressStyle : [styles.progressBar, { backgroundColor: theme.colors.accent[400] }, demoProgressStyle]]} />
+          </View>
+
+          <ScrollView style={styles.cardScroll} contentContainerStyle={styles.cardScrollContent} showsVerticalScrollIndicator={false}>
           {phase === 'intro' ? (
             <>
-              <View style={styles.progressTrack}>
-                <Animated.View style={[styles.progressBar, progressStyle]} />
-              </View>
-
-              <TouchableOpacity style={styles.skipButton} onPress={handleSkip} activeOpacity={0.7}>
-                <Text style={styles.skipText}>건너뛰기</Text>
-              </TouchableOpacity>
-
               <Animated.View style={contentStyle} key={step}>
                 <View style={[styles.iconWrap, { backgroundColor: current.accentColor + '18' }]}>
                   {current.icon}
@@ -281,27 +284,9 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
                   </View>
                 ))}
               </View>
-
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: current.accentColor }]}
-                onPress={handleNext}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.actionText}>
-                  {isLastIntro ? '15초 체험하기' : '다음'}
-                </Text>
-              </TouchableOpacity>
             </>
           ) : (
             <>
-              <View style={styles.progressTrack}>
-                <Animated.View style={[styles.progressBar, { backgroundColor: theme.colors.accent[400] }, demoProgressStyle]} />
-              </View>
-
-              <TouchableOpacity style={styles.skipButton} onPress={handleSkip} activeOpacity={0.7}>
-                <Text style={styles.skipText}>건너뛰기</Text>
-              </TouchableOpacity>
-
               <Animated.View style={contentStyle} key={phase}>
                 <View style={styles.demoLabelWrap}>
                   <Zap size={13} color={theme.colors.accent[400]} strokeWidth={2} />
@@ -426,6 +411,21 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
               </View>
             </>
           )}
+          </ScrollView>
+
+          {phase === 'intro' && (
+            <View style={styles.bottomBar}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: current.accentColor }]}
+                onPress={handleNext}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.actionText}>
+                  {isLastIntro ? '15초 체험하기' : '다음'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </Animated.View>
     </Modal>
@@ -441,8 +441,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  cardScroll: {
+    flex: 1,
+  },
+  cardScrollContent: {
+    flexGrow: 1,
+  },
   card: {
     width: cardWidth,
+    maxHeight: '85%',
     backgroundColor: theme.colors.dark.surface,
     borderRadius: theme.radius.xl,
     padding: theme.spacing.xl,
@@ -519,10 +526,16 @@ const styles = StyleSheet.create({
   dotDone: {
     backgroundColor: theme.colors.success[500],
   },
+  bottomBar: {
+    paddingTop: theme.spacing.sm,
+    paddingBottom: Platform.OS === 'ios' ? 0 : theme.spacing.sm,
+  },
   actionButton: {
     paddingVertical: 14,
     borderRadius: theme.radius.md,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   actionText: {
     fontSize: theme.typography.body,

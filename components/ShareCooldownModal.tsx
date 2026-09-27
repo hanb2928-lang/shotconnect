@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Pressable, ScrollView, Platform } from 'react-native';
 import { Shield, Clock, X, TrendingDown } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import {
@@ -42,6 +42,7 @@ export function ShareCooldownModal({ visible, onClose, onProceed, platform }: Sh
             <X size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
           </TouchableOpacity>
 
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {/* Icon */}
           <View style={styles.iconWrap}>
             <Shield size={32} color={theme.colors.warning[400]} strokeWidth={2} />
@@ -101,7 +102,10 @@ export function ShareCooldownModal({ visible, onClose, onProceed, platform }: Sh
           )}
 
           {/* Actions */}
-          <View style={styles.actionRow}>
+          </ScrollView>
+
+          <View style={styles.bottomBar}>
+            <View style={styles.actionRow}>
             <TouchableOpacity style={styles.waitBtn} onPress={onClose} activeOpacity={0.7}>
               <Text style={styles.waitBtnText}>기다릴게요</Text>
             </TouchableOpacity>
@@ -120,6 +124,7 @@ export function ShareCooldownModal({ visible, onClose, onProceed, platform }: Sh
               </TouchableOpacity>
             )}
           </View>
+          </View>
         </Pressable>
       </Pressable>
     </Modal>
@@ -134,9 +139,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
   },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
   modal: {
     width: '100%',
     maxWidth: 400,
+    maxHeight: '85%',
     backgroundColor: theme.colors.dark.surface,
     borderRadius: theme.radius.xl,
     padding: 24,
@@ -238,6 +250,10 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.textDim,
     lineHeight: 18,
   },
+  bottomBar: {
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 0 : 12,
+  },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
@@ -248,6 +264,8 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.dark.surfaceLight,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   waitBtnText: {
     fontSize: 14,
@@ -260,6 +278,8 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.warning[500],
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   proceedBtnText: {
     fontSize: 14,

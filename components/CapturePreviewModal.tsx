@@ -7,6 +7,8 @@ import {
   Modal,
   Image,
   Dimensions,
+  ScrollView,
+  Platform,
 } from 'react-native';
 import {
   Check,
@@ -70,6 +72,7 @@ export function CapturePreviewModal({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleRetake}>
       <View style={styles.overlay}>
         <View style={styles.modalCard}>
+          <ScrollView style={styles.cardScroll} contentContainerStyle={styles.cardScrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <Eye size={20} color={theme.colors.primary[400]} strokeWidth={2} />
@@ -91,7 +94,9 @@ export function CapturePreviewModal({
               resizeMode="contain"
             />
           </View>
+          </ScrollView>
 
+          <View style={styles.bottomBar}>
           <View style={styles.actionRow}>
             <TouchableOpacity style={styles.secondaryBtn} onPress={handleRetake} activeOpacity={0.7}>
               <RotateCcw size={18} color={theme.colors.dark.text} strokeWidth={2} />
@@ -112,6 +117,7 @@ export function CapturePreviewModal({
             <ScanSearch size={20} color="#fff" strokeWidth={2} />
             <Text style={styles.primaryBtnText}>AI 분석 시작하기</Text>
           </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -133,6 +139,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: theme.spacing.md,
+  },
+  cardScroll: {
+    flex: 1,
+  },
+  cardScrollContent: {
+    flexGrow: 1,
   },
   modalCard: {
     width: '100%',
@@ -189,6 +201,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  bottomBar: {
+    paddingTop: theme.spacing.sm,
+    paddingBottom: Platform.OS === 'ios' ? 0 : theme.spacing.sm,
+  },
   actionRow: {
     flexDirection: 'row',
     gap: theme.spacing.sm,
@@ -205,6 +221,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.dark.surfaceLight,
     borderWidth: 1.5,
     borderColor: theme.colors.dark.border,
+    minHeight: 48,
   },
   secondaryBtnText: {
     fontSize: 14,
@@ -220,6 +237,7 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.primary[500],
     ...theme.shadows.elevated,
+    minHeight: 52,
   },
   primaryBtnText: {
     fontSize: 16,

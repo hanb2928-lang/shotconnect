@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Modal, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, Modal, ViewStyle, ScrollView } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -98,6 +98,7 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
       <View style={styles.backdrop}>
         <View style={styles.card}>
+          <ScrollView style={styles.cardScroll} contentContainerStyle={styles.cardScrollContent} showsVerticalScrollIndicator={false}>
           {/* Header */}
           <Text style={styles.title}>AI 범용 합성 생성 중</Text>
           <Text style={styles.subtitle}>제품과 배경 사진을 합성하는 동안 잠시만 기다려주세요</Text>
@@ -146,6 +147,7 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
             />
           </View>
           <Text style={styles.progressPercent}>{progressPercent}%</Text>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -255,6 +257,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  cardScroll: {
+    flex: 1,
+  },
+  cardScrollContent: {
+    flexGrow: 1,
   },
   card: {
     width: '100%',

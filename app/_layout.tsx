@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform } from 'react-native';
+import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -28,6 +28,16 @@ import { installGlobalErrorHandlers } from '@/lib/errorLogger';
 installGlobalErrorHandlers();
 
 SplashScreen.preventAutoHideAsync();
+
+// Disable font scaling globally to prevent layout overflow when users
+// increase system font size (Accessibility > Large Text). This ensures
+// all Text and TextInput elements keep their designed font sizes.
+const TextCtor = Text as unknown as { defaultProps?: Record<string, unknown> };
+const TextInputCtor = TextInput as unknown as { defaultProps?: Record<string, unknown> };
+if (!TextCtor.defaultProps) TextCtor.defaultProps = {};
+TextCtor.defaultProps.allowFontScaling = false;
+if (!TextInputCtor.defaultProps) TextInputCtor.defaultProps = {};
+TextInputCtor.defaultProps.allowFontScaling = false;
 
 type ReadyState = 'loading' | 'app' | 'error';
 
