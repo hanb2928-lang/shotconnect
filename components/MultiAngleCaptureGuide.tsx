@@ -161,8 +161,9 @@ export function MultiAngleCaptureGuide({
         } else {
           setCaptureError('이미지를 불러오지 못했습니다. 다시 시도해 주세요.');
         }
-      } catch {
+      } catch (err) {
         if (mountedRef.current) setCaptureError('갤러리에서 이미지를 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.');
+        console.error('[MultiAngleGuide] gallery pick failed:', err);
       }
       if (mountedRef.current) setProcessing(false);
       setTimeout(() => { pickLockRef.current = false; }, 300);
@@ -190,8 +191,9 @@ export function MultiAngleCaptureGuide({
         } else {
           if (mountedRef.current) setCaptureError('카메라 캡처에 실패했습니다. 다시 촬영해 주세요.');
         }
-      } catch {
+      } catch (err) {
         if (mountedRef.current) setCaptureError('카메라 캡처 중 오류가 발생했습니다. 다시 촬영해 주세요.');
+        console.error('[MultiAngleGuide] camera capture failed:', err);
       }
       if (mountedRef.current) setProcessing(false);
       setTimeout(() => { pickLockRef.current = false; }, 300);

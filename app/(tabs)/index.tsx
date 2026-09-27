@@ -316,6 +316,7 @@ export default function CameraScreen() {
 
   const handleCapture = async () => {
     if (!cameraRef.current || processing || !cameraReady || autoSaving) return;
+    setIsActive(false);
     setMultiAngleVisible(true);
   };
 
@@ -381,6 +382,7 @@ export default function CameraScreen() {
     if (stereoOverlayVisible) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     setMultiAngleVisible(false);
+    setIsActive(true);
     if (!sorted[0]?.base64) return;
 
     setStereoProgress(makeInitialProgress());
@@ -407,6 +409,9 @@ export default function CameraScreen() {
 
   const handleMultiAngleCapture = async (_angleId: string): Promise<{ base64: string; mimeType: string } | null> => {
     if (isWebPlatform()) {
+      // The MultiAngleCaptureGuide modal renders its own InlineCameraViewfinder
+      // which should be the primary capture source. This fallback only fires
+      // if the modal's viewfinder failed to start.
       if (webCameraRef.current?.isReady()) {
         try {
           const result = await withTimeout(
@@ -415,15 +420,17 @@ export default function CameraScreen() {
             '카메라 캡처',
           );
           if (result?.base64) return result;
-        } catch {
-          // Fall through to file picker
+        } catch (err) {
+          console.error('[MultiAngleCapture] webCameraRef fallback failed:', err);
         }
       }
+      // File picker fallback
       try {
         const images = await withTimeout(pickImageWeb(false, 1, true), PICK_TIMEOUT_MS, '카메라 캡처');
         if (images.length === 0) return null;
         return { base64: images[0].base64, mimeType: images[0].mimeType };
-      } catch {
+      } catch (err) {
+        console.error('[MultiAngleCapture] file picker fallback failed:', err);
         return null;
       }
     }
@@ -449,7 +456,8 @@ export default function CameraScreen() {
       );
       if (!isMountedRef.current) return null;
       return { base64: cleanBase64(compressedDataUrl), mimeType: getMimeTypeFromDataUrl(compressedDataUrl) };
-    } catch {
+    } catch (err) {
+      console.error('[MultiAngleCapture] native capture failed:', err);
       return null;
     }
   };
@@ -460,7 +468,8 @@ export default function CameraScreen() {
         const images = await withTimeout(pickImageWeb(false, 1), PICK_TIMEOUT_MS, '사진 선택');
         if (images.length === 0) return null;
         return { base64: images[0].base64, mimeType: images[0].mimeType };
-      } catch {
+      } catch (err) {
+        console.error('[MultiAnglePick] web image pick failed:', err);
         return null;
       }
     }
@@ -537,6 +546,7 @@ export default function CameraScreen() {
     if (stereoOverlayVisible) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     setFittingGuideVisible(false);
+    setIsActive(true);
     if (sorted.length < 2) return;
 
     setStereoProgress(makeInitialProgress());
@@ -774,7 +784,7 @@ export default function CameraScreen() {
               autoSaving={stereoOverlayVisible}
               autoSaveToast={null}
               autoSaveStep={1}
-              onMultiAnglePress={() => setFittingGuideVisible(true)}
+              onMultiAnglePress={() => { setIsActive(false); setFittingGuideVisible(true); }}
               onCameraReady={setCameraReady}
               simplified
             />
@@ -789,7 +799,7 @@ export default function CameraScreen() {
             <View style={styles.shutterRow}>
               <TouchableOpacity
                 style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, stereoOverlayVisible && styles.shutterBtnCapturing]}
-                onPress={() => setFittingGuideVisible(true)}
+                onPress={() => { setIsActive(false); setFittingGuideVisible(true); }}
                 disabled={stereoOverlayVisible || !cameraReady}
                 activeOpacity={0.85}
               >
@@ -803,7 +813,7 @@ export default function CameraScreen() {
 
           <MultiAngleCaptureGuide
             visible={fittingGuideVisible}
-            onClose={() => setFittingGuideVisible(false)}
+            onClose={() => { setFittingGuideVisible(false); setIsActive(true); }}
             onComplete={handleFittingGuideComplete}
             onPickImage={handleMultiAnglePick}
             onCaptureImage={handleMultiAngleCapture}
@@ -848,7 +858,7 @@ export default function CameraScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.backToModeBtn}
-            onPress={() => setFittingGuideVisible(true)}
+            onPress={() => { setIsActive(false); setFittingGuideVisible(true); }}
             activeOpacity={0.7}
           >
             <Text style={styles.backToModeText}>갤러리에서 선택</Text>
@@ -902,7 +912,7 @@ export default function CameraScreen() {
           <View style={styles.shutterRow}>
             <TouchableOpacity
               style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, stereoOverlayVisible && styles.shutterBtnCapturing]}
-              onPress={() => setFittingGuideVisible(true)}
+              onPress={() => { setIsActive(false); setFittingGuideVisible(true); }}
               disabled={stereoOverlayVisible || !cameraReady}
               activeOpacity={0.85}
             >
@@ -916,7 +926,7 @@ export default function CameraScreen() {
 
         <MultiAngleCaptureGuide
           visible={fittingGuideVisible}
-          onClose={() => setFittingGuideVisible(false)}
+          onClose={() => { setFittingGuideVisible(false); setIsActive(true); }}
           onComplete={handleFittingGuideComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1008,7 +1018,7 @@ export default function CameraScreen() {
 
         <MultiAngleCaptureGuide
           visible={multiAngleVisible}
-          onClose={() => setMultiAngleVisible(false)}
+          onClose={() => { setMultiAngleVisible(false); setIsActive(true); }}
           onComplete={handleMultiAngleComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1122,7 +1132,7 @@ export default function CameraScreen() {
       {/* Multi-Angle Capture Guide */}
       <MultiAngleCaptureGuide
         visible={multiAngleVisible}
-        onClose={() => setMultiAngleVisible(false)}
+        onClose={() => { setMultiAngleVisible(false); setIsActive(true); }}
         onComplete={handleMultiAngleComplete}
         onPickImage={handleMultiAnglePick}
         onCaptureImage={handleMultiAngleCapture}

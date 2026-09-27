@@ -111,6 +111,7 @@ export const InlineCameraViewfinder = forwardRef<
     } catch (err) {
       if (!mountedRef.current || gen !== streamGenRef.current) return;
       const msg = err instanceof Error ? err.message : '카메라 접근 실패';
+      console.error('[InlineCameraViewfinder] stream error:', msg, err);
       if (msg.includes('Permission') || msg.includes('NotAllowed')) {
         setError('카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라를 허용해주세요.');
       } else if (msg.includes('NotFound') || msg.includes('NotReadable')) {
@@ -173,7 +174,8 @@ export const InlineCameraViewfinder = forwardRef<
       canvas.width = 0;
       canvas.height = 0;
       return await compressCaptureFrameToBlob(rawBase64, 'image/jpeg');
-    } catch {
+    } catch (err) {
+      console.error('[InlineCameraViewfinder] captureWeb failed:', err);
       return null;
     }
   }, [cameraReady, facing]);
@@ -191,7 +193,8 @@ export const InlineCameraViewfinder = forwardRef<
         return await compressCaptureFrameToBlob(photo.base64, 'image/jpeg');
       }
       return null;
-    } catch {
+    } catch (err) {
+      console.error('[InlineCameraViewfinder] captureNative failed:', err);
       return null;
     }
   }, []);
