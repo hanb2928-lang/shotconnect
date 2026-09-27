@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Alert,
   Platform,
-  Dimensions,
 } from 'react-native';
 import type {
   BottomTabBarProps,
@@ -40,8 +39,7 @@ const HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 };
 
 export type TabBadgeMap = Record<string, boolean>;
 
-const { width: screenWidth } = Dimensions.get('window');
-const isDesktop = Platform.OS === 'web' && screenWidth >= 768;
+const isDesktop = Platform.OS === 'web';
 
 export function ScrollableTabBar({ state, navigation, badges }: BottomTabBarProps & { badges?: TabBadgeMap }) {
   const insets = useSafeAreaInsets();
