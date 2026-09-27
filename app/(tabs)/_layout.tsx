@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
 import { Tabs } from 'expo-router';
 import { theme } from '@/lib/theme';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react-native';
+import { InspectorPanel } from '@/components/InspectorPanel';
 
 const ScrollableTabBar = lazy(() =>
   import('@/components/ScrollableTabBar').then((m) => ({ default: m.ScrollableTabBar })),
@@ -44,19 +45,21 @@ export default function TabLayout() {
       {isWeb && (
         <View style={[styles.inspector, inspectorOpen ? styles.inspectorOpen : styles.inspectorCollapsed]}>
           {inspectorOpen ? (
-            <>
+            <View style={styles.inspectorInner}>
               <View style={styles.inspectorHeader}>
-                <Text style={styles.inspectorTitle}>AI 프롬프트</Text>
+                <Text style={styles.inspectorTitle}>다이나믹 인스펙터</Text>
                 <Pressable onPress={toggleInspector} hitSlop={12}>
                   <PanelRightClose size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
                 </Pressable>
               </View>
-              <View style={styles.inspectorBody}>
-                <Text style={styles.inspectorHint}>
-                  프롬프트와 퍼블리싱 옵션은 여기에 표시됩니다.
-                </Text>
+              <View style={styles.inspectorContent}>
+                <InspectorPanel
+                  visible
+                  onClose={toggleInspector}
+                  currentCutLabel="현재 워크스페이스"
+                />
               </View>
-            </>
+            </View>
           ) : (
             <Pressable onPress={toggleInspector} style={styles.inspectorExpandBtn} hitSlop={12}>
               <PanelRightOpen size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
@@ -93,34 +96,31 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingTop: 16,
   },
-  inspectorExpandBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+  inspectorInner: {
+    flex: 1,
   },
   inspectorHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   inspectorTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: theme.typography.fontFamily.semiBold,
     color: theme.colors.dark.text,
   },
-  inspectorBody: {
-    padding: 20,
+  inspectorContent: {
+    flex: 1,
   },
-  inspectorHint: {
-    fontSize: 12,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
-    lineHeight: 18,
+  inspectorExpandBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
