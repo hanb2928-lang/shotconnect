@@ -48,25 +48,27 @@ export default function TabLayout() {
   return (
     <InspectorContext.Provider value={ctxValue}>
       <View style={styles.workspaceRoot}>
-        {/* Left sidebar + center canvas — managed by Tabs + custom tabBar */}
-        <Tabs
-          initialRouteName="index"
-          tabBar={(props) => (
-            <Suspense fallback={<TabBarFallback />}>
-              <ScrollableTabBar {...props} badges={{}} />
-            </Suspense>
-          )}
-          screenOptions={{
-            headerShown: false,
-            tabBarStyle: { display: 'none' },
-          }}
-        >
-          <Tabs.Screen name="index" />
-          <Tabs.Screen name="marketing" />
-          <Tabs.Screen name="assets" />
-          <Tabs.Screen name="affiliate" options={{ href: null }} />
-          <Tabs.Screen name="analytics" options={{ href: null }} />
-        </Tabs>
+        {/* Center canvas — flex: 1 to fill space between sidebar and inspector */}
+        <View style={styles.tabsWrapper}>
+          <Tabs
+            initialRouteName="index"
+            tabBar={(props) => (
+              <Suspense fallback={<TabBarFallback />}>
+                <ScrollableTabBar {...props} badges={{}} />
+              </Suspense>
+            )}
+            screenOptions={{
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+            }}
+          >
+            <Tabs.Screen name="index" />
+            <Tabs.Screen name="marketing" />
+            <Tabs.Screen name="assets" />
+            <Tabs.Screen name="affiliate" options={{ href: null }} />
+            <Tabs.Screen name="analytics" options={{ href: null }} />
+          </Tabs>
+        </View>
 
         {/* Right inspector — collapsible, web only */}
         {isWeb && (
@@ -111,6 +113,10 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     backgroundColor: '#121214',
+    height: '100%',
+  },
+  tabsWrapper: {
+    flex: 1,
   },
   fallback: {
     width: 64,
@@ -121,6 +127,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: 'rgba(255, 255, 255, 0.08)',
     overflow: 'hidden',
+    height: '100%',
   },
   inspectorOpen: {
     width: 320,

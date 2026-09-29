@@ -1174,10 +1174,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#121214',
   },
-  toonScreenInner: {
-    flex: 1,
-    width: '100%',
-  },
   // Mode selection screen
   modeSelectContainer: {
     flex: 1,
