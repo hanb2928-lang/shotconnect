@@ -4,7 +4,8 @@ import { Tabs } from 'expo-router';
 import { theme } from '@/lib/theme';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react-native';
 import { InspectorPanel, type BoundAffiliateLink } from '@/components/InspectorPanel';
-import { InspectorContext, type InspectorContextValue } from '@/lib/inspectorContext';
+import { InspectorContext, type InspectorContextValue, type InspectorMode } from '@/lib/inspectorContext';
+import type { ToonCharacter } from '@/components/PhotoToonUpload';
 
 const ScrollableTabBar = lazy(() =>
   import('@/components/ScrollableTabBar').then((m) => ({ default: m.ScrollableTabBar })),
@@ -20,6 +21,10 @@ export default function TabLayout() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [boundLinks, setBoundLinks] = useState<BoundAffiliateLink[]>([]);
   const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
+  const [inspectorMode, setInspectorMode] = useState<InspectorMode>('affiliate');
+  const [toonCharacter, setToonCharacter] = useState<ToonCharacter | null>(null);
+  const [selectedPresetId, setSelectedPresetId] = useState('veteran');
+  const [toneLevel, setToneLevel] = useState(50);
   const toggleInspector = useCallback(() => setInspectorOpen((v) => !v), []);
 
   const handleLinkBound = useCallback((link: BoundAffiliateLink) => {
@@ -30,6 +35,14 @@ export default function TabLayout() {
     boundLinks,
     selectedCutId,
     setSelectedCutId,
+    inspectorMode,
+    setInspectorMode,
+    toonCharacter,
+    setToonCharacter,
+    selectedPresetId,
+    setSelectedPresetId,
+    toneLevel,
+    setToneLevel,
   };
 
   return (
@@ -72,6 +85,12 @@ export default function TabLayout() {
                     onClose={toggleInspector}
                     currentCutLabel={selectedCutId ? `만화 컷 ${selectedCutId}` : '현재 워크스페이스'}
                     onLinkBound={handleLinkBound}
+                    inspectorMode={inspectorMode}
+                    toonCharacter={toonCharacter}
+                    selectedPresetId={selectedPresetId}
+                    onPresetSelect={setSelectedPresetId}
+                    toneLevel={toneLevel}
+                    onToneChange={setToneLevel}
                   />
                 </View>
               </View>

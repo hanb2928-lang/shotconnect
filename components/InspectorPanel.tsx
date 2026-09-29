@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
+  Image,
 } from 'react-native';
 import {
   Search,
@@ -24,12 +25,17 @@ import {
   Send,
   Trash2,
   Plus,
+  User,
+  Sliders,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { getUserSettings, updateUserSettings } from '@/lib/settings';
 import { fetchAffiliatePlatforms, generateSearchAffiliateLink, type ManagedAffiliatePlatform } from '@/lib/affiliatePlatformManager';
 import type { UserSettings } from '@/types/database';
+import type { ToonCharacter } from '@/components/PhotoToonUpload';
+import { TOON_PERSONA_PRESETS } from '@/components/PhotoToonUpload';
+import type { InspectorMode } from '@/lib/inspectorContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -53,6 +59,12 @@ interface InspectorPanelProps {
   currentCutLabel?: string;
   onLinkBound?: (link: BoundAffiliateLink) => void;
   onPromptPublish?: (config: AiPromptConfig) => void;
+  inspectorMode?: InspectorMode;
+  toonCharacter?: ToonCharacter | null;
+  selectedPresetId?: string;
+  onPresetSelect?: (id: string) => void;
+  toneLevel?: number;
+  onToneChange?: (level: number) => void;
 }
 
 interface SearchResult {
@@ -74,6 +86,12 @@ export function InspectorPanel({
   currentCutLabel,
   onLinkBound,
   onPromptPublish,
+  inspectorMode = 'affiliate',
+  toonCharacter = null,
+  selectedPresetId = 'veteran',
+  onPresetSelect,
+  toneLevel = 50,
+  onToneChange,
 }: InspectorPanelProps) {
   // ─── Section expansion state ───
   const [coupangOpen, setCoupangOpen] = useState(true);
@@ -255,6 +273,122 @@ export function InspectorPanel({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* ─── Persona Mode: Character & Style Settings ─── */}
+        {inspectorMode === 'persona' && (
+          <View style={styles.personaModeWrap}>
+            <View style={styles.personaHeader}>
+              <View style={styles.personaHeaderIcon}>
+                <User size={16} color={theme.colors.primary[400]} strokeWidth={2.5} />
+              </View>
+              <View>
+                <Text style={styles.personaHeaderTitle}>캐릭터 페르소나 & 스타일</Text>
+                <Text style={styles.personaHeaderSub}>만화 캐릭터 설정 및 숏툰 주입</Text>
+              </View>
+            </View>
+
+            {/* Character preview */}
+            {toonCharacter ? (
+              <View style={styles.personaPreviewCard}>
+                <Image
+                  source={{ uri: toonCharacter.imageUrl }}
+                  style={styles.personaPreviewImg}
+                  resizeMode="cover"
+                />
+                <View style={styles.personaPreviewInfo}>
+                  <Text style={styles.personaPreviewLabel}>적용된 캐릭터</Text>
+                  <Text style={styles.personaPreviewPreset}>
+                    {TOON_PERSONA_PRESETS.find((p) => p.id === toonCharacter.presetId)?.emoji}{' '}
+                    {TOON_PERSONA_PRESETS.find((p) => p.id === toonCharacter.presetId)?.label}
+                  </Text>
+                  <Text style={styles.personaPreviewTone}>톤 강도: {toonCharacter.toneLevel}%</Text>
+                </View>
+                <View style={styles.personaPreviewBadge}>
+                  <Check size={12} color="#fff" strokeWidth={2.5} />
+                </View>
+              </View>
+            ) : (
+              <View style={styles.personaEmptyCard}>
+                <User size={24} color={theme.colors.dark.textFaint} strokeWidth={1.5} />
+                <Text style={styles.personaEmptyText}>중앙 캔버스에서 사진을 업로드하여</Text>
+                <Text style={styles.personaEmptyText}>만화 캐릭터를 생성해주세요</Text>
+              </View>
+            )}
+
+            {/* Preset selector */}
+            <Text style={styles.personaSectionLabel}>페르소나 프리셋</Text>
+            <View style={styles.personaPresetList}>
+              {TOON_PERSONA_PRESETS.map((preset) => {
+                const selected = preset.id === selectedPresetId;
+                return (
+                  <TouchableOpacity
+                    key={preset.id}
+                    style={[
+                      styles.personaPresetRow,
+                      selected && { borderColor: preset.toneColor, backgroundColor: preset.toneColor + '12' },
+                    ]}
+                    onPress={() => onPresetSelect?.(preset.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.personaPresetEmoji}>{preset.emoji}</Text>
+                    <View style={styles.personaPresetInfo}>
+                      <Text style={[styles.personaPresetName, selected && { color: preset.toneColor }]}>
+                        {preset.label}
+                      </Text>
+                      <Text style={styles.personaPresetDesc}>{preset.desc}</Text>
+                    </View>
+                    {selected && (
+                      <Check size={16} color={preset.toneColor} strokeWidth={2.5} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Tone slider */}
+            <View style={styles.personaToneSection}>
+              <View style={styles.personaToneHeader}>
+                <Sliders size={14} color={theme.colors.primary[400]} strokeWidth={2} />
+                <Text style={styles.personaToneLabel}>톤앤매너 강도</Text>
+                <Text style={styles.personaToneValue}>{toneLevel}%</Text>
+              </View>
+              <View style={styles.personaToneTrack}>
+                <View style={[styles.personaToneFill, { width: `${toneLevel}%` }]} />
+              </View>
+              <View style={styles.personaToneMarks}>
+                {([0, 25, 50, 75, 100] as const).map((mark) => (
+                  <TouchableOpacity
+                    key={mark}
+                    style={styles.personaToneMarkBtn}
+                    onPress={() => onToneChange?.(mark)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.personaToneDot, toneLevel === mark && styles.personaToneDotActive]} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.personaToneLabels}>
+                <Text style={styles.personaToneLabelSmall}>원본</Text>
+                <Text style={styles.personaToneLabelSmall}>과장</Text>
+              </View>
+            </View>
+
+            {/* Apply button */}
+            <TouchableOpacity
+              style={[styles.personaApplyBtn, !toonCharacter && styles.personaApplyBtnDisabled]}
+              disabled={!toonCharacter}
+              activeOpacity={0.85}
+            >
+              <Check size={16} color="#fff" strokeWidth={2.5} />
+              <Text style={styles.personaApplyBtnText}>캐릭터 고정 및 숏툰 적용</Text>
+            </TouchableOpacity>
+
+            <View style={{ height: 16 }} />
+          </View>
+        )}
+
+        {/* ─── Affiliate Mode: Original sections ─── */}
+        {inspectorMode !== 'persona' && (
+        <>
         {/* ─── Section 1: Coupang Partners Search ─── */}
         <SectionHeader
           open={coupangOpen}
@@ -544,6 +678,8 @@ export function InspectorPanel({
         )}
 
         <View style={{ height: 24 }} />
+        </>
+        )}
       </ScrollView>
     </View>
   );
@@ -1065,5 +1201,212 @@ const styles = StyleSheet.create({
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.dark.textFaint,
     marginLeft: 4,
+  },
+  // ─── Persona Mode ───
+  personaModeWrap: {
+    gap: 12,
+  },
+  personaHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  personaHeaderIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: theme.colors.primary[500] + '18',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  personaHeaderTitle: {
+    fontSize: 14,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.text,
+  },
+  personaHeaderSub: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textFaint,
+    marginTop: 2,
+  },
+  personaPreviewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#1F1F23',
+    borderWidth: 1,
+    borderColor: theme.colors.primary[500] + '30',
+  },
+  personaPreviewImg: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+  },
+  personaPreviewInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  personaPreviewLabel: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textFaint,
+  },
+  personaPreviewPreset: {
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.text,
+  },
+  personaPreviewTone: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.primary[400],
+  },
+  personaPreviewBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: theme.colors.success[500],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  personaEmptyCard: {
+    alignItems: 'center',
+    gap: 8,
+    padding: 20,
+    borderRadius: 10,
+    backgroundColor: '#1F1F23',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderStyle: 'dashed',
+  },
+  personaEmptyText: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textFaint,
+    textAlign: 'center',
+  },
+  personaSectionLabel: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.textDim,
+    marginTop: 4,
+  },
+  personaPresetList: {
+    gap: 6,
+  },
+  personaPresetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: '#1F1F23',
+  },
+  personaPresetEmoji: {
+    fontSize: 18,
+  },
+  personaPresetInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  personaPresetName: {
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.text,
+  },
+  personaPresetDesc: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textFaint,
+  },
+  personaToneSection: {
+    gap: 6,
+    marginTop: 4,
+  },
+  personaToneHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  personaToneLabel: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.textDim,
+  },
+  personaToneValue: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.primary[400],
+  },
+  personaToneTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#18181B',
+  },
+  personaToneFill: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: theme.colors.primary[500],
+  },
+  personaToneMarks: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 6,
+    marginTop: -4,
+  },
+  personaToneMarkBtn: {
+    width: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  personaToneDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  personaToneDotActive: {
+    backgroundColor: theme.colors.primary[400],
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  personaToneLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  personaToneLabelSmall: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textFaint,
+  },
+  personaApplyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: theme.colors.success[500],
+    marginTop: 4,
+  },
+  personaApplyBtnDisabled: {
+    opacity: 0.4,
+  },
+  personaApplyBtnText: {
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: '#fff',
   },
 });

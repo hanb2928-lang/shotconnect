@@ -725,6 +725,11 @@ export default function CameraScreen() {
             onClose={() => setScreenPhase('mode_select')}
             boundLinks={inspectorCtx.boundLinks}
             onCutSelected={(cutId) => inspectorCtx.setSelectedCutId(cutId)}
+            toonCharacter={inspectorCtx.toonCharacter}
+            onCharacterCreated={(char) => {
+              inspectorCtx.setToonCharacter(char);
+              inspectorCtx.setInspectorMode('persona');
+            }}
           />
         </View>
         {error && (
