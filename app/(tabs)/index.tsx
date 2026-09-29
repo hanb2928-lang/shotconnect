@@ -1178,8 +1178,6 @@ const styles = StyleSheet.create({
   },
   toonScreenInner: {
     flex: 1,
-    maxWidth: 640,
-    alignSelf: 'center' as const,
     width: '100%',
   },
   // Mode selection screen

@@ -10,7 +10,7 @@ import {
   Platform,
   Image,
   ActivityIndicator,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import {
   Grid2x2,
@@ -99,6 +99,7 @@ export function ToonModeEditor({
   onCharacterCreated,
 }: ToonModeEditorProps) {
   const inspectorCtx = useInspectorContext();
+  const { width: winW } = useWindowDimensions();
   const [slots, setSlots] = useState<CaptureSlot[]>([]);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState(inspectorCtx.selectedPresetId);
@@ -220,7 +221,10 @@ export function ToonModeEditor({
 
   const handlePublish = useCallback(() => { onPublish?.(cuts); }, [cuts, onPublish]);
 
-  if (!visible) return null;
+  // Responsive column count: 4 cols on very wide, 3 on wide, 2 on narrow
+  const cutCols = winW > 1200 ? 4 : winW > 700 ? 3 : 2;
+  const cutGap = 12;
+  const cutCardWidth = `calc((100% - ${cutGap * (cutCols - 1)}px) / ${cutCols})`;
 
   const selectedCut = cuts.find((c) => c.id === selectedCutId) ?? null;
   const currentPreset = TOON_PERSONA_PRESETS.find((p) => p.id === selectedPresetId);
@@ -258,7 +262,7 @@ export function ToonModeEditor({
             <Text style={[styles.stepCount, { color: TEXT_FAINT }]}>{slots.length}/{MAX_SLOTS}장</Text>
           </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.slotScrollContent}>
+          <View style={styles.slotScrollContent}>
             {slots.map((slot, i) => (
               <View key={slot.id} style={[styles.slotCard, { borderColor: BORDER }]}>
                 <Image source={{ uri: slot.uri }} style={styles.slotImage} resizeMode="cover" />
@@ -287,7 +291,7 @@ export function ToonModeEditor({
             {Array.from({ length: Math.max(0, MAX_SLOTS - slots.length - 1) }, (_, i) => (
               <View key={`empty-${i}`} style={[styles.slotCard, styles.slotPlaceholder, { borderColor: BORDER }]} />
             ))}
-          </ScrollView>
+          </View>
           <Text style={[styles.stepHint, { color: TEXT_FAINT }]}>
             상품 사진, 영수증, 자재 등을 드래그하거나 클릭하여 순서대로 쌓으세요
           </Text>
@@ -301,8 +305,7 @@ export function ToonModeEditor({
             </View>
             <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>페르소나 & 심리자극</Text>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.chipRow}>
+          <View style={styles.chipRow}>
               {TOON_PERSONA_PRESETS.map((preset) => {
                 const sel = preset.id === selectedPresetId;
                 return (
@@ -317,8 +320,7 @@ export function ToonModeEditor({
                   </TouchableOpacity>
                 );
               })}
-            </View>
-          </ScrollView>
+          </View>
           <View style={styles.psychoRow}>
             {PSYCHOLOGY_TONES.map((tone) => {
               const sel = tone.id === psychoTone;
@@ -378,6 +380,7 @@ export function ToonModeEditor({
                   key={cut.id}
                   style={[
                     styles.cutCard,
+                    { width: cutCardWidth as unknown as number },
                     isSelected && styles.cutCardSelected,
                   ]}
                   onPress={() => handleSelectCut(cut.id)}
@@ -501,7 +504,6 @@ export function ToonModeEditor({
 }
 
 const isWeb = Platform.OS === 'web';
-const winWidth = Dimensions.get('window').width;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -523,8 +525,8 @@ const styles = StyleSheet.create({
   stepTitle: { flex: 1, fontSize: 14, fontFamily: theme.typography.fontFamily.semiBold },
   stepCount: { fontSize: 12, fontFamily: theme.typography.fontFamily.medium },
   stepHint: { fontSize: 11, fontFamily: theme.typography.fontFamily.regular, lineHeight: 16 },
-  // Slots
-  slotScrollContent: { gap: 8 },
+  // Slots — flex wrap for wide layout
+  slotScrollContent: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   slotCard: { width: 80, height: 80, borderRadius: 10, borderWidth: 1.5, overflow: 'hidden', position: 'relative' },
   slotImage: { width: '100%', height: '100%' },
   slotOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', padding: 4 },
@@ -534,7 +536,7 @@ const styles = StyleSheet.create({
   slotAddText: { fontSize: 10, fontFamily: theme.typography.fontFamily.medium },
   slotPlaceholder: { borderStyle: 'dashed', opacity: 0.3 },
   // Chips
-  chipRow: { flexDirection: 'row', gap: 8 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   personaChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5 },
   psychoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   psychoChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5 },
@@ -549,8 +551,8 @@ const styles = StyleSheet.create({
   // ─── Analog manga cut grid ───
   cutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   cutCard: {
-    // Desktop: wider cards that fill the 3-split center column
-    width: isWeb && winWidth > 900 ? '32%' : isWeb ? '48%' : 150,
+    // Width is set dynamically via inline style; this is the fallback
+    width: '48%',
     minHeight: 220,
     borderRadius: 4,
     borderWidth: 2.5,
