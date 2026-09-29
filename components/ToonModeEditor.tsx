@@ -53,7 +53,6 @@ interface ToonModeEditorProps {
   onCharacterCreated?: (char: ToonCharacter) => void;
 }
 
-const MAX_SLOTS = 10;
 const MAX_CUTS = 12;
 
 let cutCounter = 0;
@@ -121,14 +120,25 @@ export function ToonModeEditor({
     reader.onload = () => {
       const uri = reader.result as string;
       setSlots((prev) => {
-        if (prev.find((_, i) => i === index)) {
+        if (index < prev.length) {
           return prev.map((s, i) => i === index ? { ...s, uri } : s);
         }
-        if (prev.length >= MAX_SLOTS) return prev;
         return [...prev, { id: makeSlotId(), uri }];
       });
     };
     reader.readAsDataURL(file);
+  }, []);
+
+  const handleSlotFiles = useCallback((files: FileList | File[]) => {
+    const valid = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    valid.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const uri = reader.result as string;
+        setSlots((prev) => [...prev, { id: makeSlotId(), uri }]);
+      };
+      reader.readAsDataURL(file);
+    });
   }, []);
 
   const handleSlotPick = useCallback((index: number) => {
@@ -136,19 +146,58 @@ export function ToonModeEditor({
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
+    input.multiple = true;
     input.onchange = (e: Event) => {
       const target = e.target as HTMLInputElement;
-      if (target.files && target.files[0]) handleSlotFile(index, target.files[0]);
+      if (index === -1 && target.files && target.files.length > 0) {
+        handleSlotFiles(target.files);
+      } else if (target.files && target.files[0]) {
+        handleSlotFile(index, target.files[0]);
+      }
     };
     input.click();
-  }, [handleSlotFile]);
+  }, [handleSlotFile, handleSlotFiles]);
 
   const handleSlotDrop = useCallback((index: number, e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOverSlot(null);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleSlotFile(index, e.dataTransfer.files[0]);
-  }, [handleSlotFile]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      if (index === -1 || index >= slots.length) {
+        handleSlotFiles(e.dataTransfer.files);
+      } else {
+        handleSlotFile(index, e.dataTransfer.files[0]);
+      }
+    }
+  }, [handleSlotFile, handleSlotFiles, slots.length]);
+
+  // Clipboard paste support — paste images directly into the slot area
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imageItems: DataTransferItem[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) imageItems.push(items[i]);
+      }
+      if (imageItems.length === 0) return;
+      e.preventDefault();
+      imageItems.forEach((item) => {
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const uri = reader.result as string;
+            setSlots((prev) => [...prev, { id: makeSlotId(), uri }]);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, []);
 
   const handleSlotRemove = useCallback((index: number) => {
     setSlots((prev) => prev.filter((_, i) => i !== index));
@@ -254,7 +303,7 @@ export function ToonModeEditor({
               <Text style={styles.stepBadgeText}>1</Text>
             </View>
             <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>캡처 입력</Text>
-            <Text style={[styles.stepCount, { color: TEXT_FAINT }]}>{slots.length}/{MAX_SLOTS}장</Text>
+            <Text style={[styles.stepCount, { color: TEXT_FAINT }]}>{slots.length}장</Text>
           </View>
 
           <View style={styles.slotRow}>
@@ -269,23 +318,18 @@ export function ToonModeEditor({
                 </View>
               </View>
             ))}
-            {slots.length < MAX_SLOTS && (
-              <TouchableOpacity
-                style={[styles.slotCard, styles.slotAdd, {
-                  borderColor: dragOverSlot === slots.length ? ACCENT : BORDER_SLATE,
-                  backgroundColor: dragOverSlot === slots.length ? ACCENT_SOFT : PAPER,
-                }]}
-                onPress={() => handleSlotPick(slots.length)}
-                activeOpacity={0.7}
-                {...({ onDrop: (e: React.DragEvent) => handleSlotDrop(slots.length, e), onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOverSlot(slots.length); }, onDragLeave: () => setDragOverSlot(null) } as any)}
-              >
-                <Upload size={20} color={TEXT_FAINT} strokeWidth={2} />
-                <Text style={[styles.slotAddText, { color: TEXT_FAINT }]}>추가</Text>
-              </TouchableOpacity>
-            )}
-            {Array.from({ length: Math.max(0, MAX_SLOTS - slots.length - 1) }, (_, i) => (
-              <View key={`empty-${i}`} style={[styles.slotCard, styles.slotPlaceholder, { borderColor: BORDER_SLATE }]} />
-            ))}
+            <TouchableOpacity
+              style={[styles.slotCard, styles.slotAdd, {
+                borderColor: dragOverSlot === -1 ? ACCENT : BORDER_SLATE,
+                backgroundColor: dragOverSlot === -1 ? ACCENT_SOFT : PAPER,
+              }]}
+              onPress={() => handleSlotPick(-1)}
+              activeOpacity={0.7}
+              {...({ onDrop: (e: React.DragEvent) => handleSlotDrop(-1, e), onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOverSlot(-1); }, onDragLeave: () => setDragOverSlot(null) } as any)}
+            >
+              <Upload size={20} color={TEXT_FAINT} strokeWidth={2} />
+              <Text style={[styles.slotAddText, { color: TEXT_FAINT }]}>추가</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -541,7 +585,6 @@ const styles = StyleSheet.create({
   slotRemove: { width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   slotAdd: { justifyContent: 'center', alignItems: 'center', gap: 4, borderStyle: 'dashed' },
   slotAddText: { fontSize: 10, fontFamily: theme.typography.fontFamily.medium },
-  slotPlaceholder: { borderStyle: 'dashed', opacity: 0.25 },
   // Chips
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   personaChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
