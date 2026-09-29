@@ -148,7 +148,7 @@ export default function CameraScreen() {
   const [workflowMountKey, setWorkflowMountKey] = useState(0);
   const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>(makeInitialProgress());
   const [stereoOverlayVisible, setStereoOverlayVisible] = useState(false);
-  const [screenPhase, setScreenPhase] = useState<ScreenPhase>('mode_select');
+  const [screenPhase, setScreenPhase] = useState<ScreenPhase>('toon');
   const [captureMode, setCaptureMode] = useState<CaptureMode>('single');
   const [contentTone, setContentTone] = useState<ContentTone>('raw');
   const [cleanMode, setCleanMode] = useState(false);
@@ -602,116 +602,48 @@ export default function CameraScreen() {
     }
   }, [studioMode, handleModeSelect]);
 
-  // ─── Mode Selection Screen ───
+  // ─── Slim mode launcher (replaces heavy mode_select) ───
   if (screenPhase === 'mode_select') {
     return (
-      <ScrollView style={styles.modeSelectContainer} contentContainerStyle={styles.modeSelectContent} showsVerticalScrollIndicator={false}>
-        <View style={[styles.modeSelectHeader, { paddingTop: safeTop + theme.spacing.lg }]}>
-          <View style={{ width: 80 }} />
-          <View style={{ flex: 1 }} />
-          <View style={{ width: 80 }} />
-        </View>
-
-        <TriggerBanner />
-
-        {/* ─── Ultra-slim mode toolbar ─── */}
-        <View style={styles.modeToolbar}>
-          <TouchableOpacity
-            style={[styles.modeTab, 'toon' === 'toon' && styles.modeTabActive]}
-            onPress={() => setScreenPhase('toon')}
-            activeOpacity={0.7}
-          >
-            <BookOpen size={15} color={theme.colors.primary[400]} strokeWidth={2.2} />
-            <Text style={styles.modeTabText}>만화모드</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeTab, contentTone === 'studio' && studioMode === 'auto-3d' && styles.modeTabActive]}
-            onPress={() => handleModeCardPress('single')}
-            activeOpacity={0.7}
-          >
-            <Orbit size={15} color={theme.colors.primary[400]} strokeWidth={2.2} />
-            <Text style={styles.modeTabText}>입체컷 오토</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeTab, contentTone === 'studio' && studioMode === 'ai-blend' && styles.modeTabActive]}
-            onPress={() => handleModeCardPress('fitting')}
-            activeOpacity={0.7}
-          >
-            <Layers size={15} color={theme.colors.primary[400]} strokeWidth={2.2} />
-            <Text style={styles.modeTabText}>AI 합성</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ─── Selected mode description (single line) ─── */}
-        <Text style={styles.modeDescText} numberOfLines={1}>
-          {studioMode === 'auto-3d' ? '정면·좌측·우측·후면·상부 순차 촬영 → AI 입체 숏폼'
-            : studioMode === 'ai-blend' ? '3~5컷 다각도 촬영 → 배경·모델 자연 합성'
-            : '만화 컷 그리드 + 제휴 상품 자동 매칭 숏툰'}
-        </Text>
-
-        <StudioPremiumAccordion
-          visible={contentTone === 'studio' && studioMode !== null}
-          mode={studioMode === 'ai-blend' ? 'ai-blend' : 'auto-3d'}
-          onValuesChange={(values) => setStudioSliders((prev) => ({ ...prev, ...values }))}
-        />
-
-        {contentTone === 'studio' && studioMode !== null && (
-          <TouchableOpacity style={styles.modeConfirmSlim} onPress={handleModeConfirm} activeOpacity={0.85}>
-            <Text style={styles.modeConfirmSlimText}>
-              {studioMode === 'auto-3d' ? '입체컷 시작' : 'AI 합성 시작'}
-            </Text>
-            <ArrowRight size={14} color="#fff" strokeWidth={2.5} />
-          </TouchableOpacity>
-        )}
-
-        {/* ─── Compact tone chips ─── */}
-        <View style={styles.toneChipRow}>
-          <Text style={styles.toneChipLabel}>톤</Text>
-          <TouchableOpacity
-            style={[styles.toneChip, contentTone === 'studio' && styles.toneChipActive]}
-            onPress={() => handleContentToneChange('studio')}
-            activeOpacity={0.7}
-          >
-            <Diamond size={12} color={contentTone === 'studio' ? '#fff' : theme.colors.dark.textDim} strokeWidth={2.2} />
-            <Text style={[styles.toneChipText, contentTone === 'studio' && styles.toneChipTextActive]}>
-              스튜디오
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toneChip, contentTone === 'raw' && styles.toneChipActive]}
-            onPress={() => handleContentToneChange('raw')}
-            activeOpacity={0.7}
-          >
-            <Zap size={12} color={contentTone === 'raw' ? '#fff' : theme.colors.dark.textDim} strokeWidth={2.2} />
-            <Text style={[styles.toneChipText, contentTone === 'raw' && styles.toneChipTextActive]}>
-              심리자극
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ─── Compact clean mode toggle (single line) ─── */}
-        <TouchableOpacity
-          style={styles.cleanModeSlim}
-          onPress={() => setCleanMode((v) => !v)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.cleanModeSlimLabel}>클린 모드 · 자막/문구 제외</Text>
-          <View style={[styles.cleanModeSwitchSlim, cleanMode && styles.cleanModeSwitchSlimActive]}>
-            <View style={[styles.cleanModeKnobSlim, cleanMode && styles.cleanModeKnobSlimActive]} />
+      <View style={[styles.container, { backgroundColor: '#121214' }]}>
+        <View style={{ paddingTop: safeTop + theme.spacing.md, paddingHorizontal: 16, gap: 10 }}>
+          <View style={styles.modeToolbar}>
+            <TouchableOpacity
+              style={[styles.modeTab, styles.modeTabActive]}
+              onPress={() => setScreenPhase('toon')}
+              activeOpacity={0.7}
+            >
+              <BookOpen size={15} color={theme.colors.primary[400]} strokeWidth={2.2} />
+              <Text style={styles.modeTabText}>만화모드</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modeTab}
+              onPress={() => handleModeCardPress('single')}
+              activeOpacity={0.7}
+            >
+              <Orbit size={15} color={theme.colors.dark.textDim} strokeWidth={2.2} />
+              <Text style={[styles.modeTabText, { color: theme.colors.dark.textDim }]}>입체컷 오토</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modeTab}
+              onPress={() => handleModeCardPress('fitting')}
+              activeOpacity={0.7}
+            >
+              <Layers size={15} color={theme.colors.dark.textDim} strokeWidth={2.2} />
+              <Text style={[styles.modeTabText, { color: theme.colors.dark.textDim }]}>AI 합성</Text>
+            </TouchableOpacity>
           </View>
-        </TouchableOpacity>
-
-        <CreditPurchaseModal
-          visible={creditModalVisible}
-          onClose={() => setCreditModalVisible(false)}
-        />
-
+        </View>
         {error && (
           <View style={styles.modeSelectErrorInline}>
             <Text style={styles.modeSelectErrorText}>{error}</Text>
           </View>
         )}
-      </ScrollView>
+        <CreditPurchaseModal
+          visible={creditModalVisible}
+          onClose={() => setCreditModalVisible(false)}
+        />
+      </View>
     );
   }
 
