@@ -4,7 +4,7 @@ import { Tabs } from 'expo-router';
 import { theme } from '@/lib/theme';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react-native';
 import { InspectorPanel, type BoundAffiliateLink } from '@/components/InspectorPanel';
-import { InspectorContext, type InspectorContextValue, type InspectorMode, type ToonStyle } from '@/lib/inspectorContext';
+import { InspectorContext, type InspectorContextValue, type InspectorMode, type ToonStyle, type ArtStyle, type InspectorCutData } from '@/lib/inspectorContext';
 import type { ToonCharacter } from '@/components/PhotoToonUpload';
 
 const ScrollableTabBar = lazy(() =>
@@ -24,15 +24,25 @@ export default function TabLayout() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [boundLinks, setBoundLinks] = useState<BoundAffiliateLink[]>([]);
   const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
+  const [cuts, setCuts] = useState<InspectorCutData[]>([]);
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>('affiliate');
   const [toonCharacter, setToonCharacter] = useState<ToonCharacter | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState('veteran');
   const [toneLevel, setToneLevel] = useState(50);
   const [toonStyle, setToonStyle] = useState<ToonStyle>('color');
+  const [artStyle, setArtStyle] = useState<ArtStyle>('digital-webtoon');
   const [batchToonTrigger, setBatchToonTrigger] = useState(0);
   const [batchTooning, setBatchTooning] = useState(false);
   const toggleInspector = useCallback(() => setInspectorOpen((v) => !v), []);
   const triggerBatchToon = useCallback(() => setBatchToonTrigger((n) => n + 1), []);
+
+  const handleUpdateCut = useCallback((id: string, updates: Partial<Omit<InspectorCutData, 'id'>>) => {
+    setCuts((prev) => prev.map((c) => c.id === id ? { ...c, ...updates } : c));
+  }, []);
+
+  const selectedCutIndex = selectedCutId
+    ? cuts.findIndex((c) => c.id === selectedCutId)
+    : -1;
 
   const handleLinkBound = useCallback((link: BoundAffiliateLink) => {
     setBoundLinks((prev) => [...prev.filter((b) => b.productId !== link.productId), link]);
@@ -42,6 +52,10 @@ export default function TabLayout() {
     boundLinks,
     selectedCutId,
     setSelectedCutId,
+    cuts,
+    setCuts,
+    onUpdateCut: handleUpdateCut,
+    selectedCutIndex,
     inspectorMode,
     setInspectorMode,
     toonCharacter,
@@ -52,6 +66,8 @@ export default function TabLayout() {
     setToneLevel,
     toonStyle,
     setToonStyle,
+    artStyle,
+    setArtStyle,
     batchToonTrigger,
     triggerBatchToon,
     batchTooning,
@@ -98,7 +114,9 @@ export default function TabLayout() {
                   <InspectorPanel
                     visible
                     onClose={toggleInspector}
-                    currentCutLabel={selectedCutId ? `만화 컷 ${selectedCutId}` : '현재 워크스페이스'}
+                    currentCutLabel={selectedCutIndex >= 0 ? `${selectedCutIndex + 1}번째 컷 편집 모드` : '현재 워크스페이스'}
+                    selectedCut={selectedCutIndex >= 0 ? cuts[selectedCutIndex] : undefined}
+                    onUpdateCut={handleUpdateCut}
                     onLinkBound={handleLinkBound}
                     inspectorMode={inspectorMode}
                     toonCharacter={toonCharacter}
@@ -109,6 +127,8 @@ export default function TabLayout() {
                     onToneChange={setToneLevel}
                     toonStyle={toonStyle}
                     onToonStyleChange={setToonStyle}
+                    artStyle={artStyle}
+                    onArtStyleChange={setArtStyle}
                     onBatchToonApply={triggerBatchToon}
                     batchTooning={batchTooning}
                   />

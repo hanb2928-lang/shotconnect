@@ -34,6 +34,7 @@ import type { BoundAffiliateLink } from '@/components/InspectorPanel';
 import { TOON_PERSONA_PRESETS, type ToonCharacter } from '@/components/PhotoToonUpload';
 import { useInspectorContext } from '@/lib/inspectorContext';
 import { applyToonFilter } from '@/lib/toonFilter';
+import { COUPANG_DISCLOSURE, getDisclosureForPlatforms } from '@/lib/disclosure';
 
 export interface ToonCut {
   id: string;
@@ -41,6 +42,7 @@ export interface ToonCut {
   speechBubble: string;
   affiliateLink: BoundAffiliateLink | null;
   imageUrl: string | null;
+  disclosureText?: string;
 }
 
 interface CaptureSlot {
@@ -51,7 +53,7 @@ interface CaptureSlot {
 interface ToonModeEditorProps {
   visible: boolean;
   onClose: () => void;
-  onPublish?: (cuts: ToonCut[]) => void;
+  onPublish?: (cuts: ToonCut[], blogHtml?: string) => void;
   onCutSelected?: (cutId: string) => void;
   boundLinks?: BoundAffiliateLink[];
   toonCharacter?: ToonCharacter | null;
@@ -125,6 +127,43 @@ export function ToonModeEditor({
   const [urlInput, setUrlInput] = useState('');
   const [urlCapturing, setUrlCapturing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'loaded'>('idle');
+  const [publishFeedback, setPublishFeedback] = useState<'idle' | 'copied'>('idle');
+
+  // Sync local cuts to inspector context so the panel can read cut data
+  useEffect(() => {
+    inspectorCtx.setCuts(cuts.map((c) => ({
+      id: c.id,
+      label: c.label,
+      speechBubble: c.speechBubble,
+      affiliateLink: c.affiliateLink,
+      imageUrl: c.imageUrl,
+    })));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cuts]);
+
+  // Reverse sync: pick up cut edits made from the inspector panel (via onUpdateCut)
+  const lastSyncRef = useRef<string>('');
+  useEffect(() => {
+    if (inspectorCtx.cuts.length === 0) return;
+    // Build a signature to detect if context cuts changed externally
+    const sig = inspectorCtx.cuts.map((c) => `${c.id}:${c.speechBubble}:${c.affiliateLink?.productId ?? ''}`).join('|');
+    if (sig === lastSyncRef.current) return;
+    lastSyncRef.current = sig;
+    // Merge external changes into local cuts (only speech bubble and affiliate link)
+    setCuts((prev) => prev.map((localCut) => {
+      const ctxCut = inspectorCtx.cuts.find((c) => c.id === localCut.id);
+      if (!ctxCut) return localCut;
+      // Only update if there's an actual difference to avoid loops
+      if (ctxCut.speechBubble !== localCut.speechBubble) {
+        return { ...localCut, speechBubble: ctxCut.speechBubble };
+      }
+      if ((ctxCut.affiliateLink?.productId ?? '') !== (localCut.affiliateLink?.productId ?? '')) {
+        return { ...localCut, affiliateLink: ctxCut.affiliateLink };
+      }
+      return localCut;
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectorCtx.cuts]);
 
   // Apply toon filter to a slot image and map it to the corresponding cut 1:1
   const applyToonToSlot = useCallback(async (slotId: string, rawUri: string) => {
@@ -133,6 +172,7 @@ export function ToonModeEditor({
       const toonedUri = await applyToonFilter(rawUri, {
         toneLevel: inspectorCtx.toneLevel,
         style: inspectorCtx.toonStyle,
+        artStyle: inspectorCtx.artStyle,
         edgeThreshold: 40,
         posterizeLevels: 4,
         dotSize: 3,
@@ -172,7 +212,7 @@ export function ToonModeEditor({
       setSlots((prev) => prev.map((s) => s.id === slotId ? { ...s, uri: rawUri } : s));
     }
     setTooningSlots(false);
-  }, [inspectorCtx.toneLevel, inspectorCtx.toonStyle]);
+  }, [inspectorCtx.toneLevel, inspectorCtx.toonStyle, inspectorCtx.artStyle]);
 
   const handleSlotFile = useCallback((index: number, file: File) => {
     if (!file.type.startsWith('image/')) return;
@@ -436,6 +476,7 @@ export function ToonModeEditor({
           const toonedUri = await applyToonFilter(slot.uri, {
             toneLevel: inspectorCtx.toneLevel,
             style: inspectorCtx.toonStyle,
+            artStyle: inspectorCtx.artStyle,
           });
           newCuts.push({
             id: existingCut?.id ?? makeCutId(),
@@ -479,9 +520,95 @@ export function ToonModeEditor({
     }
 
     setGenerating(false);
-  }, [generating, toonCharacter, slots, cuts, selectedPresetId, inspectorCtx.toneLevel, onCharacterCreated, relabelCuts]);
+  }, [generating, toonCharacter, slots, cuts, selectedPresetId, inspectorCtx.toneLevel, inspectorCtx.artStyle, onCharacterCreated, relabelCuts]);
 
-  const handlePublish = useCallback(() => { onPublish?.(cuts); }, [cuts, onPublish]);
+  // Compute the disclosure text for the last cut based on all bound affiliate platforms
+  const lastCutDisclosure = useCallback((allCuts: ToonCut[]): string => {
+    const platforms = new Set<string>();
+    allCuts.forEach((c) => {
+      if (c.affiliateLink && c.affiliateLink.productId && c.affiliateLink.platform) {
+        platforms.add(c.affiliateLink.platform);
+      }
+    });
+    if (platforms.size === 0) return COUPANG_DISCLOSURE;
+    return getDisclosureForPlatforms(Array.from(platforms));
+  }, []);
+
+  // Inject disclosure into the last cut whenever cuts or affiliate links change
+  useEffect(() => {
+    if (cuts.length === 0) return;
+    const lastIdx = cuts.length - 1;
+    const disclosure = lastCutDisclosure(cuts);
+    const lastCut = cuts[lastIdx];
+    if (lastCut.disclosureText !== disclosure) {
+      setCuts((prev) => prev.map((c, i) => i === lastIdx ? { ...c, disclosureText: disclosure } : c));
+    }
+  }, [cuts, lastCutDisclosure]);
+
+  // Build blog HTML markup with images, affiliate links, and disclosure
+  const buildBlogHtml = useCallback((allCuts: ToonCut[]): string => {
+    const disclosure = lastCutDisclosure(allCuts);
+    const cutImages = allCuts
+      .filter((c) => c.imageUrl)
+      .map((c, i) => {
+        const linkHtml = c.affiliateLink && c.affiliateLink.url
+          ? `<a href="${c.affiliateLink.url}" target="_blank" rel="nofollow noopener sponsored">${c.affiliateLink.productName || '제품 보기'}</a>`
+          : '';
+        const bubbleHtml = c.speechBubble ? `<figcaption>${c.speechBubble}</figcaption>` : '';
+        return `<figure><img src="${c.imageUrl}" alt="${c.label}" />${bubbleHtml}${linkHtml ? `<figcaption>${linkHtml}</figcaption>` : ''}</figure>`;
+      })
+      .join('\n');
+    return `<section class="shopformer-toon">\n${cutImages}\n<aside class="affiliate-disclosure">${disclosure}</aside>\n</section>`;
+  }, [lastCutDisclosure]);
+
+  const handlePublish = useCallback(() => {
+    const html = buildBlogHtml(cuts);
+    onPublish?.(cuts, html);
+    // Copy blog HTML to clipboard on web
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(html).then(() => {
+        setPublishFeedback('copied');
+        setTimeout(() => setPublishFeedback('idle'), 2500);
+      }).catch(() => {});
+    }
+  }, [cuts, onPublish, buildBlogHtml]);
+
+  // Re-apply toon filter to all slots when artStyle changes
+  const prevArtStyleRef = useRef(inspectorCtx.artStyle);
+  useEffect(() => {
+    if (prevArtStyleRef.current === inspectorCtx.artStyle) return;
+    prevArtStyleRef.current = inspectorCtx.artStyle;
+    const rawEntries = Array.from(rawImageMap.current.entries());
+    if (rawEntries.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      setTooningSlots(true);
+      for (let i = 0; i < rawEntries.length && i < MAX_CUTS; i++) {
+        const [slotId, rawUri] = rawEntries[i];
+        try {
+          const toonedUri = await applyToonFilter(rawUri, {
+            toneLevel: inspectorCtx.toneLevel,
+            style: inspectorCtx.toonStyle,
+            artStyle: inspectorCtx.artStyle,
+            edgeThreshold: 40,
+            posterizeLevels: 4,
+            dotSize: 3,
+          });
+          if (cancelled) return;
+          setSlots((prev) => prev.map((s) => s.id === slotId ? { ...s, uri: toonedUri } : s));
+          setCuts((prev) => {
+            if (i >= prev.length) return prev;
+            return prev.map((c, idx) => idx === i ? { ...c, imageUrl: toonedUri } : c);
+          });
+        } catch {
+          // skip on error
+        }
+      }
+      setTooningSlots(false);
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectorCtx.artStyle, inspectorCtx.toneLevel, inspectorCtx.toonStyle]);
 
   // Batch re-apply toon filter to all cuts when triggered from inspector
   useEffect(() => {
@@ -504,6 +631,7 @@ export function ToonModeEditor({
           const toonedUri = await applyToonFilter(rawUri, {
             toneLevel: inspectorCtx.toneLevel,
             style: inspectorCtx.toonStyle,
+            artStyle: inspectorCtx.artStyle,
             edgeThreshold: 40,
             posterizeLevels: 4,
             dotSize: 3,
@@ -774,8 +902,9 @@ export function ToonModeEditor({
 
           {/* ─── Manga tile grid ─── */}
           <View style={styles.cutGrid}>
-            {cuts.map((cut) => {
+            {cuts.map((cut, cutIdx) => {
               const isSelected = cut.id === selectedCutId;
+              const isLastCut = cutIdx === cuts.length - 1;
               return (
                 <Pressable
                   key={cut.id}
@@ -861,6 +990,13 @@ export function ToonModeEditor({
                       </Text>
                     </View>
                   )}
+
+                  {/* Fair-trade disclosure — auto-injected on last cut */}
+                  {isLastCut && cut.disclosureText && (
+                    <View style={styles.disclosureBadge}>
+                      <Text style={styles.disclosureText}>{cut.disclosureText}</Text>
+                    </View>
+                  )}
                 </Pressable>
               );
             })}
@@ -893,7 +1029,9 @@ export function ToonModeEditor({
 
           <TouchableOpacity style={[styles.publishBtn, { backgroundColor: ACCENT }]} onPress={handlePublish} activeOpacity={0.85}>
             <Sparkles size={16} color="#fff" strokeWidth={2.5} />
-            <Text style={styles.publishBtnText}>만화 콘텐츠 확정 & 발행</Text>
+            <Text style={styles.publishBtnText}>
+              {publishFeedback === 'copied' ? '블로그 HTML 복사됨!' : '만화 콘텐츠 확정 & 발행'}
+            </Text>
             <ArrowRight size={16} color="#fff" strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
@@ -1074,6 +1212,20 @@ const styles = StyleSheet.create({
   linkBadgeBoundText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.medium, color: theme.colors.success[600] },
   linkBadgeEmpty: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 4, paddingVertical: 2 },
   linkBadgeEmptyText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.regular, color: TEXT_FAINT },
+  // Disclosure badge — auto on last cut
+  disclosureBadge: {
+    paddingHorizontal: 4,
+    paddingVertical: 3,
+    backgroundColor: PAPER,
+    borderTopWidth: 0.5,
+    borderTopColor: BORDER_SLATE,
+  },
+  disclosureText: {
+    fontSize: 6,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: TEXT_FAINT,
+    lineHeight: 9,
+  },
   // Detail panel
   detailPanel: { padding: 14, borderRadius: 10, borderWidth: 1, gap: 8, marginTop: 4 },
   detailTitle: { fontSize: 13, fontFamily: theme.typography.fontFamily.semiBold },

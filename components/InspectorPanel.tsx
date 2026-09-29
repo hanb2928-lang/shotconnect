@@ -30,7 +30,9 @@ import {
   Upload,
   X,
   Palette,
+  Brush,
   Zap,
+  ImageIcon,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
@@ -39,7 +41,8 @@ import { fetchAffiliatePlatforms, generateSearchAffiliateLink, type ManagedAffil
 import type { UserSettings } from '@/types/database';
 import type { ToonCharacter } from '@/components/PhotoToonUpload';
 import { TOON_PERSONA_PRESETS } from '@/components/PhotoToonUpload';
-import type { InspectorMode, ToonStyle } from '@/lib/inspectorContext';
+import type { InspectorMode, ToonStyle, ArtStyle } from '@/lib/inspectorContext';
+import type { InspectorCutData } from '@/lib/inspectorContext';
 import { applyToonFilter } from '@/lib/toonFilter';
 
 const isWeb = Platform.OS === 'web';
@@ -73,6 +76,10 @@ interface InspectorPanelProps {
   onToneChange?: (level: number) => void;
   toonStyle?: ToonStyle;
   onToonStyleChange?: (style: ToonStyle) => void;
+  artStyle?: ArtStyle;
+  onArtStyleChange?: (style: ArtStyle) => void;
+  selectedCut?: InspectorCutData;
+  onUpdateCut?: (id: string, updates: Partial<Omit<InspectorCutData, 'id'>>) => void;
   onBatchToonApply?: () => void;
   batchTooning?: boolean;
 }
@@ -105,6 +112,10 @@ export function InspectorPanel({
   onToneChange,
   toonStyle = 'color',
   onToonStyleChange,
+  artStyle = 'digital-webtoon',
+  onArtStyleChange,
+  selectedCut,
+  onUpdateCut,
   onBatchToonApply,
   batchTooning = false,
 }: InspectorPanelProps) {
@@ -148,6 +159,7 @@ export function InspectorPanel({
         toonedUri = await applyToonFilter(rawUri, {
           toneLevel,
           style: toonStyle,
+          artStyle,
           edgeThreshold: 40,
           posterizeLevels: 4,
           dotSize: 3,
@@ -165,7 +177,7 @@ export function InspectorPanel({
       onCharacterCreated?.(newFace);
     };
     reader.readAsDataURL(file);
-  }, [selectedPresetId, toneLevel, toonStyle, onCharacterCreated]);
+  }, [selectedPresetId, toneLevel, toonStyle, artStyle, onCharacterCreated]);
 
   const handleFacePick = useCallback(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -354,6 +366,35 @@ export function InspectorPanel({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* ─── Selected Cut Info Bar ─── */}
+        {selectedCut && (
+          <View style={styles.selectedCutBar}>
+            <View style={styles.selectedCutBadge}>
+              <Text style={styles.selectedCutBadgeText}>{selectedCut.label}</Text>
+            </View>
+            {selectedCut.imageUrl ? (
+              <Image
+                source={{ uri: selectedCut.imageUrl }}
+                style={styles.selectedCutThumb}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.selectedCutThumbEmpty}>
+                <ImageIcon size={14} color={theme.colors.light.textFaint} strokeWidth={1.5} />
+              </View>
+            )}
+            <View style={styles.selectedCutInfo}>
+              <Text style={styles.selectedCutLinkLabel} numberOfLines={1}>
+                {selectedCut.affiliateLink
+                  ? selectedCut.affiliateLink.productName
+                  : '제휴 링크 미바인딩'}
+              </Text>
+              <Text style={styles.selectedCutBubblePreview} numberOfLines={1}>
+                {selectedCut.speechBubble || '말풍선 미입력'}
+              </Text>
+            </View>
+          </View>
+        )}
         {/* ─── Character & Style Settings (always visible at top) ─── */}
         <View style={styles.personaModeWrap}>
           <View style={styles.personaHeader}>
@@ -530,6 +571,34 @@ export function InspectorPanel({
                   흑백 망점 스케치
                 </Text>
               </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Art style selector — 3 distinctive drawing styles */}
+          <View style={styles.artStyleSection}>
+            <View style={styles.toonStyleHeader}>
+              <Brush size={14} color={theme.colors.primary[400]} strokeWidth={2} />
+              <Text style={styles.toonStyleLabel}>만화 화풍</Text>
+            </View>
+            <View style={styles.artStyleGrid}>
+              {([
+                { id: 'digital-webtoon', emoji: '🎨', label: '디지털 웹툰풍', desc: '깔끔·선명 라인' },
+                { id: 'analog-manga', emoji: '✒️', label: '아날로그 극화체', desc: '거친 펜선·묵직' },
+                { id: 'vintage-sketch', emoji: '✏️', label: '빈티지 카툰', desc: '손그림 스케치 톤' },
+              ] as const).map((opt) => (
+                <TouchableOpacity
+                  key={opt.id}
+                  style={[styles.artStyleChip, artStyle === opt.id && styles.artStyleChipActive]}
+                  onPress={() => onArtStyleChange?.(opt.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.artStyleEmoji}>{opt.emoji}</Text>
+                  <Text style={[styles.artStyleLabel, artStyle === opt.id && styles.artStyleLabelActive]}>
+                    {opt.label}
+                  </Text>
+                  <Text style={styles.artStyleDesc}>{opt.desc}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
@@ -1372,6 +1441,55 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   // ─── Persona Mode ───
+  // Selected cut info bar
+  selectedCutBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  selectedCutBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: '#A855F715',
+  },
+  selectedCutBadgeText: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: '#A855F7',
+  },
+  selectedCutThumb: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+  },
+  selectedCutThumbEmpty: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedCutInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  selectedCutLinkLabel: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: '#475569',
+  },
+  selectedCutBubblePreview: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: '#94A3B8',
+  },
   personaModeWrap: {
     gap: 12,
   },
@@ -1600,6 +1718,50 @@ const styles = StyleSheet.create({
   },
   toonStyleBtnTextActive: {
     color: '#A855F7',
+  },
+  // Art style selector
+  artStyleSection: {
+    marginTop: 14,
+    gap: 8,
+  },
+  artStyleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  artStyleChip: {
+    flex: 1,
+    minWidth: '47%',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    gap: 2,
+  },
+  artStyleChipActive: {
+    borderColor: '#A855F7',
+    backgroundColor: '#A855F715',
+  },
+  artStyleEmoji: {
+    fontSize: 18,
+  },
+  artStyleLabel: {
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: '#475569',
+    textAlign: 'center',
+  },
+  artStyleLabelActive: {
+    color: '#A855F7',
+  },
+  artStyleDesc: {
+    fontSize: 9,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: '#94A3B8',
+    textAlign: 'center',
   },
   // Batch apply button
   batchApplyBtn: {
