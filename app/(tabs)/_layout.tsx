@@ -12,7 +12,7 @@ const ScrollableTabBar = lazy(() =>
 );
 
 function TabBarFallback() {
-  return <View style={styles.fallback} />;
+  return null;
 }
 
 const isWeb = Platform.OS === 'web';
@@ -51,7 +51,7 @@ export default function TabLayout() {
   return (
     <InspectorContext.Provider value={ctxValue}>
       <View style={styles.workspaceRoot}>
-        {/* Center canvas — flex: 1 to fill space between sidebar and inspector */}
+        {/* Center canvas — full-width, no sidebar */}
         <View style={styles.tabsWrapper}>
           <Tabs
             initialRouteName="index"
@@ -116,14 +116,14 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     backgroundColor: C.bg,
-    height: '100%',
+    height: isWeb ? ('100vh' as any) : '100%',
   },
   tabsWrapper: {
     flex: 1,
+    height: '100%',
   },
   fallback: {
-    width: 64,
-    backgroundColor: C.surface,
+    width: 0,
   },
   inspector: {
     backgroundColor: C.surface,
@@ -143,6 +143,7 @@ const styles = StyleSheet.create({
   },
   inspectorInner: {
     flex: 1,
+    height: '100%',
   },
   inspectorHeader: {
     flexDirection: 'row',
@@ -161,6 +162,7 @@ const styles = StyleSheet.create({
   },
   inspectorContent: {
     flex: 1,
+    height: '100%',
   },
   inspectorExpandBtn: {
     width: 40,

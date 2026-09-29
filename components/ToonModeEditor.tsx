@@ -13,7 +13,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {
-  Grid2x2,
   Plus,
   Link2,
   Check,
@@ -76,18 +75,17 @@ const PSYCHOLOGY_TONES = [
   { id: 'empathy', label: '공감대폭발', emoji: '💛' },
 ];
 
-// Light manga color palette
-const INK = '#0f172a';
-const PAPER = '#f5f5f5';
-const PAPER_DARK = '#ffffff';
-const INK_LIGHT = '#94a3b8';
-const WHITE = '#ffffff';
-const BG_PAGE = '#f0f4fa';
-const BORDER = '#d6e0ee';
-const TEXT_DARK = '#0f172a';
+// Light theme palette with electric purple accent
+const BG_PAGE = '#FAFAFB';
+const CARD_SURFACE = '#FFFFFF';
+const PAPER = '#F8F8FA';
+const INK_LIGHT = '#94A3B8';
+const BORDER_SLATE = '#E2E8F0';
+const TEXT_DARK = '#1E293B';
 const TEXT_DIM = '#475569';
-const TEXT_FAINT = '#94a3b8';
-const ACCENT = '#3b82f6';
+const TEXT_FAINT = '#94A3B8';
+const ACCENT = '#A855F7';
+const ACCENT_SOFT = '#A855F715';
 
 export function ToonModeEditor({
   visible,
@@ -117,7 +115,6 @@ export function ToonModeEditor({
   const [editingBubbleId, setEditingBubbleId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
-  // ─── Slot handlers ───
   const handleSlotFile = useCallback((index: number, file: File) => {
     if (!file.type.startsWith('image/')) return;
     const reader = new FileReader();
@@ -157,7 +154,6 @@ export function ToonModeEditor({
     setSlots((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  // ─── Cut handlers ───
   const handleAddCut = useCallback(() => {
     setCuts((prev) => {
       if (prev.length >= MAX_CUTS) return prev;
@@ -221,25 +217,24 @@ export function ToonModeEditor({
 
   const handlePublish = useCallback(() => { onPublish?.(cuts); }, [cuts, onPublish]);
 
-  // Responsive column count: 4 cols on very wide, 3 on wide, 2 on narrow
-  const cutCols = winW > 1200 ? 4 : winW > 700 ? 3 : 2;
-  const cutGap = 12;
+  // Wider grids for full-width workspace — 4 cols on wide, 3 on medium, 2 on narrow
+  const cutCols = winW > 1400 ? 4 : winW > 800 ? 3 : 2;
+  const cutGap = 14;
   const cutCardWidth = `calc((100% - ${cutGap * (cutCols - 1)}px) / ${cutCols})`;
 
   const selectedCut = cuts.find((c) => c.id === selectedCutId) ?? null;
-  const currentPreset = TOON_PERSONA_PRESETS.find((p) => p.id === selectedPresetId);
 
   return (
     <View style={[styles.container, { backgroundColor: BG_PAGE }]}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: PAPER_DARK, borderBottomColor: BORDER }]}>
+      <View style={[styles.header, { backgroundColor: CARD_SURFACE, borderBottomColor: BORDER_SLATE }]}>
         <View style={styles.headerLeft}>
-          <View style={[styles.headerIcon, { backgroundColor: ACCENT + '15' }]}>
+          <View style={[styles.headerIcon, { backgroundColor: ACCENT_SOFT }]}>
             <BookOpen size={18} color={ACCENT} strokeWidth={2.5} />
           </View>
           <View>
-            <Text style={[styles.headerTitle, { color: TEXT_DARK }]}>아날로그 만화 숏툰 에디터</Text>
-            <Text style={[styles.headerSub, { color: TEXT_FAINT }]}>실제 만화책 같은 손그림 텍스처 · 리얼 말풍선</Text>
+            <Text style={[styles.headerTitle, { color: TEXT_DARK }]}>만화 숏툰 에디터</Text>
+            <Text style={[styles.headerSub, { color: TEXT_FAINT }]}>손그림 텍스처 · 리얼 말풍선 · 제휴 링크 바인딩</Text>
           </View>
         </View>
         <Pressable onPress={onClose} hitSlop={12}>
@@ -252,19 +247,19 @@ export function ToonModeEditor({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── STEP 1: Capture Slots (top fixed) ─── */}
-        <View style={[styles.stepSection, { backgroundColor: PAPER_DARK, borderColor: BORDER }]}>
+        {/* ─── STEP 1: Capture Slots — slim band, no box ─── */}
+        <View style={styles.stepBand}>
           <View style={styles.stepHeader}>
             <View style={[styles.stepBadge, { backgroundColor: ACCENT }]}>
               <Text style={styles.stepBadgeText}>1</Text>
             </View>
-            <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>제휴 쇼핑 캡처 입력</Text>
+            <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>캡처 입력</Text>
             <Text style={[styles.stepCount, { color: TEXT_FAINT }]}>{slots.length}/{MAX_SLOTS}장</Text>
           </View>
 
-          <View style={styles.slotScrollContent}>
+          <View style={styles.slotRow}>
             {slots.map((slot, i) => (
-              <View key={slot.id} style={[styles.slotCard, { borderColor: BORDER }]}>
+              <View key={slot.id} style={[styles.slotCard, { borderColor: BORDER_SLATE }]}>
                 <Image source={{ uri: slot.uri }} style={styles.slotImage} resizeMode="cover" />
                 <View style={styles.slotOverlay}>
                   <Text style={styles.slotIndex}>{i + 1}</Text>
@@ -277,8 +272,8 @@ export function ToonModeEditor({
             {slots.length < MAX_SLOTS && (
               <TouchableOpacity
                 style={[styles.slotCard, styles.slotAdd, {
-                  borderColor: dragOverSlot === slots.length ? ACCENT : BORDER,
-                  backgroundColor: dragOverSlot === slots.length ? ACCENT + '08' : PAPER,
+                  borderColor: dragOverSlot === slots.length ? ACCENT : BORDER_SLATE,
+                  backgroundColor: dragOverSlot === slots.length ? ACCENT_SOFT : PAPER,
                 }]}
                 onPress={() => handleSlotPick(slots.length)}
                 activeOpacity={0.7}
@@ -289,16 +284,16 @@ export function ToonModeEditor({
               </TouchableOpacity>
             )}
             {Array.from({ length: Math.max(0, MAX_SLOTS - slots.length - 1) }, (_, i) => (
-              <View key={`empty-${i}`} style={[styles.slotCard, styles.slotPlaceholder, { borderColor: BORDER }]} />
+              <View key={`empty-${i}`} style={[styles.slotCard, styles.slotPlaceholder, { borderColor: BORDER_SLATE }]} />
             ))}
           </View>
-          <Text style={[styles.stepHint, { color: TEXT_FAINT }]}>
-            상품 사진, 영수증, 자재 등을 드래그하거나 클릭하여 순서대로 쌓으세요
-          </Text>
         </View>
 
-        {/* ─── STEP 2: Persona & Tone ─── */}
-        <View style={[styles.stepSection, { backgroundColor: PAPER_DARK, borderColor: BORDER }]}>
+        {/* Soft divider between steps */}
+        <View style={styles.divider} />
+
+        {/* ─── STEP 2: Persona & Tone — inline strip ─── */}
+        <View style={styles.stepBand}>
           <View style={styles.stepHeader}>
             <View style={[styles.stepBadge, { backgroundColor: ACCENT }]}>
               <Text style={styles.stepBadgeText}>2</Text>
@@ -306,20 +301,20 @@ export function ToonModeEditor({
             <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>페르소나 & 심리자극</Text>
           </View>
           <View style={styles.chipRow}>
-              {TOON_PERSONA_PRESETS.map((preset) => {
-                const sel = preset.id === selectedPresetId;
-                return (
-                  <TouchableOpacity
-                    key={preset.id}
-                    style={[styles.personaChip, { borderColor: sel ? preset.toneColor : BORDER, backgroundColor: sel ? preset.toneColor + '12' : PAPER }]}
-                    onPress={() => { setSelectedPresetId(preset.id); inspectorCtx.setSelectedPresetId(preset.id); }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.chipEmoji}>{preset.emoji}</Text>
-                    <Text style={[styles.chipLabel, { color: sel ? preset.toneColor : TEXT_DIM }]} numberOfLines={1}>{preset.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+            {TOON_PERSONA_PRESETS.map((preset) => {
+              const sel = preset.id === selectedPresetId;
+              return (
+                <TouchableOpacity
+                  key={preset.id}
+                  style={[styles.personaChip, { borderColor: sel ? ACCENT : BORDER_SLATE, backgroundColor: sel ? ACCENT_SOFT : PAPER }]}
+                  onPress={() => { setSelectedPresetId(preset.id); inspectorCtx.setSelectedPresetId(preset.id); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.chipEmoji}>{preset.emoji}</Text>
+                  <Text style={[styles.chipLabel, { color: sel ? ACCENT : TEXT_DIM }]} numberOfLines={1}>{preset.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
           <View style={styles.psychoRow}>
             {PSYCHOLOGY_TONES.map((tone) => {
@@ -327,7 +322,7 @@ export function ToonModeEditor({
               return (
                 <TouchableOpacity
                   key={tone.id}
-                  style={[styles.psychoChip, { borderColor: sel ? ACCENT : BORDER, backgroundColor: sel ? ACCENT + '12' : PAPER }]}
+                  style={[styles.psychoChip, { borderColor: sel ? ACCENT : BORDER_SLATE, backgroundColor: sel ? ACCENT_SOFT : PAPER }]}
                   onPress={() => setPsychoTone(tone.id)}
                   activeOpacity={0.7}
                 >
@@ -339,39 +334,45 @@ export function ToonModeEditor({
           </View>
         </View>
 
-        {/* ─── STEP 3: Analog Manga Grid ─── */}
-        <View style={[styles.stepSection, { backgroundColor: PAPER_DARK, borderColor: BORDER }]}>
+        {/* Soft divider before the main grid */}
+        <View style={styles.divider} />
+
+        {/* ─── STEP 3: Manga Tile Grid — the visual centerpiece ─── */}
+        <View style={styles.gridSection}>
           <View style={styles.stepHeader}>
             <View style={[styles.stepBadge, { backgroundColor: ACCENT }]}>
               <Text style={styles.stepBadgeText}>3</Text>
             </View>
-            <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>만화 숏툰 타일 그리드</Text>
+            <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>만화 타일 그리드</Text>
             <Text style={[styles.stepCount, { color: TEXT_FAINT }]}>{cuts.length}/{MAX_CUTS}컷</Text>
           </View>
 
-          <TouchableOpacity
-            style={[styles.generateBtn, { backgroundColor: ACCENT }, generating && styles.generateBtnDisabled]}
-            onPress={handleGenerate}
-            disabled={generating}
-            activeOpacity={0.85}
-          >
-            {generating ? <ActivityIndicator size="small" color="#fff" /> : <Zap size={16} color="#fff" strokeWidth={2.5} />}
-            <Text style={styles.generateBtnText}>{generating ? '생성 중...' : '만화 숏툰 자동 생성'}</Text>
-          </TouchableOpacity>
+          {/* Generate + Add row — inline */}
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[styles.generateBtn, { backgroundColor: ACCENT }, generating && styles.generateBtnDisabled]}
+              onPress={handleGenerate}
+              disabled={generating}
+              activeOpacity={0.85}
+            >
+              {generating ? <ActivityIndicator size="small" color="#fff" /> : <Zap size={16} color="#fff" strokeWidth={2.5} />}
+              <Text style={styles.generateBtnText}>{generating ? '생성 중...' : '만화 숏툰 자동 생성'}</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.addPageBtn, { borderColor: BORDER }]}
-            onPress={handleAddCut}
-            disabled={cuts.length >= MAX_CUTS}
-            activeOpacity={0.7}
-          >
-            <Plus size={15} color={ACCENT} strokeWidth={2.5} />
-            <Text style={[styles.addPageBtnText, { color: ACCENT }, cuts.length >= MAX_CUTS && { opacity: 0.3 }]}>
-              컷 추가 ({cuts.length}/{MAX_CUTS})
-            </Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.addPageBtn, { borderColor: ACCENT }]}
+              onPress={handleAddCut}
+              disabled={cuts.length >= MAX_CUTS}
+              activeOpacity={0.7}
+            >
+              <Plus size={15} color={ACCENT} strokeWidth={2.5} />
+              <Text style={[styles.addPageBtnText, { color: ACCENT }, cuts.length >= MAX_CUTS && { opacity: 0.3 }]}>
+                컷 추가 ({cuts.length}/{MAX_CUTS})
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-          {/* ─── Analog manga tile grid ─── */}
+          {/* ─── Manga tile grid ─── */}
           <View style={styles.cutGrid}>
             {cuts.map((cut) => {
               const isSelected = cut.id === selectedCutId;
@@ -385,7 +386,7 @@ export function ToonModeEditor({
                   ]}
                   onPress={() => handleSelectCut(cut.id)}
                 >
-                  {/* Cut number badge — top-left, ink style */}
+                  {/* Cut number badge */}
                   <View style={styles.cutNumberBadge}>
                     <Text style={styles.cutNumberText}>{cut.label}</Text>
                   </View>
@@ -399,7 +400,7 @@ export function ToonModeEditor({
                     <Trash2 size={11} color={theme.colors.error[400]} strokeWidth={2} />
                   </TouchableOpacity>
 
-                  {/* Manga panel — paper texture background */}
+                  {/* Manga panel */}
                   <View style={styles.cutPanel}>
                     {toonCharacter?.imageUrl || cut.imageUrl ? (
                       <Image
@@ -413,7 +414,7 @@ export function ToonModeEditor({
                       </View>
                     )}
 
-                    {/* ─── Real speech bubble overlay ─── */}
+                    {/* Speech bubble overlay */}
                     {editingBubbleId === cut.id ? (
                       <View style={styles.bubbleFloat}>
                         <View style={styles.bubbleFloatShape}>
@@ -465,15 +466,15 @@ export function ToonModeEditor({
             })}
           </View>
 
-          {/* Selected cut detail */}
+          {/* Selected cut detail — inline */}
           {selectedCut && (
-            <View style={[styles.detailPanel, { backgroundColor: PAPER, borderColor: BORDER }]}>
+            <View style={[styles.detailPanel, { backgroundColor: PAPER, borderColor: BORDER_SLATE }]}>
               <Text style={[styles.detailTitle, { color: ACCENT }]}>{selectedCut.label} 편집 중</Text>
               <Text style={[styles.detailHint, { color: TEXT_DIM }]}>
                 우측 인스펙터에서 쿠팡 파트너스 상품을 검색하고 "바인딩" 버튼을 누르면 이 컷에 제휴 링크가 자동 연결됩니다.
               </Text>
               {selectedCut.affiliateLink && selectedCut.affiliateLink.productId && (
-                <View style={[styles.detailLinkCard, { backgroundColor: PAPER_DARK, borderColor: BORDER }]}>
+                <View style={[styles.detailLinkCard, { backgroundColor: CARD_SURFACE, borderColor: BORDER_SLATE }]}>
                   <View style={styles.detailLinkInfo}>
                     <Text style={[styles.detailLinkName, { color: TEXT_DARK }]} numberOfLines={1}>{selectedCut.affiliateLink.productName}</Text>
                     <Text style={[styles.detailLinkUrl, { color: TEXT_FAINT }]} numberOfLines={1}>{selectedCut.affiliateLink.url}</Text>
@@ -501,79 +502,86 @@ export function ToonModeEditor({
   );
 }
 
-const isWeb = Platform.OS === 'web';
-
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, width: '100%', height: '100%' },
+  // Header
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 14, borderBottomWidth: 1,
+    paddingHorizontal: 24, paddingTop: 16, paddingBottom: 14, borderBottomWidth: 1,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerIcon: { width: 32, height: 32, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 15, fontFamily: theme.typography.fontFamily.semiBold },
   headerSub: { fontSize: 11, fontFamily: theme.typography.fontFamily.regular, marginTop: 2 },
-  scroll: { flex: 1 },
-  scrollContent: { padding: 16, gap: 14 },
-  // Step section
-  stepSection: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 12 },
+  // Scroll — full width, generous padding
+  scroll: { flex: 1, height: '100%' },
+  scrollContent: { paddingHorizontal: 24, paddingVertical: 20, gap: 0, width: '100%', flexGrow: 1 },
+  // Step bands — no boxed borders, just padding for organic flow
+  stepBand: { paddingVertical: 16, gap: 10 },
+  gridSection: { paddingVertical: 16, gap: 14, flex: 1, minHeight: 0 },
+  // Soft divider between steps — subtle hairline, no box
+  divider: {
+    height: 1,
+    backgroundColor: BORDER_SLATE,
+    marginHorizontal: 0,
+    opacity: 0.6,
+  },
+  // Step header
   stepHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  stepBadge: { width: 24, height: 24, borderRadius: 7, justifyContent: 'center', alignItems: 'center' },
-  stepBadgeText: { fontSize: 12, fontFamily: theme.typography.fontFamily.bold, color: '#fff' },
+  stepBadge: { width: 22, height: 22, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
+  stepBadgeText: { fontSize: 11, fontFamily: theme.typography.fontFamily.bold, color: '#fff' },
   stepTitle: { flex: 1, fontSize: 14, fontFamily: theme.typography.fontFamily.semiBold },
   stepCount: { fontSize: 12, fontFamily: theme.typography.fontFamily.medium },
-  stepHint: { fontSize: 11, fontFamily: theme.typography.fontFamily.regular, lineHeight: 16 },
-  // Slots — flex wrap for wide layout
-  slotScrollContent: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  slotCard: { width: 80, height: 80, borderRadius: 10, borderWidth: 1.5, overflow: 'hidden', position: 'relative' },
+  // Slots
+  slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  slotCard: { width: 80, height: 80, borderRadius: 10, borderWidth: 1, overflow: 'hidden', position: 'relative' },
   slotImage: { width: '100%', height: '100%' },
   slotOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', padding: 4 },
   slotIndex: { fontSize: 10, fontFamily: theme.typography.fontFamily.bold, color: '#fff', backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, overflow: 'hidden' },
   slotRemove: { width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   slotAdd: { justifyContent: 'center', alignItems: 'center', gap: 4, borderStyle: 'dashed' },
   slotAddText: { fontSize: 10, fontFamily: theme.typography.fontFamily.medium },
-  slotPlaceholder: { borderStyle: 'dashed', opacity: 0.3 },
+  slotPlaceholder: { borderStyle: 'dashed', opacity: 0.25 },
   // Chips
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  personaChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5 },
-  psychoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  psychoChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5 },
+  personaChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  psychoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
+  psychoChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
   chipEmoji: { fontSize: 14 },
   chipLabel: { fontSize: 12, fontFamily: theme.typography.fontFamily.medium },
-  // Generate
-  generateBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 44, borderRadius: 12 },
+  // Action row — generate + add side by side
+  actionRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  generateBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 44, borderRadius: 12, flex: 1 },
   generateBtnDisabled: { opacity: 0.6 },
   generateBtnText: { fontSize: 14, fontFamily: theme.typography.fontFamily.semiBold, color: '#fff' },
-  addPageBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 38, borderRadius: 10, borderWidth: 1.5 },
+  addPageBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44, borderRadius: 12, borderWidth: 1.5, paddingHorizontal: 16 },
   addPageBtnText: { fontSize: 13, fontFamily: theme.typography.fontFamily.medium },
-  // ─── Analog manga cut grid ───
-  cutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  // ─── Manga cut grid ───
+  cutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
   cutCard: {
-    // Width is set dynamically via inline style; this is the fallback
     width: '48%',
-    minHeight: 220,
-    borderRadius: 4,
-    borderWidth: 2.5,
-    borderColor: INK,
+    minHeight: 240,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#1E293B',
     backgroundColor: PAPER,
     overflow: 'hidden',
     position: 'relative',
   },
   cutCardSelected: {
     borderColor: ACCENT,
-    borderWidth: 3,
+    borderWidth: 2.5,
     shadowColor: ACCENT,
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 0 },
-    elevation: 4,
+    elevation: 6,
   },
-  // Cut number — top-left ink badge
   cutNumberBadge: {
     position: 'absolute',
     top: 0,
     left: 0,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#1E293B',
     paddingHorizontal: 8,
     paddingVertical: 3,
     zIndex: 3,
@@ -581,7 +589,7 @@ const styles = StyleSheet.create({
   cutNumberText: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.bold,
-    color: '#f5f5f5',
+    color: '#F8F8FA',
   },
   cutDeleteBtn: {
     position: 'absolute',
@@ -595,7 +603,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 3,
   },
-  // Manga panel interior — paper texture
   cutPanel: {
     flex: 1,
     backgroundColor: PAPER,
@@ -612,9 +619,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: PAPER_DARK,
+    backgroundColor: CARD_SURFACE,
   },
-  // ─── Real speech bubble ───
+  // Speech bubble
   bubbleFloat: {
     position: 'absolute',
     top: 8,
@@ -646,7 +653,6 @@ const styles = StyleSheet.create({
     minHeight: 20,
     lineHeight: 16,
   },
-  // Bubble tail — triangle pointing down-left
   bubbleTail: {
     position: 'absolute',
     bottom: -8,
@@ -670,7 +676,7 @@ const styles = StyleSheet.create({
   linkBadgeEmpty: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5 },
   linkBadgeEmptyText: { flex: 1, fontSize: 10, fontFamily: theme.typography.fontFamily.regular, color: TEXT_FAINT },
   // Detail panel
-  detailPanel: { padding: 14, borderRadius: 10, borderWidth: 1, gap: 8 },
+  detailPanel: { padding: 14, borderRadius: 10, borderWidth: 1, gap: 8, marginTop: 4 },
   detailTitle: { fontSize: 13, fontFamily: theme.typography.fontFamily.semiBold },
   detailHint: { fontSize: 11, fontFamily: theme.typography.fontFamily.regular, lineHeight: 17 },
   detailLinkCard: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1 },
@@ -679,6 +685,6 @@ const styles = StyleSheet.create({
   detailLinkUrl: { fontSize: 10, fontFamily: theme.typography.fontFamily.regular },
   detailLinkRemove: { width: 28, height: 28, borderRadius: 7, backgroundColor: 'rgba(239, 68, 68, 0.08)', justifyContent: 'center', alignItems: 'center' },
   // Publish
-  publishBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46, borderRadius: 12, marginTop: 4 },
+  publishBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46, borderRadius: 12, marginTop: 6 },
   publishBtnText: { fontSize: 14, fontFamily: theme.typography.fontFamily.semiBold, color: '#fff' },
 });

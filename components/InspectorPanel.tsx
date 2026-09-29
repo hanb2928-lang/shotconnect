@@ -756,10 +756,12 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
+    height: '100%',
   },
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 8,
+    flexGrow: 1,
   },
   // ─── Section Header ───
   sectionHeader: {
