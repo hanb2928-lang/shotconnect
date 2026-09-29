@@ -17,6 +17,7 @@ import {
   RefreshCw,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { applyToonFilter } from '@/lib/toonFilter';
 
 export interface ToonPersonaPreset {
   id: string;
@@ -120,15 +121,18 @@ export function PhotoToonUpload({
     setTooning(true);
     setError(null);
     try {
-      // Simulate toonification processing — in production this would call an AI edge function
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      // Use the uploaded image as the "toonified" result for now
-      setToonedUri(uploadedUri);
+      const toonedResult = await applyToonFilter(uploadedUri, {
+        toneLevel,
+        edgeThreshold: 40,
+        posterizeLevels: 4,
+        dotSize: 3,
+      });
+      setToonedUri(toonedResult);
       const preset = TOON_PERSONA_PRESETS.find((p) => p.id === selectedPresetId);
       if (preset && onCharacterCreated) {
         onCharacterCreated({
           id: `char_${Date.now()}`,
-          imageUrl: uploadedUri,
+          imageUrl: toonedResult,
           presetId: selectedPresetId,
           toneLevel,
         });

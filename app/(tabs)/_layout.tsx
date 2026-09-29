@@ -4,7 +4,7 @@ import { Tabs } from 'expo-router';
 import { theme } from '@/lib/theme';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react-native';
 import { InspectorPanel, type BoundAffiliateLink } from '@/components/InspectorPanel';
-import { InspectorContext, type InspectorContextValue, type InspectorMode } from '@/lib/inspectorContext';
+import { InspectorContext, type InspectorContextValue, type InspectorMode, type ToonStyle } from '@/lib/inspectorContext';
 import type { ToonCharacter } from '@/components/PhotoToonUpload';
 
 const ScrollableTabBar = lazy(() =>
@@ -28,7 +28,11 @@ export default function TabLayout() {
   const [toonCharacter, setToonCharacter] = useState<ToonCharacter | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState('veteran');
   const [toneLevel, setToneLevel] = useState(50);
+  const [toonStyle, setToonStyle] = useState<ToonStyle>('color');
+  const [batchToonTrigger, setBatchToonTrigger] = useState(0);
+  const [batchTooning, setBatchTooning] = useState(false);
   const toggleInspector = useCallback(() => setInspectorOpen((v) => !v), []);
+  const triggerBatchToon = useCallback(() => setBatchToonTrigger((n) => n + 1), []);
 
   const handleLinkBound = useCallback((link: BoundAffiliateLink) => {
     setBoundLinks((prev) => [...prev.filter((b) => b.productId !== link.productId), link]);
@@ -46,6 +50,10 @@ export default function TabLayout() {
     setSelectedPresetId,
     toneLevel,
     setToneLevel,
+    toonStyle,
+    setToonStyle,
+    batchToonTrigger,
+    triggerBatchToon,
   };
 
   return (
@@ -92,10 +100,15 @@ export default function TabLayout() {
                     onLinkBound={handleLinkBound}
                     inspectorMode={inspectorMode}
                     toonCharacter={toonCharacter}
+                    onCharacterCreated={setToonCharacter}
                     selectedPresetId={selectedPresetId}
                     onPresetSelect={setSelectedPresetId}
                     toneLevel={toneLevel}
                     onToneChange={setToneLevel}
+                    toonStyle={toonStyle}
+                    onToonStyleChange={setToonStyle}
+                    onBatchToonApply={triggerBatchToon}
+                    batchTooning={batchTooning}
                   />
                 </View>
               </View>

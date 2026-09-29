@@ -3,6 +3,7 @@ import type { BoundAffiliateLink } from '@/components/InspectorPanel';
 import type { ToonCharacter, ToonPersonaPreset } from '@/components/PhotoToonUpload';
 
 export type InspectorMode = 'affiliate' | 'persona';
+export type ToonStyle = 'color' | 'mono';
 
 export interface InspectorContextValue {
   boundLinks: BoundAffiliateLink[];
@@ -16,6 +17,10 @@ export interface InspectorContextValue {
   setSelectedPresetId: (id: string) => void;
   toneLevel: number;
   setToneLevel: (level: number) => void;
+  toonStyle: ToonStyle;
+  setToonStyle: (style: ToonStyle) => void;
+  batchToonTrigger: number;
+  triggerBatchToon: () => void;
 }
 
 export const InspectorContext = createContext<InspectorContextValue>({
@@ -30,6 +35,10 @@ export const InspectorContext = createContext<InspectorContextValue>({
   setSelectedPresetId: () => {},
   toneLevel: 50,
   setToneLevel: () => {},
+  toonStyle: 'color',
+  setToonStyle: () => {},
+  batchToonTrigger: 0,
+  triggerBatchToon: () => {},
 });
 
 export function useInspectorContext(): InspectorContextValue {

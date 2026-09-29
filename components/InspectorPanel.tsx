@@ -27,6 +27,10 @@ import {
   Plus,
   User,
   Sliders,
+  Upload,
+  X,
+  Palette,
+  Zap,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
@@ -35,7 +39,8 @@ import { fetchAffiliatePlatforms, generateSearchAffiliateLink, type ManagedAffil
 import type { UserSettings } from '@/types/database';
 import type { ToonCharacter } from '@/components/PhotoToonUpload';
 import { TOON_PERSONA_PRESETS } from '@/components/PhotoToonUpload';
-import type { InspectorMode } from '@/lib/inspectorContext';
+import type { InspectorMode, ToonStyle } from '@/lib/inspectorContext';
+import { applyToonFilter } from '@/lib/toonFilter';
 
 const isWeb = Platform.OS === 'web';
 
@@ -61,10 +66,15 @@ interface InspectorPanelProps {
   onPromptPublish?: (config: AiPromptConfig) => void;
   inspectorMode?: InspectorMode;
   toonCharacter?: ToonCharacter | null;
+  onCharacterCreated?: (char: ToonCharacter) => void;
   selectedPresetId?: string;
   onPresetSelect?: (id: string) => void;
   toneLevel?: number;
   onToneChange?: (level: number) => void;
+  toonStyle?: ToonStyle;
+  onToonStyleChange?: (style: ToonStyle) => void;
+  onBatchToonApply?: () => void;
+  batchTooning?: boolean;
 }
 
 interface SearchResult {
@@ -88,10 +98,15 @@ export function InspectorPanel({
   onPromptPublish,
   inspectorMode = 'affiliate',
   toonCharacter = null,
+  onCharacterCreated,
   selectedPresetId = 'veteran',
   onPresetSelect,
   toneLevel = 50,
   onToneChange,
+  toonStyle = 'color',
+  onToonStyleChange,
+  onBatchToonApply,
+  batchTooning = false,
 }: InspectorPanelProps) {
   // ─── Section expansion state ───
   const [coupangOpen, setCoupangOpen] = useState(true);
@@ -117,6 +132,72 @@ export function InspectorPanel({
   const [model, setModel] = useState('gpt-4o');
   const [autoPublish, setAutoPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
+
+  // ─── Face upload state (persona mode) ───
+  const [faces, setFaces] = useState<ToonCharacter[]>([]);
+  const [faceDragOver, setFaceDragOver] = useState(false);
+
+  const handleFaceFile = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const rawUri = reader.result as string;
+      // Apply toon filter to transform the photo into a manga-style face
+      let toonedUri = rawUri;
+      try {
+        toonedUri = await applyToonFilter(rawUri, {
+          toneLevel,
+          style: toonStyle,
+          edgeThreshold: 40,
+          posterizeLevels: 4,
+          dotSize: 3,
+        });
+      } catch {
+        // Fall back to raw image if filter fails
+      }
+      const newFace: ToonCharacter = {
+        id: `face_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        imageUrl: toonedUri,
+        presetId: selectedPresetId,
+        toneLevel,
+      };
+      setFaces((prev) => [...prev, newFace]);
+      onCharacterCreated?.(newFace);
+    };
+    reader.readAsDataURL(file);
+  }, [selectedPresetId, toneLevel, toonStyle, onCharacterCreated]);
+
+  const handleFacePick = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.onchange = (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      if (target.files) {
+        Array.from(target.files).forEach((f) => handleFaceFile(f));
+      }
+    };
+    input.click();
+  }, [handleFaceFile]);
+
+  const handleFaceDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFaceDragOver(false);
+    if (e.dataTransfer.files) {
+      Array.from(e.dataTransfer.files).forEach((f) => handleFaceFile(f));
+    }
+  }, [handleFaceFile]);
+
+  const handleFaceRemove = useCallback((id: string) => {
+    setFaces((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const handleFaceSelect = useCallback((face: ToonCharacter) => {
+    onCharacterCreated?.(face);
+  }, [onCharacterCreated]);
 
   // Load settings + affiliate platforms on mount
   useEffect(() => {
@@ -309,8 +390,61 @@ export function InspectorPanel({
             ) : (
               <View style={styles.personaEmptyCard}>
                 <User size={24} color={theme.colors.light.textFaint} strokeWidth={1.5} />
-                <Text style={styles.personaEmptyText}>중앙 캔버스에서 사진을 업로드하여</Text>
-                <Text style={styles.personaEmptyText}>만화 캐릭터를 생성해주세요</Text>
+                <Text style={styles.personaEmptyText}>아래 업로더에서 캐릭터 얼굴 사진을</Text>
+                <Text style={styles.personaEmptyText}>추가하여 만화 캐릭터를 생성하세요</Text>
+              </View>
+            )}
+
+            {/* Face photo uploader */}
+            <Text style={styles.personaSectionLabel}>캐릭터 얼굴 사진 업로드</Text>
+            <TouchableOpacity
+              style={[styles.faceDropzone, faceDragOver && styles.faceDropzoneActive]}
+              onPress={handleFacePick}
+              activeOpacity={0.7}
+              {...({
+                onDrop: handleFaceDrop,
+                onDragOver: (e: React.DragEvent) => { e.preventDefault(); setFaceDragOver(true); },
+                onDragLeave: () => setFaceDragOver(false),
+              } as any)}
+            >
+              <Upload size={20} color={theme.colors.primary[400]} strokeWidth={2} />
+              <Text style={styles.faceDropzoneText}>클릭 또는 드래그하여 얼굴 사진 추가</Text>
+              <Text style={styles.faceDropzoneHint}>JPG, PNG · 여러 장 동시 업로드 가능</Text>
+            </TouchableOpacity>
+
+            {/* Face thumbnail grid */}
+            {faces.length > 0 && (
+              <View style={styles.faceGrid}>
+                {faces.map((face) => {
+                  const isActive = toonCharacter?.id === face.id;
+                  return (
+                    <View key={face.id} style={styles.faceThumbWrap}>
+                      <TouchableOpacity
+                        style={[styles.faceThumb, isActive && styles.faceThumbActive]}
+                        onPress={() => handleFaceSelect(face)}
+                        activeOpacity={0.7}
+                      >
+                        <Image
+                          source={{ uri: face.imageUrl }}
+                          style={styles.faceThumbImg}
+                          resizeMode="cover"
+                        />
+                        {isActive && (
+                          <View style={styles.faceThumbBadge}>
+                            <Check size={10} color="#fff" strokeWidth={3} />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.faceThumbRemove}
+                        onPress={() => handleFaceRemove(face.id)}
+                        activeOpacity={0.7}
+                      >
+                        <X size={8} color="#fff" strokeWidth={3} />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
               </View>
             )}
 
@@ -371,6 +505,51 @@ export function InspectorPanel({
                 <Text style={styles.personaToneLabelSmall}>과장</Text>
               </View>
             </View>
+
+            {/* Toon style toggle: Color / Mono */}
+            <View style={styles.toonStyleSection}>
+              <View style={styles.toonStyleHeader}>
+                <Palette size={14} color={theme.colors.primary[400]} strokeWidth={2} />
+                <Text style={styles.toonStyleLabel}>만화 스타일</Text>
+              </View>
+              <View style={styles.toonStyleToggle}>
+                <TouchableOpacity
+                  style={[styles.toonStyleBtn, toonStyle === 'color' && styles.toonStyleBtnActive]}
+                  onPress={() => onToonStyleChange?.('color')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.toonStyleBtnText, toonStyle === 'color' && styles.toonStyleBtnTextActive]}>
+                    컬러 만화
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.toonStyleBtn, toonStyle === 'mono' && styles.toonStyleBtnActive]}
+                  onPress={() => onToonStyleChange?.('mono')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.toonStyleBtnText, toonStyle === 'mono' && styles.toonStyleBtnTextActive]}>
+                    흑백 만화
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Batch apply to all cuts */}
+            <TouchableOpacity
+              style={[styles.batchApplyBtn, batchTooning && styles.batchApplyBtnDisabled]}
+              onPress={() => onBatchToonApply?.()}
+              disabled={batchTooning}
+              activeOpacity={0.85}
+            >
+              {batchTooning ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Zap size={16} color="#fff" strokeWidth={2.5} />
+              )}
+              <Text style={styles.batchApplyBtnText}>
+                {batchTooning ? '일괄 변환 중...' : '만화풍 적용 및 저장'}
+              </Text>
+            </TouchableOpacity>
 
             {/* Apply button */}
             <TouchableOpacity
@@ -1393,6 +1572,66 @@ const styles = StyleSheet.create({
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.light.textFaint,
   },
+  // Toon style toggle
+  toonStyleSection: {
+    marginTop: 14,
+    gap: 8,
+  },
+  toonStyleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  toonStyleLabel: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.light.textDim,
+  },
+  toonStyleToggle: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toonStyleBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toonStyleBtnActive: {
+    borderColor: '#A855F7',
+    backgroundColor: '#A855F715',
+  },
+  toonStyleBtnText: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: '#475569',
+  },
+  toonStyleBtnTextActive: {
+    color: '#A855F7',
+  },
+  // Batch apply button
+  batchApplyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#A855F7',
+    marginTop: 12,
+  },
+  batchApplyBtnDisabled: {
+    opacity: 0.5,
+  },
+  batchApplyBtnText: {
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: '#fff',
+  },
   personaApplyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1410,5 +1649,79 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.semiBold,
     color: '#fff',
+  },
+  // ─── Face uploader ───
+  faceDropzone: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: theme.colors.light.border,
+    backgroundColor: '#FAFAFB',
+    marginBottom: 12,
+  },
+  faceDropzoneActive: {
+    borderColor: theme.colors.primary[400],
+    backgroundColor: theme.colors.primary[500] + '0A',
+  },
+  faceDropzoneText: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.light.textDim,
+  },
+  faceDropzoneHint: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.light.textFaint,
+  },
+  faceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  faceThumbWrap: {
+    position: 'relative',
+  },
+  faceThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  faceThumbActive: {
+    borderColor: theme.colors.primary[400],
+  },
+  faceThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  faceThumbBadge: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: theme.colors.success[500],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  faceThumbRemove: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: theme.colors.error[400],
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
   },
 });

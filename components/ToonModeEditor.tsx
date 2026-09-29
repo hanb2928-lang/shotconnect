@@ -29,6 +29,7 @@ import { theme } from '@/lib/theme';
 import type { BoundAffiliateLink } from '@/components/InspectorPanel';
 import { TOON_PERSONA_PRESETS, type ToonCharacter } from '@/components/PhotoToonUpload';
 import { useInspectorContext } from '@/lib/inspectorContext';
+import { applyToonFilter } from '@/lib/toonFilter';
 
 export interface ToonCut {
   id: string;
@@ -98,36 +99,93 @@ export function ToonModeEditor({
   const inspectorCtx = useInspectorContext();
   const { width: winW } = useWindowDimensions();
   const [slots, setSlots] = useState<CaptureSlot[]>([]);
+  const slotsRef = useRef<CaptureSlot[]>([]);
+  useEffect(() => { slotsRef.current = slots; }, [slots]);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState(inspectorCtx.selectedPresetId);
   const [psychoTone, setPsychoTone] = useState('raw');
-  const [cuts, setCuts] = useState<ToonCut[]>(() =>
-    Array.from({ length: 4 }, (_, i) => ({
-      id: makeCutId(),
-      label: `${i + 1}컷`,
-      speechBubble: i === 0 ? '이거 보셨어요?' : '',
-      affiliateLink: null,
-      imageUrl: null,
-    })),
-  );
+  const [tooningSlots, setTooningSlots] = useState(false);
+  // Map from slot ID to original raw (unfiltered) image URI, for re-processing on style change
+  const rawImageMap = useRef<Map<string, string>>(new Map());
+  const [cuts, setCuts] = useState<ToonCut[]>(() => [{
+    id: makeCutId(),
+    label: '1컷',
+    speechBubble: '',
+    affiliateLink: null,
+    imageUrl: null,
+  }]);
   const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
   const [editingBubbleId, setEditingBubbleId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  // Apply toon filter to a slot image and map it to the corresponding cut 1:1
+  const applyToonToSlot = useCallback(async (slotId: string, rawUri: string) => {
+    setTooningSlots(true);
+    try {
+      const toonedUri = await applyToonFilter(rawUri, {
+        toneLevel: inspectorCtx.toneLevel,
+        style: inspectorCtx.toonStyle,
+        edgeThreshold: 40,
+        posterizeLevels: 4,
+        dotSize: 3,
+      });
+      // Update the slot to show the toonified image
+      setSlots((prev) => prev.map((s) => s.id === slotId ? { ...s, uri: toonedUri } : s));
+      // Find the cut index from the ref and assign
+      const slotIndex = slotsRef.current.findIndex((s) => s.id === slotId);
+      if (slotIndex < 0) {
+        setTooningSlots(false);
+        return;
+      }
+      setCuts((prevCuts) => {
+        const cutIdx = slotIndex;
+        if (cutIdx >= prevCuts.length && prevCuts.length < MAX_CUTS) {
+          const newCuts = [...prevCuts];
+          while (newCuts.length <= cutIdx && newCuts.length < MAX_CUTS) {
+            newCuts.push({
+              id: makeCutId(),
+              label: `${newCuts.length + 1}컷`,
+              speechBubble: '',
+              affiliateLink: null,
+              imageUrl: null,
+            });
+          }
+          if (cutIdx < newCuts.length) {
+            newCuts[cutIdx] = { ...newCuts[cutIdx], imageUrl: toonedUri };
+          }
+          return newCuts;
+        }
+        if (cutIdx < prevCuts.length) {
+          return prevCuts.map((c, i) => i === cutIdx ? { ...c, imageUrl: toonedUri } : c);
+        }
+        return prevCuts;
+      });
+    } catch {
+      setSlots((prev) => prev.map((s) => s.id === slotId ? { ...s, uri: rawUri } : s));
+    }
+    setTooningSlots(false);
+  }, [inspectorCtx.toneLevel, inspectorCtx.toonStyle]);
 
   const handleSlotFile = useCallback((index: number, file: File) => {
     if (!file.type.startsWith('image/')) return;
     const reader = new FileReader();
     reader.onload = () => {
       const uri = reader.result as string;
-      setSlots((prev) => {
-        if (index < prev.length) {
-          return prev.map((s, i) => i === index ? { ...s, uri } : s);
-        }
-        return [...prev, { id: makeSlotId(), uri }];
-      });
+      if (index < slots.length) {
+        // Replace existing slot and re-toonify
+        const existingId = slots[index].id;
+        rawImageMap.current.set(existingId, uri);
+        setSlots((prev) => prev.map((s, i) => i === index ? { ...s, uri } : s));
+        applyToonToSlot(existingId, uri);
+      } else {
+        const slotId = makeSlotId();
+        rawImageMap.current.set(slotId, uri);
+        setSlots((prev) => [...prev, { id: slotId, uri }]);
+        applyToonToSlot(slotId, uri);
+      }
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [slots, applyToonToSlot]);
 
   const handleSlotFiles = useCallback((files: FileList | File[]) => {
     const valid = Array.from(files).filter((f) => f.type.startsWith('image/'));
@@ -135,11 +193,15 @@ export function ToonModeEditor({
       const reader = new FileReader();
       reader.onload = () => {
         const uri = reader.result as string;
-        setSlots((prev) => [...prev, { id: makeSlotId(), uri }]);
+        const slotId = makeSlotId();
+        rawImageMap.current.set(slotId, uri);
+        setSlots((prev) => [...prev, { id: slotId, uri }]);
+        // Auto-apply toon filter and assign to a cut 1:1
+        applyToonToSlot(slotId, uri);
       };
       reader.readAsDataURL(file);
     });
-  }, []);
+  }, [applyToonToSlot]);
 
   const handleSlotPick = useCallback((index: number) => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -189,7 +251,10 @@ export function ToonModeEditor({
           const reader = new FileReader();
           reader.onload = () => {
             const uri = reader.result as string;
-            setSlots((prev) => [...prev, { id: makeSlotId(), uri }]);
+            const slotId = makeSlotId();
+            rawImageMap.current.set(slotId, uri);
+            setSlots((prev) => [...prev, { id: slotId, uri }]);
+            applyToonToSlot(slotId, uri);
           };
           reader.readAsDataURL(file);
         }
@@ -197,11 +262,23 @@ export function ToonModeEditor({
     };
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
-  }, []);
+  }, [applyToonToSlot]);
+
+  const relabelCuts = useCallback((arr: ToonCut[]) =>
+    arr.map((c, i) => ({ ...c, label: `${i + 1}컷` })), []);
 
   const handleSlotRemove = useCallback((index: number) => {
     setSlots((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+    // Remove the corresponding slot from rawImageMap
+    const slotToRemove = slotsRef.current[index];
+    if (slotToRemove) {
+      rawImageMap.current.delete(slotToRemove.id);
+    }
+    // Clear the image on the corresponding cut, but keep the cut itself
+    setCuts((prev) => relabelCuts(prev.map((c, i) =>
+      i === index ? { ...c, imageUrl: null } : c
+    )));
+  }, [relabelCuts]);
 
   const handleAddCut = useCallback(() => {
     setCuts((prev) => {
@@ -217,9 +294,20 @@ export function ToonModeEditor({
   }, []);
 
   const handleRemoveCut = useCallback((id: string) => {
-    setCuts((prev) => prev.length > 1 ? prev.filter((c) => c.id !== id) : prev);
+    setCuts((prev) => {
+      if (prev.length <= 1) return prev;
+      const cutIndex = prev.findIndex((c) => c.id === id);
+      if (cutIndex < 0) return prev;
+      // Also remove the corresponding slot and its raw image entry
+      const slotToRemove = slotsRef.current[cutIndex];
+      if (slotToRemove) {
+        rawImageMap.current.delete(slotToRemove.id);
+        setSlots((curSlots) => curSlots.filter((_, i) => i !== cutIndex));
+      }
+      return relabelCuts(prev.filter((c) => c.id !== id));
+    });
     setSelectedCutId((prev) => prev === id ? null : prev);
-  }, []);
+  }, [relabelCuts]);
 
   const handleSelectCut = useCallback((id: string) => {
     setSelectedCutId(id);
@@ -248,23 +336,123 @@ export function ToonModeEditor({
   const handleGenerate = useCallback(async () => {
     if (generating) return;
     setGenerating(true);
-    await new Promise((resolve) => setTimeout(resolve, 1800));
-    if (toonCharacter?.imageUrl) {
-      setCuts((prev) => prev.map((c) => ({ ...c, imageUrl: c.imageUrl || toonCharacter.imageUrl })));
+
+    // Map all slots to cuts 1:1, applying toon filter to any unprocessed ones
+    const slotsSnapshot = slots;
+    const newCuts: ToonCut[] = [];
+
+    for (let i = 0; i < Math.min(slotsSnapshot.length, MAX_CUTS); i++) {
+      const slot = slotsSnapshot[i];
+      // Check if the corresponding cut already has a toonified image
+      const existingCut = cuts[i];
+      if (existingCut?.imageUrl) {
+        newCuts.push(existingCut);
+      } else {
+        try {
+          const toonedUri = await applyToonFilter(slot.uri, {
+            toneLevel: inspectorCtx.toneLevel,
+            style: inspectorCtx.toonStyle,
+          });
+          newCuts.push({
+            id: existingCut?.id ?? makeCutId(),
+            label: `${i + 1}컷`,
+            speechBubble: existingCut?.speechBubble ?? '',
+            affiliateLink: existingCut?.affiliateLink ?? null,
+            imageUrl: toonedUri,
+          });
+        } catch {
+          newCuts.push({
+            id: existingCut?.id ?? makeCutId(),
+            label: `${i + 1}컷`,
+            speechBubble: existingCut?.speechBubble ?? '',
+            affiliateLink: existingCut?.affiliateLink ?? null,
+            imageUrl: slot.uri,
+          });
+        }
+      }
     }
-    const preset = TOON_PERSONA_PRESETS.find((p) => p.id === selectedPresetId);
-    if (preset && onCharacterCreated) {
-      onCharacterCreated({
-        id: `char_${Date.now()}`,
-        imageUrl: toonCharacter?.imageUrl || slots[0]?.uri || '',
-        presetId: selectedPresetId,
-        toneLevel: inspectorCtx.toneLevel,
-      });
+
+    // Keep any extra cuts beyond the slot count
+    for (let i = slotsSnapshot.length; i < cuts.length; i++) {
+      newCuts.push(cuts[i]);
     }
+
+    if (newCuts.length > 0) {
+      setCuts(relabelCuts(newCuts));
+    }
+
+    // Also set character if not yet set
+    if (!toonCharacter && slotsSnapshot.length > 0) {
+      const preset = TOON_PERSONA_PRESETS.find((p) => p.id === selectedPresetId);
+      if (preset && onCharacterCreated) {
+        onCharacterCreated({
+          id: `char_${Date.now()}`,
+          imageUrl: cuts[0]?.imageUrl || slotsSnapshot[0].uri,
+          presetId: selectedPresetId,
+          toneLevel: inspectorCtx.toneLevel,
+        });
+      }
+    }
+
     setGenerating(false);
-  }, [generating, toonCharacter, slots, selectedPresetId, inspectorCtx.toneLevel, onCharacterCreated]);
+  }, [generating, toonCharacter, slots, cuts, selectedPresetId, inspectorCtx.toneLevel, onCharacterCreated, relabelCuts]);
 
   const handlePublish = useCallback(() => { onPublish?.(cuts); }, [cuts, onPublish]);
+
+  // Batch re-apply toon filter to all cuts when triggered from inspector
+  useEffect(() => {
+    if (inspectorCtx.batchToonTrigger === 0) return;
+    let cancelled = false;
+    (async () => {
+      setTooningSlots(true);
+      const rawEntries = Array.from(rawImageMap.current.entries());
+      if (rawEntries.length === 0) {
+        setTooningSlots(false);
+        return;
+      }
+      const newCuts: ToonCut[] = [];
+      for (let i = 0; i < rawEntries.length && i < MAX_CUTS; i++) {
+        const [slotId, rawUri] = rawEntries[i];
+        const existingCut = cuts[i];
+        try {
+          const toonedUri = await applyToonFilter(rawUri, {
+            toneLevel: inspectorCtx.toneLevel,
+            style: inspectorCtx.toonStyle,
+            edgeThreshold: 40,
+            posterizeLevels: 4,
+            dotSize: 3,
+          });
+          if (cancelled) return;
+          setSlots((prev) => prev.map((s) => s.id === slotId ? { ...s, uri: toonedUri } : s));
+          newCuts.push({
+            id: existingCut?.id ?? makeCutId(),
+            label: `${i + 1}컷`,
+            speechBubble: existingCut?.speechBubble ?? '',
+            affiliateLink: existingCut?.affiliateLink ?? null,
+            imageUrl: toonedUri,
+          });
+        } catch {
+          if (cancelled) return;
+          newCuts.push(existingCut ?? {
+            id: makeCutId(),
+            label: `${i + 1}컷`,
+            speechBubble: '',
+            affiliateLink: null,
+            imageUrl: rawUri,
+          });
+        }
+      }
+      for (let i = rawEntries.length; i < cuts.length; i++) {
+        newCuts.push(cuts[i]);
+      }
+      if (!cancelled && newCuts.length > 0) {
+        setCuts(relabelCuts(newCuts));
+      }
+      setTooningSlots(false);
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectorCtx.batchToonTrigger, relabelCuts]);
 
   // Wider grids for full-width workspace — 4 cols on wide, 3 on medium, 2 on narrow
   const cutCols = winW > 1400 ? 4 : winW > 800 ? 3 : 2;
@@ -394,13 +582,13 @@ export function ToonModeEditor({
           {/* Generate + Add row — inline */}
           <View style={styles.actionRow}>
             <TouchableOpacity
-              style={[styles.generateBtn, { backgroundColor: ACCENT }, generating && styles.generateBtnDisabled]}
+              style={[styles.generateBtn, { backgroundColor: ACCENT }, (generating || tooningSlots) && styles.generateBtnDisabled]}
               onPress={handleGenerate}
-              disabled={generating}
+              disabled={generating || tooningSlots}
               activeOpacity={0.85}
             >
-              {generating ? <ActivityIndicator size="small" color="#fff" /> : <Zap size={16} color="#fff" strokeWidth={2.5} />}
-              <Text style={styles.generateBtnText}>{generating ? '생성 중...' : '만화 숏툰 자동 생성'}</Text>
+              {generating || tooningSlots ? <ActivityIndicator size="small" color="#fff" /> : <Zap size={16} color="#fff" strokeWidth={2.5} />}
+              <Text style={styles.generateBtnText}>{generating ? '만화 변환 중...' : tooningSlots ? '필터 적용 중...' : '만화 숏툰 자동 생성'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -446,9 +634,9 @@ export function ToonModeEditor({
 
                   {/* Manga panel */}
                   <View style={styles.cutPanel}>
-                    {toonCharacter?.imageUrl || cut.imageUrl ? (
+                    {cut.imageUrl ? (
                       <Image
-                        source={{ uri: toonCharacter?.imageUrl || cut.imageUrl! }}
+                        source={{ uri: cut.imageUrl }}
                         style={styles.cutPanelImage}
                         resizeMode="cover"
                       />
