@@ -651,19 +651,17 @@ export default function CameraScreen() {
   if (screenPhase === 'toon') {
     return (
       <View style={styles.container}>
-        <View style={[styles.toonScreenInner, { paddingTop: safeTop + theme.spacing.md }]}>
-          <ToonModeEditor
-            visible
-            onClose={() => setScreenPhase('mode_select')}
-            boundLinks={inspectorCtx.boundLinks}
-            onCutSelected={(cutId) => inspectorCtx.setSelectedCutId(cutId)}
-            toonCharacter={inspectorCtx.toonCharacter}
-            onCharacterCreated={(char) => {
-              inspectorCtx.setToonCharacter(char);
-              inspectorCtx.setInspectorMode('persona');
-            }}
-          />
-        </View>
+        <ToonModeEditor
+          visible
+          onClose={() => setScreenPhase('mode_select')}
+          boundLinks={inspectorCtx.boundLinks}
+          onCutSelected={(cutId) => inspectorCtx.setSelectedCutId(cutId)}
+          toonCharacter={inspectorCtx.toonCharacter}
+          onCharacterCreated={(char) => {
+            inspectorCtx.setToonCharacter(char);
+            inspectorCtx.setInspectorMode('persona');
+          }}
+        />
         {error && (
           <View style={styles.modeSelectErrorInline}>
             <Text style={styles.modeSelectErrorText}>{error}</Text>

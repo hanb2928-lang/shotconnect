@@ -496,8 +496,6 @@ export function ToonModeEditor({
             <ArrowRight size={16} color="#fff" strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
-
-        <View style={{ height: 32 }} />
       </ScrollView>
     </View>
   );
