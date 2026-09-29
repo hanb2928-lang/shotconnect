@@ -24,6 +24,10 @@ import {
   Upload,
   Zap,
   BookOpen,
+  Link as LinkIcon,
+  FolderOpen,
+  Save,
+  Camera,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import type { BoundAffiliateLink } from '@/components/InspectorPanel';
@@ -117,6 +121,10 @@ export function ToonModeEditor({
   const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
   const [editingBubbleId, setEditingBubbleId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [captureMode, setCaptureMode] = useState<'file' | 'link'>('file');
+  const [urlInput, setUrlInput] = useState('');
+  const [urlCapturing, setUrlCapturing] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'loaded'>('idle');
 
   // Apply toon filter to a slot image and map it to the corresponding cut 1:1
   const applyToonToSlot = useCallback(async (slotId: string, rawUri: string) => {
@@ -201,6 +209,82 @@ export function ToonModeEditor({
       };
       reader.readAsDataURL(file);
     });
+  }, [applyToonToSlot]);
+
+  // URL capture — uses WordPress mShots free screenshot service
+  const handleUrlCapture = useCallback(() => {
+    const url = urlInput.trim();
+    if (!url || urlCapturing) return;
+    const normalized = url.startsWith('http') ? url : `https://${url}`;
+    setUrlCapturing(true);
+    const screenshotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(normalized)}?w=800`;
+    const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // Convert to data URL via canvas so it persists in slots
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 800;
+      canvas.height = img.naturalHeight || 600;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        try {
+          const dataUri = canvas.toDataURL('image/png');
+          const slotId = makeSlotId();
+          rawImageMap.current.set(slotId, dataUri);
+          setSlots((prev) => [...prev, { id: slotId, uri: dataUri }]);
+          applyToonToSlot(slotId, dataUri);
+        } catch {
+          // CORS taint — use the screenshot URL directly
+          const slotId = makeSlotId();
+          rawImageMap.current.set(slotId, screenshotUrl);
+          setSlots((prev) => [...prev, { id: slotId, uri: screenshotUrl }]);
+          applyToonToSlot(slotId, screenshotUrl);
+        }
+      }
+      setUrlCapturing(false);
+      setUrlInput('');
+    };
+    img.onerror = () => {
+      setUrlCapturing(false);
+    };
+    img.src = screenshotUrl;
+  }, [urlInput, urlCapturing, applyToonToSlot]);
+
+  // Save slots to localStorage
+  const handleSaveSlots = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof localStorage === 'undefined') return;
+    const rawEntries: Array<[string, string]> = Array.from(rawImageMap.current.entries());
+    const data = {
+      slots: slotsRef.current.map((s) => ({ id: s.id, uri: s.uri })),
+      rawMap: rawEntries,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem('shopformer_toon_slots', JSON.stringify(data));
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
+  }, []);
+
+  // Load slots from localStorage
+  const handleLoadSlots = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem('shopformer_toon_slots');
+    if (!raw) return;
+    try {
+      const data = JSON.parse(raw);
+      const loadedSlots: CaptureSlot[] = (data.slots as Array<{ id: string; uri: string }>).map((s) => ({ id: s.id, uri: s.uri }));
+      rawImageMap.current = new Map(data.rawMap as Array<[string, string]>);
+      setSlots(loadedSlots);
+      // Re-apply toon filter to all loaded slots
+      loadedSlots.forEach((slot) => {
+        const rawUri = rawImageMap.current.get(slot.id);
+        if (rawUri) applyToonToSlot(slot.id, rawUri);
+      });
+      setSaveStatus('loaded');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch {
+      // ignore corrupt data
+    }
   }, [applyToonToSlot]);
 
   const handleSlotPick = useCallback((index: number) => {
@@ -405,9 +489,11 @@ export function ToonModeEditor({
     let cancelled = false;
     (async () => {
       setTooningSlots(true);
+      inspectorCtx.setBatchTooning(true);
       const rawEntries = Array.from(rawImageMap.current.entries());
       if (rawEntries.length === 0) {
         setTooningSlots(false);
+        inspectorCtx.setBatchTooning(false);
         return;
       }
       const newCuts: ToonCut[] = [];
@@ -449,14 +535,15 @@ export function ToonModeEditor({
         setCuts(relabelCuts(newCuts));
       }
       setTooningSlots(false);
+      inspectorCtx.setBatchTooning(false);
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inspectorCtx.batchToonTrigger, relabelCuts]);
 
-  // Wider grids for full-width workspace — 4 cols on wide, 3 on medium, 2 on narrow
-  const cutCols = winW > 1400 ? 4 : winW > 800 ? 3 : 2;
-  const cutGap = 14;
+  // Compact 6-column grid on wide, responsive fallback on narrow
+  const cutCols = winW > 900 ? 6 : winW > 600 ? 4 : winW > 400 ? 3 : 2;
+  const cutGap = 8;
   const cutCardWidth = `calc((100% - ${cutGap * (cutCols - 1)}px) / ${cutCols})`;
 
   const selectedCut = cuts.find((c) => c.id === selectedCutId) ?? null;
@@ -493,6 +580,87 @@ export function ToonModeEditor({
             <Text style={[styles.stepTitle, { color: TEXT_DARK }]}>캡처 입력</Text>
             <Text style={[styles.stepCount, { color: TEXT_FAINT }]}>{slots.length}장</Text>
           </View>
+
+          {/* Capture mode tabs */}
+          <View style={styles.captureTabs}>
+            <TouchableOpacity
+              style={[styles.captureTab, captureMode === 'file' && styles.captureTabActive]}
+              onPress={() => setCaptureMode('file')}
+              activeOpacity={0.7}
+            >
+              <FolderOpen size={14} color={captureMode === 'file' ? ACCENT : TEXT_FAINT} strokeWidth={2} />
+              <Text style={[styles.captureTabText, captureMode === 'file' && styles.captureTabTextActive]}>
+                파일 불러오기 / 저장
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.captureTab, captureMode === 'link' && styles.captureTabActive]}
+              onPress={() => setCaptureMode('link')}
+              activeOpacity={0.7}
+            >
+              <LinkIcon size={14} color={captureMode === 'link' ? ACCENT : TEXT_FAINT} strokeWidth={2} />
+              <Text style={[styles.captureTabText, captureMode === 'link' && styles.captureTabTextActive]}>
+                링크 주소로 직접 캡처
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Link capture mode */}
+          {captureMode === 'link' && (
+            <View style={styles.urlCaptureWrap}>
+              <View style={styles.urlInputRow}>
+                <View style={styles.urlInputWrap}>
+                  <LinkIcon size={15} color={TEXT_FAINT} strokeWidth={2} />
+                  <TextInput
+                    style={styles.urlInput}
+                    placeholder="https:// 상품 페이지 URL 입력"
+                    placeholderTextColor={TEXT_FAINT}
+                    value={urlInput}
+                    onChangeText={setUrlInput}
+                    onSubmitEditing={handleUrlCapture}
+                    returnKeyType="go"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[styles.urlCaptureBtn, !urlInput.trim() && styles.urlCaptureBtnDisabled]}
+                  onPress={handleUrlCapture}
+                  disabled={!urlInput.trim() || urlCapturing}
+                  activeOpacity={0.85}
+                >
+                  {urlCapturing ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Camera size={16} color="#fff" strokeWidth={2.5} />
+                  )}
+                  <Text style={styles.urlCaptureBtnText}>
+                    {urlCapturing ? '캡처 중...' : '화면 캡처'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.urlHint}>입력한 링크의 화면을 캡처하여 슬롯에 자동 추가됩니다</Text>
+            </View>
+          )}
+
+          {/* File mode save/load actions */}
+          {captureMode === 'file' && slots.length > 0 && (
+            <View style={styles.fileActionsRow}>
+              <TouchableOpacity style={styles.fileActionBtn} onPress={handleSaveSlots} activeOpacity={0.7}>
+                <Save size={14} color={ACCENT} strokeWidth={2} />
+                <Text style={styles.fileActionBtnText}>
+                  {saveStatus === 'saved' ? '저장됨' : '저장'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.fileActionBtn} onPress={handleLoadSlots} activeOpacity={0.7}>
+                <FolderOpen size={14} color={ACCENT} strokeWidth={2} />
+                <Text style={styles.fileActionBtnText}>
+                  {saveStatus === 'loaded' ? '불러옴' : '불러오기'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.slotRow}>
             {slots.map((slot, i) => (
@@ -629,7 +797,7 @@ export function ToonModeEditor({
                     onPress={() => handleRemoveCut(cut.id)}
                     activeOpacity={0.7}
                   >
-                    <Trash2 size={11} color={theme.colors.error[400]} strokeWidth={2} />
+                    <Trash2 size={8} color={theme.colors.error[400]} strokeWidth={2} />
                   </TouchableOpacity>
 
                   {/* Manga panel */}
@@ -642,7 +810,7 @@ export function ToonModeEditor({
                       />
                     ) : (
                       <View style={styles.cutPanelEmpty}>
-                        <ImageIcon size={24} color={INK_LIGHT} strokeWidth={1.5} />
+                        <ImageIcon size={16} color={INK_LIGHT} strokeWidth={1.5} />
                       </View>
                     )}
 
@@ -681,13 +849,13 @@ export function ToonModeEditor({
                   {/* Affiliate link badge — bottom */}
                   {cut.affiliateLink && cut.affiliateLink.productId ? (
                     <View style={styles.linkBadgeBound}>
-                      <Link2 size={11} color={theme.colors.success[600]} strokeWidth={2.5} />
+                      <Link2 size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
                       <Text style={styles.linkBadgeBoundText} numberOfLines={1}>{cut.affiliateLink.productName}</Text>
-                      <Check size={11} color={theme.colors.success[600]} strokeWidth={2.5} />
+                      <Check size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
                     </View>
                   ) : (
                     <View style={styles.linkBadgeEmpty}>
-                      <Link2 size={11} color={TEXT_FAINT} strokeWidth={2} />
+                      <Link2 size={8} color={TEXT_FAINT} strokeWidth={2} />
                       <Text style={styles.linkBadgeEmptyText}>
                         {isSelected ? '우측 인스펙터에서 바인딩' : '제휴 링크 없음'}
                       </Text>
@@ -788,47 +956,47 @@ const styles = StyleSheet.create({
   addPageBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44, borderRadius: 12, borderWidth: 1.5, paddingHorizontal: 16 },
   addPageBtnText: { fontSize: 13, fontFamily: theme.typography.fontFamily.medium },
   // ─── Manga cut grid ───
-  cutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  cutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   cutCard: {
     width: '48%',
-    minHeight: 240,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#1E293B',
-    backgroundColor: PAPER,
+    minHeight: 120,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: BORDER_SLATE,
+    backgroundColor: CARD_SURFACE,
     overflow: 'hidden',
     position: 'relative',
   },
   cutCardSelected: {
     borderColor: ACCENT,
-    borderWidth: 2.5,
+    borderWidth: 1.5,
     shadowColor: ACCENT,
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 0 },
-    elevation: 6,
+    elevation: 4,
   },
   cutNumberBadge: {
     position: 'absolute',
     top: 0,
     left: 0,
     backgroundColor: '#1E293B',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
     zIndex: 3,
   },
   cutNumberText: {
-    fontSize: 10,
+    fontSize: 8,
     fontFamily: theme.typography.fontFamily.bold,
     color: '#F8F8FA',
   },
   cutDeleteBtn: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+    top: 2,
+    right: 2,
+    width: 16,
+    height: 16,
+    borderRadius: 4,
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -838,8 +1006,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: PAPER,
     position: 'relative',
-    margin: 2,
-    marginTop: 18,
+    margin: 1,
+    marginTop: 12,
   },
   cutPanelImage: {
     width: '100%',
@@ -852,60 +1020,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: CARD_SURFACE,
   },
-  // Speech bubble
+  // Speech bubble — compact
   bubbleFloat: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    maxWidth: '72%',
+    top: 4,
+    right: 4,
+    maxWidth: '78%',
     zIndex: 2,
   },
   bubbleFloatShape: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    borderWidth: 2,
+    borderRadius: 10,
+    borderWidth: 1,
     borderColor: '#cbd5e1',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    minHeight: 32,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    minHeight: 18,
     justifyContent: 'center',
   },
   bubbleFloatText: {
-    fontSize: 11,
+    fontSize: 8,
     fontFamily: theme.typography.fontFamily.medium,
     color: '#1a1a1a',
-    lineHeight: 16,
+    lineHeight: 11,
   },
   bubbleFloatInput: {
-    fontSize: 11,
+    fontSize: 8,
     fontFamily: theme.typography.fontFamily.medium,
     color: '#1a1a1a',
     padding: 0,
-    minHeight: 20,
-    lineHeight: 16,
+    minHeight: 14,
+    lineHeight: 11,
   },
   bubbleTail: {
     position: 'absolute',
-    bottom: -8,
-    left: 16,
+    bottom: -5,
+    left: 10,
     width: 0,
     height: 0,
-    borderLeftWidth: 7,
-    borderRightWidth: 7,
-    borderTopWidth: 9,
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderTopWidth: 5,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     borderTopColor: '#cbd5e1',
   },
-  // Affiliate badge
+  // Affiliate badge — slim
   linkBadgeBound: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 5,
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    paddingHorizontal: 4, paddingVertical: 2,
     backgroundColor: theme.colors.success[500] + '15',
   },
-  linkBadgeBoundText: { flex: 1, fontSize: 10, fontFamily: theme.typography.fontFamily.medium, color: theme.colors.success[600] },
-  linkBadgeEmpty: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5 },
-  linkBadgeEmptyText: { flex: 1, fontSize: 10, fontFamily: theme.typography.fontFamily.regular, color: TEXT_FAINT },
+  linkBadgeBoundText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.medium, color: theme.colors.success[600] },
+  linkBadgeEmpty: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 4, paddingVertical: 2 },
+  linkBadgeEmptyText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.regular, color: TEXT_FAINT },
   // Detail panel
   detailPanel: { padding: 14, borderRadius: 10, borderWidth: 1, gap: 8, marginTop: 4 },
   detailTitle: { fontSize: 13, fontFamily: theme.typography.fontFamily.semiBold },
@@ -918,4 +1086,38 @@ const styles = StyleSheet.create({
   // Publish
   publishBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46, borderRadius: 12, marginTop: 6 },
   publishBtnText: { fontSize: 14, fontFamily: theme.typography.fontFamily.semiBold, color: '#fff' },
+  // Capture mode tabs
+  captureTabs: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  captureTab: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10,
+    borderWidth: 1.5, borderColor: BORDER_SLATE, backgroundColor: CARD_SURFACE,
+  },
+  captureTabActive: { borderColor: ACCENT, backgroundColor: ACCENT_SOFT },
+  captureTabText: { fontSize: 12, fontFamily: theme.typography.fontFamily.medium, color: TEXT_FAINT },
+  captureTabTextActive: { color: ACCENT },
+  // URL capture
+  urlCaptureWrap: { gap: 6, marginBottom: 4 },
+  urlInputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  urlInputWrap: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+    height: 40, paddingHorizontal: 12, borderRadius: 10,
+    borderWidth: 1.5, borderColor: BORDER_SLATE, backgroundColor: CARD_SURFACE,
+  },
+  urlInput: { flex: 1, fontSize: 12, fontFamily: theme.typography.fontFamily.regular, color: TEXT_DARK, padding: 0 },
+  urlCaptureBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    height: 40, paddingHorizontal: 16, borderRadius: 10, backgroundColor: ACCENT,
+  },
+  urlCaptureBtnDisabled: { opacity: 0.4 },
+  urlCaptureBtnText: { fontSize: 12, fontFamily: theme.typography.fontFamily.semiBold, color: '#fff' },
+  urlHint: { fontSize: 10, fontFamily: theme.typography.fontFamily.regular, color: TEXT_FAINT },
+  // File actions
+  fileActionsRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  fileActionBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8,
+    borderWidth: 1.5, borderColor: ACCENT, backgroundColor: ACCENT_SOFT,
+  },
+  fileActionBtnText: { fontSize: 12, fontFamily: theme.typography.fontFamily.medium, color: ACCENT },
 });

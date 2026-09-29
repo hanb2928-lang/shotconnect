@@ -21,6 +21,8 @@ export interface InspectorContextValue {
   setToonStyle: (style: ToonStyle) => void;
   batchToonTrigger: number;
   triggerBatchToon: () => void;
+  batchTooning: boolean;
+  setBatchTooning: (v: boolean) => void;
 }
 
 export const InspectorContext = createContext<InspectorContextValue>({
@@ -39,6 +41,8 @@ export const InspectorContext = createContext<InspectorContextValue>({
   setToonStyle: () => {},
   batchToonTrigger: 0,
   triggerBatchToon: () => {},
+  batchTooning: false,
+  setBatchTooning: () => {},
 });
 
 export function useInspectorContext(): InspectorContextValue {

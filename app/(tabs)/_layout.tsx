@@ -54,6 +54,8 @@ export default function TabLayout() {
     setToonStyle,
     batchToonTrigger,
     triggerBatchToon,
+    batchTooning,
+    setBatchTooning,
   };
 
   return (

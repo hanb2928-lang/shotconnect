@@ -354,216 +354,204 @@ export function InspectorPanel({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── Persona Mode: Character & Style Settings ─── */}
-        {inspectorMode === 'persona' && (
-          <View style={styles.personaModeWrap}>
-            <View style={styles.personaHeader}>
-              <View style={styles.personaHeaderIcon}>
-                <User size={16} color={theme.colors.primary[400]} strokeWidth={2.5} />
+        {/* ─── Character & Style Settings (always visible at top) ─── */}
+        <View style={styles.personaModeWrap}>
+          <View style={styles.personaHeader}>
+            <View style={styles.personaHeaderIcon}>
+              <User size={16} color={theme.colors.primary[400]} strokeWidth={2.5} />
+            </View>
+            <View>
+              <Text style={styles.personaHeaderTitle}>캐릭터 & 만화 스타일</Text>
+              <Text style={styles.personaHeaderSub}>캐릭터 사진 업로드 · 컬러/흑백 · 일괄 적용</Text>
+            </View>
+          </View>
+
+          {/* Character preview */}
+          {toonCharacter ? (
+            <View style={styles.personaPreviewCard}>
+              <Image
+                source={{ uri: toonCharacter.imageUrl }}
+                style={styles.personaPreviewImg}
+                resizeMode="cover"
+              />
+              <View style={styles.personaPreviewInfo}>
+                <Text style={styles.personaPreviewLabel}>적용된 캐릭터</Text>
+                <Text style={styles.personaPreviewPreset}>
+                  {TOON_PERSONA_PRESETS.find((p) => p.id === toonCharacter.presetId)?.emoji}{' '}
+                  {TOON_PERSONA_PRESETS.find((p) => p.id === toonCharacter.presetId)?.label}
+                </Text>
+                <Text style={styles.personaPreviewTone}>톤 강도: {toonCharacter.toneLevel}%</Text>
               </View>
-              <View>
-                <Text style={styles.personaHeaderTitle}>캐릭터 페르소나 & 스타일</Text>
-                <Text style={styles.personaHeaderSub}>만화 캐릭터 설정 및 숏툰 주입</Text>
+              <View style={styles.personaPreviewBadge}>
+                <Check size={12} color="#fff" strokeWidth={2.5} />
               </View>
             </View>
+          ) : (
+            <View style={styles.personaEmptyCard}>
+              <User size={24} color={theme.colors.light.textFaint} strokeWidth={1.5} />
+              <Text style={styles.personaEmptyText}>아래 업로더에서 캐릭터 얼굴 사진을</Text>
+              <Text style={styles.personaEmptyText}>추가하여 만화 캐릭터를 생성하세요</Text>
+            </View>
+          )}
 
-            {/* Character preview */}
-            {toonCharacter ? (
-              <View style={styles.personaPreviewCard}>
-                <Image
-                  source={{ uri: toonCharacter.imageUrl }}
-                  style={styles.personaPreviewImg}
-                  resizeMode="cover"
-                />
-                <View style={styles.personaPreviewInfo}>
-                  <Text style={styles.personaPreviewLabel}>적용된 캐릭터</Text>
-                  <Text style={styles.personaPreviewPreset}>
-                    {TOON_PERSONA_PRESETS.find((p) => p.id === toonCharacter.presetId)?.emoji}{' '}
-                    {TOON_PERSONA_PRESETS.find((p) => p.id === toonCharacter.presetId)?.label}
-                  </Text>
-                  <Text style={styles.personaPreviewTone}>톤 강도: {toonCharacter.toneLevel}%</Text>
-                </View>
-                <View style={styles.personaPreviewBadge}>
-                  <Check size={12} color="#fff" strokeWidth={2.5} />
-                </View>
-              </View>
-            ) : (
-              <View style={styles.personaEmptyCard}>
-                <User size={24} color={theme.colors.light.textFaint} strokeWidth={1.5} />
-                <Text style={styles.personaEmptyText}>아래 업로더에서 캐릭터 얼굴 사진을</Text>
-                <Text style={styles.personaEmptyText}>추가하여 만화 캐릭터를 생성하세요</Text>
-              </View>
-            )}
+          {/* Face photo uploader */}
+          <Text style={styles.personaSectionLabel}>캐릭터 얼굴 사진 업로드</Text>
+          <TouchableOpacity
+            style={[styles.faceDropzone, faceDragOver && styles.faceDropzoneActive]}
+            onPress={handleFacePick}
+            activeOpacity={0.7}
+            {...({
+              onDrop: handleFaceDrop,
+              onDragOver: (e: React.DragEvent) => { e.preventDefault(); setFaceDragOver(true); },
+              onDragLeave: () => setFaceDragOver(false),
+            } as any)}
+          >
+            <Upload size={20} color={theme.colors.primary[400]} strokeWidth={2} />
+            <Text style={styles.faceDropzoneText}>클릭 또는 드래그하여 얼굴 사진 추가</Text>
+            <Text style={styles.faceDropzoneHint}>JPG, PNG · 여러 장 동시 업로드 가능</Text>
+          </TouchableOpacity>
 
-            {/* Face photo uploader */}
-            <Text style={styles.personaSectionLabel}>캐릭터 얼굴 사진 업로드</Text>
-            <TouchableOpacity
-              style={[styles.faceDropzone, faceDragOver && styles.faceDropzoneActive]}
-              onPress={handleFacePick}
-              activeOpacity={0.7}
-              {...({
-                onDrop: handleFaceDrop,
-                onDragOver: (e: React.DragEvent) => { e.preventDefault(); setFaceDragOver(true); },
-                onDragLeave: () => setFaceDragOver(false),
-              } as any)}
-            >
-              <Upload size={20} color={theme.colors.primary[400]} strokeWidth={2} />
-              <Text style={styles.faceDropzoneText}>클릭 또는 드래그하여 얼굴 사진 추가</Text>
-              <Text style={styles.faceDropzoneHint}>JPG, PNG · 여러 장 동시 업로드 가능</Text>
-            </TouchableOpacity>
-
-            {/* Face thumbnail grid */}
-            {faces.length > 0 && (
-              <View style={styles.faceGrid}>
-                {faces.map((face) => {
-                  const isActive = toonCharacter?.id === face.id;
-                  return (
-                    <View key={face.id} style={styles.faceThumbWrap}>
-                      <TouchableOpacity
-                        style={[styles.faceThumb, isActive && styles.faceThumbActive]}
-                        onPress={() => handleFaceSelect(face)}
-                        activeOpacity={0.7}
-                      >
-                        <Image
-                          source={{ uri: face.imageUrl }}
-                          style={styles.faceThumbImg}
-                          resizeMode="cover"
-                        />
-                        {isActive && (
-                          <View style={styles.faceThumbBadge}>
-                            <Check size={10} color="#fff" strokeWidth={3} />
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.faceThumbRemove}
-                        onPress={() => handleFaceRemove(face.id)}
-                        activeOpacity={0.7}
-                      >
-                        <X size={8} color="#fff" strokeWidth={3} />
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-
-            {/* Preset selector */}
-            <Text style={styles.personaSectionLabel}>페르소나 프리셋</Text>
-            <View style={styles.personaPresetList}>
-              {TOON_PERSONA_PRESETS.map((preset) => {
-                const selected = preset.id === selectedPresetId;
+          {/* Face thumbnail grid */}
+          {faces.length > 0 && (
+            <View style={styles.faceGrid}>
+              {faces.map((face) => {
+                const isActive = toonCharacter?.id === face.id;
                 return (
-                  <TouchableOpacity
-                    key={preset.id}
-                    style={[
-                      styles.personaPresetRow,
-                      selected && { borderColor: preset.toneColor, backgroundColor: preset.toneColor + '12' },
-                    ]}
-                    onPress={() => onPresetSelect?.(preset.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.personaPresetEmoji}>{preset.emoji}</Text>
-                    <View style={styles.personaPresetInfo}>
-                      <Text style={[styles.personaPresetName, selected && { color: preset.toneColor }]}>
-                        {preset.label}
-                      </Text>
-                      <Text style={styles.personaPresetDesc}>{preset.desc}</Text>
-                    </View>
-                    {selected && (
-                      <Check size={16} color={preset.toneColor} strokeWidth={2.5} />
-                    )}
-                  </TouchableOpacity>
+                  <View key={face.id} style={styles.faceThumbWrap}>
+                    <TouchableOpacity
+                      style={[styles.faceThumb, isActive && styles.faceThumbActive]}
+                      onPress={() => handleFaceSelect(face)}
+                      activeOpacity={0.7}
+                    >
+                      <Image
+                        source={{ uri: face.imageUrl }}
+                        style={styles.faceThumbImg}
+                        resizeMode="cover"
+                      />
+                      {isActive && (
+                        <View style={styles.faceThumbBadge}>
+                          <Check size={10} color="#fff" strokeWidth={3} />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.faceThumbRemove}
+                      onPress={() => handleFaceRemove(face.id)}
+                      activeOpacity={0.7}
+                    >
+                      <X size={8} color="#fff" strokeWidth={3} />
+                    </TouchableOpacity>
+                  </View>
                 );
               })}
             </View>
+          )}
 
-            {/* Tone slider */}
-            <View style={styles.personaToneSection}>
-              <View style={styles.personaToneHeader}>
-                <Sliders size={14} color={theme.colors.primary[400]} strokeWidth={2} />
-                <Text style={styles.personaToneLabel}>톤앤매너 강도</Text>
-                <Text style={styles.personaToneValue}>{toneLevel}%</Text>
-              </View>
-              <View style={styles.personaToneTrack}>
-                <View style={[styles.personaToneFill, { width: `${toneLevel}%` }]} />
-              </View>
-              <View style={styles.personaToneMarks}>
-                {([0, 25, 50, 75, 100] as const).map((mark) => (
-                  <TouchableOpacity
-                    key={mark}
-                    style={styles.personaToneMarkBtn}
-                    onPress={() => onToneChange?.(mark)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[styles.personaToneDot, toneLevel === mark && styles.personaToneDotActive]} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.personaToneLabels}>
-                <Text style={styles.personaToneLabelSmall}>원본</Text>
-                <Text style={styles.personaToneLabelSmall}>과장</Text>
-              </View>
-            </View>
-
-            {/* Toon style toggle: Color / Mono */}
-            <View style={styles.toonStyleSection}>
-              <View style={styles.toonStyleHeader}>
-                <Palette size={14} color={theme.colors.primary[400]} strokeWidth={2} />
-                <Text style={styles.toonStyleLabel}>만화 스타일</Text>
-              </View>
-              <View style={styles.toonStyleToggle}>
+          {/* Preset selector */}
+          <Text style={styles.personaSectionLabel}>페르소나 프리셋</Text>
+          <View style={styles.personaPresetList}>
+            {TOON_PERSONA_PRESETS.map((preset) => {
+              const selected = preset.id === selectedPresetId;
+              return (
                 <TouchableOpacity
-                  style={[styles.toonStyleBtn, toonStyle === 'color' && styles.toonStyleBtnActive]}
-                  onPress={() => onToonStyleChange?.('color')}
+                  key={preset.id}
+                  style={[
+                    styles.personaPresetRow,
+                    selected && { borderColor: preset.toneColor, backgroundColor: preset.toneColor + '12' },
+                  ]}
+                  onPress={() => onPresetSelect?.(preset.id)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.toonStyleBtnText, toonStyle === 'color' && styles.toonStyleBtnTextActive]}>
-                    컬러 만화
-                  </Text>
+                  <Text style={styles.personaPresetEmoji}>{preset.emoji}</Text>
+                  <View style={styles.personaPresetInfo}>
+                    <Text style={[styles.personaPresetName, selected && { color: preset.toneColor }]}>
+                      {preset.label}
+                    </Text>
+                    <Text style={styles.personaPresetDesc}>{preset.desc}</Text>
+                  </View>
+                  {selected && (
+                    <Check size={16} color={preset.toneColor} strokeWidth={2.5} />
+                  )}
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.toonStyleBtn, toonStyle === 'mono' && styles.toonStyleBtnActive]}
-                  onPress={() => onToonStyleChange?.('mono')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.toonStyleBtnText, toonStyle === 'mono' && styles.toonStyleBtnTextActive]}>
-                    흑백 만화
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Batch apply to all cuts */}
-            <TouchableOpacity
-              style={[styles.batchApplyBtn, batchTooning && styles.batchApplyBtnDisabled]}
-              onPress={() => onBatchToonApply?.()}
-              disabled={batchTooning}
-              activeOpacity={0.85}
-            >
-              {batchTooning ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Zap size={16} color="#fff" strokeWidth={2.5} />
-              )}
-              <Text style={styles.batchApplyBtnText}>
-                {batchTooning ? '일괄 변환 중...' : '만화풍 적용 및 저장'}
-              </Text>
-            </TouchableOpacity>
-
-            {/* Apply button */}
-            <TouchableOpacity
-              style={[styles.personaApplyBtn, !toonCharacter && styles.personaApplyBtnDisabled]}
-              disabled={!toonCharacter}
-              activeOpacity={0.85}
-            >
-              <Check size={16} color="#fff" strokeWidth={2.5} />
-              <Text style={styles.personaApplyBtnText}>캐릭터 고정 및 숏툰 적용</Text>
-            </TouchableOpacity>
-
-            <View style={{ height: 16 }} />
+              );
+            })}
           </View>
-        )}
+
+          {/* Tone slider */}
+          <View style={styles.personaToneSection}>
+            <View style={styles.personaToneHeader}>
+              <Sliders size={14} color={theme.colors.primary[400]} strokeWidth={2} />
+              <Text style={styles.personaToneLabel}>톤앤매너 강도</Text>
+              <Text style={styles.personaToneValue}>{toneLevel}%</Text>
+            </View>
+            <View style={styles.personaToneTrack}>
+              <View style={[styles.personaToneFill, { width: `${toneLevel}%` }]} />
+            </View>
+            <View style={styles.personaToneMarks}>
+              {([0, 25, 50, 75, 100] as const).map((mark) => (
+                <TouchableOpacity
+                  key={mark}
+                  style={styles.personaToneMarkBtn}
+                  onPress={() => onToneChange?.(mark)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.personaToneDot, toneLevel === mark && styles.personaToneDotActive]} />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.personaToneLabels}>
+              <Text style={styles.personaToneLabelSmall}>원본</Text>
+              <Text style={styles.personaToneLabelSmall}>과장</Text>
+            </View>
+          </View>
+
+          {/* Toon style toggle: Color / Mono */}
+          <View style={styles.toonStyleSection}>
+            <View style={styles.toonStyleHeader}>
+              <Palette size={14} color={theme.colors.primary[400]} strokeWidth={2} />
+              <Text style={styles.toonStyleLabel}>만화 스타일</Text>
+            </View>
+            <View style={styles.toonStyleToggle}>
+              <TouchableOpacity
+                style={[styles.toonStyleBtn, toonStyle === 'color' && styles.toonStyleBtnActive]}
+                onPress={() => onToonStyleChange?.('color')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.toonStyleBtnText, toonStyle === 'color' && styles.toonStyleBtnTextActive]}>
+                  컬러 웹툰풍
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toonStyleBtn, toonStyle === 'mono' && styles.toonStyleBtnActive]}
+                onPress={() => onToonStyleChange?.('mono')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.toonStyleBtnText, toonStyle === 'mono' && styles.toonStyleBtnTextActive]}>
+                  흑백 망점 스케치
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Batch apply to all cuts — prominent electric purple button */}
+          <TouchableOpacity
+            style={[styles.batchApplyBtn, batchTooning && styles.batchApplyBtnDisabled]}
+            onPress={() => onBatchToonApply?.()}
+            disabled={batchTooning}
+            activeOpacity={0.85}
+          >
+            {batchTooning ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Zap size={16} color="#fff" strokeWidth={2.5} />
+            )}
+            <Text style={styles.batchApplyBtnText}>
+              {batchTooning ? '일괄 변환 중...' : '만화 캐릭터 생성 및 타일 컷 일괄 적용'}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.inspectorDivider} />
+        </View>
 
         {/* ─── Affiliate Mode: Original sections ─── */}
         {inspectorMode !== 'persona' && (
@@ -1723,5 +1711,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 2,
+  },
+  inspectorDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 8,
+    marginTop: 14,
   },
 });
