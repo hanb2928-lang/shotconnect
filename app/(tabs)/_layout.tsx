@@ -17,6 +17,9 @@ function TabBarFallback() {
 
 const isWeb = Platform.OS === 'web';
 
+// Light palette — app defaults to studio-light theme
+const C = theme.colors.light;
+
 export default function TabLayout() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [boundLinks, setBoundLinks] = useState<BoundAffiliateLink[]>([]);
@@ -78,7 +81,7 @@ export default function TabLayout() {
                 <View style={styles.inspectorHeader}>
                   <Text style={styles.inspectorTitle}>다이나믹 인스펙터</Text>
                   <Pressable onPress={toggleInspector} hitSlop={12}>
-                    <PanelRightClose size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
+                    <PanelRightClose size={18} color={C.textDim} strokeWidth={2} />
                   </Pressable>
                 </View>
                 <View style={styles.inspectorContent}>
@@ -98,7 +101,7 @@ export default function TabLayout() {
               </View>
             ) : (
               <Pressable onPress={toggleInspector} style={styles.inspectorExpandBtn} hitSlop={12}>
-                <PanelRightOpen size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
+                <PanelRightOpen size={18} color={C.textDim} strokeWidth={2} />
               </Pressable>
             )}
           </View>
@@ -112,7 +115,7 @@ const styles = StyleSheet.create({
   workspaceRoot: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#121214',
+    backgroundColor: C.bg,
     height: '100%',
   },
   tabsWrapper: {
@@ -120,12 +123,12 @@ const styles = StyleSheet.create({
   },
   fallback: {
     width: 64,
-    backgroundColor: '#18181B',
+    backgroundColor: C.surface,
   },
   inspector: {
-    backgroundColor: '#18181B',
+    backgroundColor: C.surface,
     borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255, 255, 255, 0.08)',
+    borderLeftColor: C.border,
     overflow: 'hidden',
     height: '100%',
   },
@@ -149,12 +152,12 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    borderBottomColor: C.border,
   },
   inspectorTitle: {
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: C.text,
   },
   inspectorContent: {
     flex: 1,

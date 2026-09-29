@@ -264,7 +264,7 @@ export function InspectorPanel({
           </View>
         </View>
         <Pressable onPress={onClose} hitSlop={12}>
-          <ChevronDown size={18} color={theme.colors.dark.textDim} strokeWidth={2} />
+          <ChevronDown size={18} color={theme.colors.light.textDim} strokeWidth={2} />
         </Pressable>
       </View>
 
@@ -308,7 +308,7 @@ export function InspectorPanel({
               </View>
             ) : (
               <View style={styles.personaEmptyCard}>
-                <User size={24} color={theme.colors.dark.textFaint} strokeWidth={1.5} />
+                <User size={24} color={theme.colors.light.textFaint} strokeWidth={1.5} />
                 <Text style={styles.personaEmptyText}>중앙 캔버스에서 사진을 업로드하여</Text>
                 <Text style={styles.personaEmptyText}>만화 캐릭터를 생성해주세요</Text>
               </View>
@@ -403,11 +403,11 @@ export function InspectorPanel({
             {/* Search input */}
             <View style={styles.searchRow}>
               <View style={styles.searchInputWrap}>
-                <Search size={15} color={theme.colors.dark.textFaint} strokeWidth={2} />
+                <Search size={15} color={theme.colors.light.textFaint} strokeWidth={2} />
                 <TextInput
                   style={styles.searchInput}
                   placeholder="상품 키워드 입력"
-                  placeholderTextColor={theme.colors.dark.textFaint}
+                  placeholderTextColor={theme.colors.light.textFaint}
                   value={searchQuery}
                   onChangeText={setSearchQuery}
                   onSubmitEditing={handleSearch}
@@ -430,7 +430,7 @@ export function InspectorPanel({
 
             {/* Partner ID status */}
             <View style={styles.partnerStatus}>
-              <Tag size={12} color={theme.colors.dark.textFaint} strokeWidth={2} />
+              <Tag size={12} color={theme.colors.light.textFaint} strokeWidth={2} />
               <Text style={styles.partnerStatusText}>
                 {(coupangPlatform?.partners_id || settings?.coupang_partners_id)
                   ? `파트너스 ID: ${(coupangPlatform?.partners_id ?? settings?.coupang_partners_id ?? '').slice(0, 8)}...`
@@ -462,7 +462,7 @@ export function InspectorPanel({
                           onPress={() => isWeb && window.open(result.url, '_blank')}
                           activeOpacity={0.7}
                         >
-                          <ExternalLink size={14} color={theme.colors.dark.textDim} strokeWidth={2} />
+                          <ExternalLink size={14} color={theme.colors.light.textDim} strokeWidth={2} />
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={[styles.bindBtn, isBound && styles.bindBtnActive]}
@@ -507,7 +507,7 @@ export function InspectorPanel({
                         {copiedId === link.productId ? (
                           <Check size={13} color={theme.colors.success[400]} strokeWidth={2.5} />
                         ) : (
-                          <Copy size={13} color={theme.colors.dark.textDim} strokeWidth={2} />
+                          <Copy size={13} color={theme.colors.light.textDim} strokeWidth={2} />
                         )}
                       </TouchableOpacity>
                       <TouchableOpacity
@@ -566,14 +566,14 @@ export function InspectorPanel({
               <TextInput
                 style={styles.subIdInput}
                 placeholder="채널명 (예: instagram)"
-                placeholderTextColor={theme.colors.dark.textFaint}
+                placeholderTextColor={theme.colors.light.textFaint}
                 value={newChannel}
                 onChangeText={setNewChannel}
               />
               <TextInput
                 style={styles.subIdInput}
                 placeholder="Sub ID 값"
-                placeholderTextColor={theme.colors.dark.textFaint}
+                placeholderTextColor={theme.colors.light.textFaint}
                 value={newSubId}
                 onChangeText={setNewSubId}
               />
@@ -623,7 +623,7 @@ export function InspectorPanel({
               <TextInput
                 style={styles.promptInput}
                 placeholder="AI 프롬프트를 입력하세요..."
-                placeholderTextColor={theme.colors.dark.textFaint}
+                placeholderTextColor={theme.colors.light.textFaint}
                 value={prompt}
                 onChangeText={setPrompt}
                 multiline
@@ -707,9 +707,9 @@ function SectionHeader({
         {badge && <View style={styles.sectionBadge}><Text style={styles.sectionBadgeText}>{badge}</Text></View>}
       </View>
       {open ? (
-        <ChevronDown size={16} color={theme.colors.dark.textDim} strokeWidth={2} />
+        <ChevronDown size={16} color={theme.colors.light.textDim} strokeWidth={2} />
       ) : (
-        <ChevronRight size={16} color={theme.colors.dark.textDim} strokeWidth={2} />
+        <ChevronRight size={16} color={theme.colors.light.textDim} strokeWidth={2} />
       )}
     </TouchableOpacity>
   );
@@ -718,7 +718,7 @@ function SectionHeader({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#18181B',
+    backgroundColor: '#ffffff',
   },
   header: {
     flexDirection: 'row',
@@ -728,7 +728,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -746,12 +746,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 14,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   headerSub: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
     marginTop: 2,
   },
   scroll: {
@@ -770,7 +770,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginTop: 8,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: 'rgba(15, 23, 42, 0.03)',
   },
   sectionHeaderLeft: {
     flexDirection: 'row',
@@ -788,7 +788,7 @@ const styles = StyleSheet.create({
   sectionHeaderTitle: {
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   sectionBadge: {
     minWidth: 18,
@@ -812,7 +812,7 @@ const styles = StyleSheet.create({
   sectionDesc: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
     lineHeight: 16,
     marginTop: 4,
   },
@@ -830,15 +830,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 36,
     borderRadius: 8,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(15, 23, 42, 0.08)',
   },
   searchInput: {
     flex: 1,
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
     padding: 0,
   },
   searchBtn: {
@@ -866,7 +866,7 @@ const styles = StyleSheet.create({
   partnerStatusText: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
   },
   loadingRow: {
     flexDirection: 'row',
@@ -878,7 +878,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
+    color: theme.colors.light.textDim,
   },
   resultsList: {
     gap: 6,
@@ -890,9 +890,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   resultInfo: {
     flex: 1,
@@ -901,7 +901,7 @@ const styles = StyleSheet.create({
   resultName: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
     lineHeight: 16,
   },
   resultPrice: {
@@ -918,7 +918,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -926,7 +926,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -958,7 +958,7 @@ const styles = StyleSheet.create({
   boundSectionTitle: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.textDim,
+    color: theme.colors.light.textDim,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -980,12 +980,12 @@ const styles = StyleSheet.create({
   boundName: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   boundUrl: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
   },
   boundSubId: {
     fontSize: 10,
@@ -1001,7 +1001,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1016,7 +1016,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
   },
   subIdChannel: {
     paddingHorizontal: 8,
@@ -1033,7 +1033,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   subIdAddRow: {
     flexDirection: 'row',
@@ -1045,12 +1045,12 @@ const styles = StyleSheet.create({
     height: 34,
     paddingHorizontal: 10,
     borderRadius: 7,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(15, 23, 42, 0.08)',
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   addBtn: {
     width: 34,
@@ -1073,7 +1073,7 @@ const styles = StyleSheet.create({
   modelLabel: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.textDim,
+    color: theme.colors.light.textDim,
   },
   modelOptions: {
     flexDirection: 'row',
@@ -1084,9 +1084,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 6,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(15, 23, 42, 0.08)',
   },
   modelChipActive: {
     backgroundColor: theme.colors.primary[500] + '20',
@@ -1095,7 +1095,7 @@ const styles = StyleSheet.create({
   modelChipText: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
+    color: theme.colors.light.textDim,
   },
   modelChipTextActive: {
     color: theme.colors.primary[400],
@@ -1103,16 +1103,16 @@ const styles = StyleSheet.create({
   },
   promptWrap: {
     borderRadius: 8,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(15, 23, 42, 0.08)',
     minHeight: 100,
   },
   promptInput: {
     padding: 12,
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
     lineHeight: 18,
     minHeight: 100,
   },
@@ -1126,9 +1126,9 @@ const styles = StyleSheet.create({
     width: 38,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.1)',
     justifyContent: 'center',
     padding: 2,
   },
@@ -1140,7 +1140,7 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: theme.colors.dark.textDim,
+    backgroundColor: theme.colors.light.textDim,
     transform: [{ translateX: 0 }],
   },
   toggleThumbActive: {
@@ -1154,12 +1154,12 @@ const styles = StyleSheet.create({
   toggleTitle: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   toggleDesc: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
   },
   publishBtn: {
     flexDirection: 'row',
@@ -1194,12 +1194,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.success[400],
   },
   apiKeyDotInactive: {
-    backgroundColor: theme.colors.dark.textFaint,
+    backgroundColor: theme.colors.light.textFaint,
   },
   apiKeyStatusText: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
     marginLeft: 4,
   },
   // ─── Persona Mode ───
@@ -1212,7 +1212,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   personaHeaderIcon: {
     width: 28,
@@ -1225,12 +1225,12 @@ const styles = StyleSheet.create({
   personaHeaderTitle: {
     fontSize: 14,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   personaHeaderSub: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
     marginTop: 2,
   },
   personaPreviewCard: {
@@ -1239,7 +1239,7 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 10,
     borderRadius: 10,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
     borderColor: theme.colors.primary[500] + '30',
   },
@@ -1255,12 +1255,12 @@ const styles = StyleSheet.create({
   personaPreviewLabel: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
   },
   personaPreviewPreset: {
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   personaPreviewTone: {
     fontSize: 11,
@@ -1280,21 +1280,21 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 20,
     borderRadius: 10,
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
     borderStyle: 'dashed',
   },
   personaEmptyText: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
     textAlign: 'center',
   },
   personaSectionLabel: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.textDim,
+    color: theme.colors.light.textDim,
     marginTop: 4,
   },
   personaPresetList: {
@@ -1308,8 +1308,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    backgroundColor: '#1F1F23',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+    backgroundColor: '#f5f5f5',
   },
   personaPresetEmoji: {
     fontSize: 18,
@@ -1321,12 +1321,12 @@ const styles = StyleSheet.create({
   personaPresetName: {
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: theme.colors.light.text,
   },
   personaPresetDesc: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
   },
   personaToneSection: {
     gap: 6,
@@ -1341,7 +1341,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.textDim,
+    color: theme.colors.light.textDim,
   },
   personaToneValue: {
     fontSize: 12,
@@ -1351,7 +1351,7 @@ const styles = StyleSheet.create({
   personaToneTrack: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#18181B',
+    backgroundColor: '#ffffff',
   },
   personaToneFill: {
     height: '100%',
@@ -1374,7 +1374,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(15, 23, 42, 0.15)',
   },
   personaToneDotActive: {
     backgroundColor: theme.colors.primary[400],
@@ -1389,7 +1389,7 @@ const styles = StyleSheet.create({
   personaToneLabelSmall: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
   },
   personaApplyBtn: {
     flexDirection: 'row',

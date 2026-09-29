@@ -57,9 +57,9 @@ function resolveDensity(d: DisplayDensity) {
 const VALID_PRESETS: ThemePreset[] = ['cinematic-dark', 'studio-light', 'trendy-viral'];
 
 export function AppThemeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>('dark');
+  const [mode, setModeState] = useState<ThemeMode>('light');
   const [density, setDensityState] = useState<DisplayDensity>('standard');
-  const [preset, setPresetState] = useState<ThemePreset>('cinematic-dark');
+  const [preset, setPresetState] = useState<ThemePreset>('studio-light');
 
   const [themeReady, setThemeReady] = useState(false);
 
@@ -87,9 +87,9 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
       try {
         const s = await getUserSettings();
         if (!mounted) return;
-        const tm = (s?.theme_mode as ThemeMode) || 'dark';
+        const tm = (s?.theme_mode as ThemeMode) || 'light';
         const dn = (s?.display_density as DisplayDensity) || 'standard';
-        const tp = (s?.theme_preset as ThemePreset) || 'cinematic-dark';
+        const tp = (s?.theme_preset as ThemePreset) || 'studio-light';
         setModeState(tm);
         setDensityState(dn);
         if (VALID_PRESETS.includes(tp)) setPresetState(tp);

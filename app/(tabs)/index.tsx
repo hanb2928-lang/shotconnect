@@ -21,6 +21,7 @@ import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, BookOpen } from 'lucide-react-native';
 
 import { theme } from '@/lib/theme';
+const C = theme.colors.light;
 import { startAsyncAnalysis } from '@/lib/asyncAnalysis';
 import { saveManualScan, uploadImage } from '@/lib/analysis';
 import { supabase } from '@/lib/supabase';
@@ -605,7 +606,7 @@ export default function CameraScreen() {
   // ─── Slim mode launcher (replaces heavy mode_select) ───
   if (screenPhase === 'mode_select') {
     return (
-      <View style={[styles.container, { backgroundColor: '#121214' }]}>
+      <View style={[styles.container, { backgroundColor: C.bg }]}>
         <View style={{ paddingTop: safeTop + theme.spacing.md, paddingHorizontal: 16, gap: 10 }}>
           <View style={styles.modeToolbar}>
             <TouchableOpacity
@@ -621,16 +622,16 @@ export default function CameraScreen() {
               onPress={() => handleModeCardPress('single')}
               activeOpacity={0.7}
             >
-              <Orbit size={15} color={theme.colors.dark.textDim} strokeWidth={2.2} />
-              <Text style={[styles.modeTabText, { color: theme.colors.dark.textDim }]}>입체컷 오토</Text>
+              <Orbit size={15} color={C.textDim} strokeWidth={2.2} />
+              <Text style={[styles.modeTabText, { color: C.textDim }]}>입체컷 오토</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.modeTab}
               onPress={() => handleModeCardPress('fitting')}
               activeOpacity={0.7}
             >
-              <Layers size={15} color={theme.colors.dark.textDim} strokeWidth={2.2} />
-              <Text style={[styles.modeTabText, { color: theme.colors.dark.textDim }]}>AI 합성</Text>
+              <Layers size={15} color={C.textDim} strokeWidth={2.2} />
+              <Text style={[styles.modeTabText, { color: C.textDim }]}>AI 합성</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -686,7 +687,7 @@ export default function CameraScreen() {
               onPress={() => { setScreenPhase('mode_select'); setError(null); }}
               activeOpacity={0.7}
             >
-              <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
+              <X size={22} color={C.text} strokeWidth={2} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.topBarBtn}
@@ -802,7 +803,7 @@ export default function CameraScreen() {
             onPress={() => { setScreenPhase('mode_select'); setError(null); setCameraReady(false); }}
             activeOpacity={0.7}
           >
-            <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
+            <X size={22} color={C.text} strokeWidth={2} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.topBarBtn}
@@ -825,7 +826,7 @@ export default function CameraScreen() {
             />
           ) : (
             <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>
-              <Camera size={36} color={theme.colors.dark.textDim} strokeWidth={1.5} />
+              <Camera size={36} color={C.textDim} strokeWidth={1.5} />
             </View>
           )}
         </View>
@@ -891,7 +892,7 @@ export default function CameraScreen() {
             onPress={() => { setScreenPhase('mode_select'); setError(null); }}
             activeOpacity={0.7}
           >
-            <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
+            <X size={22} color={C.text} strokeWidth={2} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.topBarBtn}
@@ -1006,7 +1007,7 @@ export default function CameraScreen() {
           onPress={() => { setScreenPhase('mode_select'); setError(null); setCameraReady(false); }}
           activeOpacity={0.7}
         >
-          <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
+          <X size={22} color={C.text} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.topBarBtn}
@@ -1030,7 +1031,7 @@ export default function CameraScreen() {
           />
         ) : (
           <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>
-            <Camera size={36} color={theme.colors.dark.textDim} strokeWidth={1.5} />
+            <Camera size={36} color={C.textDim} strokeWidth={1.5} />
           </View>
         )}
       </View>
@@ -1172,12 +1173,12 @@ function StereoProgressLightweight({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121214',
+    backgroundColor: C.bg,
   },
   // Mode selection screen
   modeSelectContainer: {
     flex: 1,
-    backgroundColor: '#121214',
+    backgroundColor: C.bg,
   },
   modeSelectContent: {
     paddingBottom: theme.spacing.lg,
@@ -1217,12 +1218,12 @@ const styles = StyleSheet.create({
   modeTabText: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.dark.text,
+    color: C.text,
   },
   modeDescText: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
+    color: C.textDim,
     paddingHorizontal: theme.spacing.md,
     marginBottom: 8,
   },
@@ -1237,7 +1238,7 @@ const styles = StyleSheet.create({
   toneChipLabel: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.textFaint,
+    color: C.textFaint,
     marginRight: 2,
   },
   toneChip: {
@@ -1258,7 +1259,7 @@ const styles = StyleSheet.create({
   toneChipText: {
     fontSize: 11,
     fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.dark.textDim,
+    color: C.textDim,
   },
   toneChipTextActive: {
     color: '#fff',
@@ -1275,7 +1276,7 @@ const styles = StyleSheet.create({
   cleanModeSlimLabel: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.dark.textDim,
+    color: C.textDim,
   },
   cleanModeSwitchSlim: {
     width: 32,
@@ -1292,7 +1293,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: theme.colors.dark.textDim,
+    backgroundColor: C.textDim,
   },
   cleanModeKnobSlimActive: {
     backgroundColor: '#fff',
@@ -1334,13 +1335,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: theme.colors.dark.bg,
+    backgroundColor: C.bg,
     gap: theme.spacing.md,
   },
   permissionText: {
     fontSize: 14,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
+    color: C.textDim,
   },
   permissionBtn: {
     paddingHorizontal: 24,
@@ -1360,7 +1361,7 @@ const styles = StyleSheet.create({
   backToModeText: {
     fontSize: 14,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
+    color: C.textDim,
   },
   // Camera screen
   topBar: {
@@ -1389,7 +1390,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cameraPlaceholder: {
-    backgroundColor: theme.colors.dark.surface,
+    backgroundColor: C.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1429,7 +1430,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   shutterBtnDisabled: {
-    backgroundColor: theme.colors.dark.surfaceLight,
+    backgroundColor: C.surfaceLight,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   shutterBtnCapturing: {
@@ -1438,7 +1439,7 @@ const styles = StyleSheet.create({
   shutterHintText: {
     fontSize: 12,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.textDim,
+    color: C.textDim,
     textAlign: 'center',
   },
   // Auto-save toast
@@ -1451,7 +1452,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: theme.colors.dark.surface,
+    backgroundColor: C.surface,
     borderRadius: theme.radius.full,
     paddingHorizontal: 20,
     paddingVertical: 12,
@@ -1474,7 +1475,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(248, 250, 252, 0.8)',
   },
   autoSavingCard: {
-    backgroundColor: theme.colors.dark.surface,
+    backgroundColor: C.surface,
     borderRadius: theme.radius.xl,
     paddingHorizontal: theme.spacing.xl,
     paddingVertical: theme.spacing.xl,
@@ -1485,12 +1486,12 @@ const styles = StyleSheet.create({
   autoSavingTitle: {
     fontSize: 18,
     fontFamily: theme.typography.fontFamily.bold,
-    color: theme.colors.dark.text,
+    color: C.text,
   },
   autoSavingSub: {
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
+    color: C.textDim,
     textAlign: 'center',
     lineHeight: 18,
   },
@@ -1503,7 +1504,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: theme.colors.dark.surfaceLight,
+    backgroundColor: C.surfaceLight,
   },
   autoSavingStepDotActive: {
     backgroundColor: theme.colors.primary[400],
@@ -1517,19 +1518,19 @@ const styles = StyleSheet.create({
   },
   stereoLightCard: {
     width: 280,
-    backgroundColor: theme.colors.dark.surface,
+    backgroundColor: C.surface,
     borderRadius: theme.radius.xl,
     padding: theme.spacing.xl,
     alignItems: 'center',
     gap: 12,
     borderWidth: 1,
-    borderColor: theme.colors.dark.border,
+    borderColor: C.border,
     ...theme.shadows.elevated,
   },
   stereoLightTitle: {
     fontSize: 16,
     fontFamily: theme.typography.fontFamily.bold,
-    color: theme.colors.dark.text,
+    color: C.text,
   },
   stereoLightStep: {
     fontSize: 13,
@@ -1553,7 +1554,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 5,
     borderRadius: 3,
-    backgroundColor: theme.colors.dark.surfaceLight,
+    backgroundColor: C.surfaceLight,
     overflow: 'hidden',
   },
   stereoLightBarFill: {
@@ -1571,12 +1572,12 @@ const styles = StyleSheet.create({
   stereoLightBtn: {
     paddingVertical: 10,
     paddingHorizontal: 24,
-    backgroundColor: theme.colors.dark.surfaceLight,
+    backgroundColor: C.surfaceLight,
     borderRadius: theme.radius.md,
   },
   stereoLightBtnText: {
     fontSize: 14,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
+    color: C.text,
   },
 });

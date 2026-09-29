@@ -76,18 +76,18 @@ const PSYCHOLOGY_TONES = [
   { id: 'empathy', label: '공감대폭발', emoji: '💛' },
 ];
 
-// Dark charcoal manga color palette
-const INK = '#E4E4E7';
-const PAPER = '#1F1F23';
-const PAPER_DARK = '#18181B';
-const INK_LIGHT = '#A1A1AA';
+// Light manga color palette
+const INK = '#0f172a';
+const PAPER = '#f5f5f5';
+const PAPER_DARK = '#ffffff';
+const INK_LIGHT = '#94a3b8';
 const WHITE = '#ffffff';
-const BG_PAGE = '#121214';
-const BORDER = 'rgba(255, 255, 255, 0.08)';
-const TEXT_DARK = '#E4E4E7';
-const TEXT_DIM = '#A1A1AA';
-const TEXT_FAINT = '#71717A';
-const ACCENT = '#A855F7';
+const BG_PAGE = '#f0f4fa';
+const BORDER = '#d6e0ee';
+const TEXT_DARK = '#0f172a';
+const TEXT_DIM = '#475569';
+const TEXT_FAINT = '#94a3b8';
+const ACCENT = '#3b82f6';
 
 export function ToonModeEditor({
   visible,
@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    backgroundColor: '#2a2a2e',
+    backgroundColor: '#0f172a',
     paddingHorizontal: 8,
     paddingVertical: 3,
     zIndex: 3,
@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
   cutNumberText: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.bold,
-    color: '#E4E4E7',
+    color: '#f5f5f5',
   },
   cutDeleteBtn: {
     position: 'absolute',
@@ -623,10 +623,10 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   bubbleFloatShape: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#ffffff',
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#E4E4E7',
+    borderColor: '#cbd5e1',
     paddingHorizontal: 10,
     paddingVertical: 7,
     minHeight: 32,
@@ -658,7 +658,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 9,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderTopColor: '#E4E4E7',
+    borderTopColor: '#cbd5e1',
   },
   // Affiliate badge
   linkBadgeBound: {

@@ -93,7 +93,7 @@ export function ScrollableTabBar({ state, navigation, badges }: BottomTabBarProp
                 <View style={[styles.sidebarIconWrap, isFocused && !isDisabled && styles.sidebarIconWrapActive]}>
                   <Icon
                     size={22}
-                    color={isDisabled ? theme.colors.dark.textFaint : isFocused ? theme.colors.primary[400] : theme.colors.dark.textDim}
+                    color={isDisabled ? theme.colors.light.textFaint : isFocused ? theme.colors.primary[400] : theme.colors.light.textDim}
                     strokeWidth={isFocused && !isDisabled ? 2.5 : 2}
                     fill={isFocused && !isDisabled ? theme.colors.primary[400] + '20' : 'transparent'}
                   />
@@ -111,7 +111,7 @@ export function ScrollableTabBar({ state, navigation, badges }: BottomTabBarProp
             hitSlop={HIT_SLOP}
           >
             <View style={styles.sidebarIconWrap}>
-              <Settings size={20} color={theme.colors.dark.textDim} strokeWidth={2} />
+              <Settings size={20} color={theme.colors.light.textDim} strokeWidth={2} />
             </View>
           </TouchableOpacity>
         </View>
@@ -158,7 +158,7 @@ export function ScrollableTabBar({ state, navigation, badges }: BottomTabBarProp
               <View style={[styles.iconWrap, isFocused && !isDisabled && styles.iconWrapActive]}>
                 <Icon
                   size={26}
-                  color={isDisabled ? theme.colors.dark.textFaint : isFocused ? theme.colors.primary[400] : theme.colors.dark.textDim}
+                  color={isDisabled ? theme.colors.light.textFaint : isFocused ? theme.colors.primary[400] : theme.colors.light.textDim}
                   strokeWidth={isFocused && !isDisabled ? 2.5 : 2.2}
                   fill={isFocused && !isDisabled ? theme.colors.primary[400] + '3C' : 'transparent'}
                 />
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
   // ─── Desktop Sidebar (64px) ───
   sidebarContainer: {
     width: 64,
-    backgroundColor: theme.colors.dark.surface,
+    backgroundColor: theme.colors.light.surface,
     borderRightWidth: 1,
     borderRightColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
   },
   // ─── Mobile Bottom Bar ───
   container: {
-    backgroundColor: theme.colors.dark.surface,
+    backgroundColor: theme.colors.light.surface,
     borderTopColor: 'rgba(255, 255, 255, 0.06)',
     borderTopWidth: 1,
     paddingTop: 10,
@@ -283,12 +283,12 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: theme.colors.error[400],
     borderWidth: 1.5,
-    borderColor: theme.colors.dark.surface,
+    borderColor: theme.colors.light.surface,
   },
   tabLabel: {
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
     marginTop: 6,
   },
   tabLabelActive: {
@@ -302,17 +302,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 2,
     right: -2,
-    backgroundColor: theme.colors.dark.border,
+    backgroundColor: theme.colors.light.border,
     borderRadius: 4,
     paddingHorizontal: 4,
     paddingVertical: 1,
     borderWidth: 1,
-    borderColor: theme.colors.dark.surface,
+    borderColor: theme.colors.light.surface,
   },
   disabledBadgeText: {
     fontSize: 7,
     fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.textFaint,
+    color: theme.colors.light.textFaint,
     letterSpacing: 0.3,
   },
   activeBar: {
