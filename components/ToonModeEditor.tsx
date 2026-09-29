@@ -1097,7 +1097,6 @@ const styles = StyleSheet.create({
   cutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   cutCard: {
     width: '48%',
-    minHeight: 120,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: BORDER_SLATE,
@@ -1141,7 +1140,7 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   cutPanel: {
-    flex: 1,
+    aspectRatio: 0.75,
     backgroundColor: PAPER,
     position: 'relative',
     margin: 1,
@@ -1153,7 +1152,8 @@ const styles = StyleSheet.create({
     opacity: 0.92,
   },
   cutPanelEmpty: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: CARD_SURFACE,
