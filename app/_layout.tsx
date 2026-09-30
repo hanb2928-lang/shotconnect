@@ -13,7 +13,6 @@ import {
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { initStorage } from '@/lib/storage';
-import { preloadTemplates } from '@/lib/templateRegistry';
 import { theme } from '@/lib/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AffiliateToastProvider } from '@/components/AffiliateToast';
@@ -105,7 +104,7 @@ export default function RootLayout() {
   // Font timeout: if fonts don't resolve in 6s, proceed with system fonts
   useEffect(() => {
     if (fontsLoaded || fontError) return;
-    const id = setTimeout(() => setFontTimedOut(true), 6000);
+    const id = setTimeout(() => setFontTimedOut(true), 3000);
     return () => clearTimeout(id);
   }, [fontsLoaded, fontError]);
 
@@ -120,26 +119,16 @@ export default function RootLayout() {
 
     const initPromise = (async () => {
       try {
-        try {
-          await initStorage();
-        } catch {
-          // storage init failed — app can still run with in-memory state
-        }
-
-        try {
-          await Promise.race([
-            preloadTemplates(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('template timeout')), 3000)),
-          ]);
-        } catch {
-          // template preload failed or timed out — app can still run
-        }
+        await Promise.race([
+          initStorage(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('storage timeout')), 2000)),
+        ]);
       } catch {
-        // last-resort catch: any unexpected error during init falls back to app mode
+        // storage init failed — app can still run with in-memory state
       }
     })();
 
-    const hardTimeout = new Promise<void>((resolve) => setTimeout(resolve, 8000));
+    const hardTimeout = new Promise<void>((resolve) => setTimeout(resolve, 4000));
 
     Promise.race([initPromise, hardTimeout]).finally(() => {
       setReady('app');
