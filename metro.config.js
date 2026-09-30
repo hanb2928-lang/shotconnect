@@ -5,6 +5,17 @@ const config = getDefaultConfig(__dirname);
 
 delete config.watcher?.unstable_workerThreads;
 
+config.watcher = {
+  ...config.watcher,
+  watchFolders: config.watcher?.watchFolders,
+  healthCheck: { enabled: false },
+};
+
+config.server = {
+  ...config.server,
+  hmrEnabled: false,
+};
+
 config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
 
 const projectRoot = __dirname;
