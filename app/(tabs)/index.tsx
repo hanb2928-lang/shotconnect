@@ -67,8 +67,10 @@ async function loadStereoPipeline() {
 
 function ComponentFallback() {
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-      <ActivityIndicator size="large" color={theme.colors.primary[400]} />
+    <View style={styles.bootFallback}>
+      <Sparkles size={28} color={theme.colors.primary[400]} strokeWidth={2} />
+      <Text style={styles.bootFallbackText}>숏커넥트 부팅 중...</Text>
+      <ActivityIndicator size="small" color={theme.colors.primary[400]} style={{ marginTop: 12 }} />
     </View>
   );
 }
@@ -1252,6 +1254,18 @@ const styles = StyleSheet.create({
     flex: 1,
     height: '100%',
     backgroundColor: C.bg,
+  },
+  bootFallback: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: C.bg,
+    gap: 10,
+  },
+  bootFallbackText: {
+    fontSize: 16,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.primary[400],
   },
   // Mode selection screen
   modeSelectContainer: {
