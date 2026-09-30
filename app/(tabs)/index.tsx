@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ScrollView,
   Animated as RNAnimated,
   Easing,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -33,15 +34,44 @@ import { friendlyError } from '@/lib/errors';
 import { getItem, setItem } from '@/lib/storage';
 import { CreditPurchaseModal } from '@/components/CreditPurchaseModal';
 import { pickImageWeb, isWebPlatform } from '@/lib/webImagePicker';
-import { WebCameraView, type WebCameraHandle } from '@/components/WebCameraView';
-import { MultiAngleCaptureGuide, type AngleShot, type AngleGuide } from '@/components/MultiAngleCaptureGuide';
+import type { WebCameraHandle } from '@/components/WebCameraView';
+import type { AngleShot, AngleGuide } from '@/components/MultiAngleCaptureGuide';
 import { TriggerBanner } from '@/components/TriggerBanner';
 import { StudioPremiumAccordion, type StudioSliderValues } from '@/components/StudioPremiumPanel';
-import { PostCaptureWorkflow } from '@/components/PostCaptureWorkflow';
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
-import { runStereoPipeline, createScanFromAngleShots, makeInitialProgress, type StereoPipelineProgress } from '@/lib/stereoPipeline';
-import { ToonModeEditor, type ToonCut } from '@/components/ToonModeEditor';
+import type { StereoPipelineProgress } from '@/lib/stereoPipeline';
+import type { ToonCut } from '@/components/ToonModeEditor';
 import { useInspectorContext } from '@/lib/inspectorContext';
+
+// Lazy-load heavy components to reduce native memory at startup.
+// These components pull in large transitive dependency trees
+// (camera, image processing, editing UI) that can OOM on native.
+const WebCameraView = lazy(() =>
+  import('@/components/WebCameraView').then((m) => ({ default: m.WebCameraView })),
+);
+const MultiAngleCaptureGuide = lazy(() =>
+  import('@/components/MultiAngleCaptureGuide').then((m) => ({ default: m.MultiAngleCaptureGuide })),
+);
+const PostCaptureWorkflow = lazy(() =>
+  import('@/components/PostCaptureWorkflow').then((m) => ({ default: m.PostCaptureWorkflow })),
+);
+const ToonModeEditor = lazy(() =>
+  import('@/components/ToonModeEditor').then((m) => ({ default: m.ToonModeEditor })),
+);
+
+// Lazy-load the stereo pipeline module — it imports aiSynthesisEngine,
+// shortFormEditEngine, directingEngine, publishManager, etc. at module level.
+async function loadStereoPipeline() {
+  return await import('@/lib/stereoPipeline');
+}
+
+function ComponentFallback() {
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color={theme.colors.primary[400]} />
+    </View>
+  );
+}
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -147,7 +177,19 @@ export default function CameraScreen() {
   const [postCaptureBase64, setPostCaptureBase64] = useState<string | null>(null);
   const [postCaptureMime, setPostCaptureMime] = useState<string>('video/webm');
   const [workflowMountKey, setWorkflowMountKey] = useState(0);
-  const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>(makeInitialProgress());
+  const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>({
+    steps: [
+      { key: 'upload', label: '클라우드 AI 입체 합성', status: 'pending', detail: '' },
+      { key: 'synthesis', label: '3D 볼륨 분석 & 실사용 맥락 매칭', status: 'pending', detail: '' },
+      { key: 'directing', label: '유튜브 상위 1% 심리 리듬 연출', status: 'pending', detail: '' },
+      { key: 'render', label: '멀티플랫폼 9:16 렌더링 & 메타데이터', status: 'pending', detail: '' },
+      { key: 'publish', label: '갤러리 저장 & 퍼블리시 준비', status: 'pending', detail: '' },
+    ],
+    currentStep: -1,
+    overallProgress: 0,
+    result: null,
+    error: null,
+  });
   const [stereoOverlayVisible, setStereoOverlayVisible] = useState(false);
   const [screenPhase, setScreenPhase] = useState<ScreenPhase>('toon');
   const [captureMode, setCaptureMode] = useState<CaptureMode>('single');
@@ -387,13 +429,14 @@ export default function CameraScreen() {
     setIsActive(true);
     if (!sorted[0]?.base64) return;
 
-    setStereoProgress(makeInitialProgress());
+    const { makeInitialProgress: initProgress, createScanFromAngleShots: createScan } = await loadStereoPipeline();
+    setStereoProgress(initProgress());
     setStereoOverlayVisible(true);
 
     let scanId: string;
     let uploadedUrls: string[];
     try {
-      const result = await createScanFromAngleShots(sorted);
+      const result = await createScan(sorted);
       scanId = result.scanId;
       uploadedUrls = result.uploadedUrls;
     } catch (err) {
@@ -409,7 +452,9 @@ export default function CameraScreen() {
     }
 
     // Background: run synthesis/directing/publish pipeline without blocking UI
-    runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls).catch((err) => {
+    loadStereoPipeline().then(({ runStereoPipeline: runPipeline }) =>
+      runPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls),
+    ).catch((err) => {
       console.error('[StereoPipeline] background pipeline failed:', err);
       Promise.resolve(
         supabase
@@ -561,13 +606,14 @@ export default function CameraScreen() {
     setIsActive(true);
     if (sorted.length < 2) return;
 
-    setStereoProgress(makeInitialProgress());
+    const { makeInitialProgress: initProgress, createScanFromAngleShots: createScan } = await loadStereoPipeline();
+    setStereoProgress(initProgress());
     setStereoOverlayVisible(true);
     setError(null);
 
     let scanId: string;
     try {
-      const result = await createScanFromAngleShots(sorted);
+      const result = await createScan(sorted);
       scanId = result.scanId;
     } catch (err) {
       if (!isMountedRef.current) return;
@@ -665,6 +711,7 @@ export default function CameraScreen() {
   if (screenPhase === 'toon') {
     return (
       <View style={styles.container}>
+        <Suspense fallback={<ComponentFallback />}>
         <ToonModeEditor
           visible
           onClose={() => setScreenPhase('mode_select')}
@@ -676,6 +723,7 @@ export default function CameraScreen() {
             inspectorCtx.setInspectorMode('persona');
           }}
         />
+        </Suspense>
         {error && (
           <View style={styles.modeSelectErrorInline}>
             <Text style={styles.modeSelectErrorText}>{error}</Text>
@@ -712,6 +760,7 @@ export default function CameraScreen() {
           </View>
 
           <View style={styles.cameraPreviewWrap}>
+            <Suspense fallback={<ComponentFallback />}>
             <WebCameraView
               ref={webCameraRef}
               onCapture={handleFittingWebCapture}
@@ -729,6 +778,7 @@ export default function CameraScreen() {
               onCameraReady={setCameraReady}
               simplified
             />
+            </Suspense>
           </View>
 
           <View style={[styles.bottomBar, { paddingBottom: theme.spacing.sm }]}>
@@ -752,6 +802,7 @@ export default function CameraScreen() {
             </Text>
           </View>
 
+          <Suspense fallback={null}>
           <MultiAngleCaptureGuide
             visible={fittingGuideVisible}
             onClose={() => { setFittingGuideVisible(false); setIsActive(true); }}
@@ -767,6 +818,7 @@ export default function CameraScreen() {
             completeLabelAll="5장으로 AI 합성하기"
             completeLabelEarly="여기까지 완료 (합성하기)"
           />
+          </Suspense>
 
           <StereoProgressLightweight
             visible={stereoOverlayVisible}
@@ -865,6 +917,7 @@ export default function CameraScreen() {
           </Text>
         </View>
 
+        <Suspense fallback={null}>
         <MultiAngleCaptureGuide
           visible={fittingGuideVisible}
           onClose={() => { setFittingGuideVisible(false); setIsActive(true); }}
@@ -880,6 +933,7 @@ export default function CameraScreen() {
           completeLabelAll="5장으로 AI 합성하기"
           completeLabelEarly="여기까지 완료 (합성하기)"
         />
+        </Suspense>
 
         <StereoProgressLightweight
           visible={stereoOverlayVisible}
@@ -917,6 +971,7 @@ export default function CameraScreen() {
         </View>
 
         <View style={styles.cameraPreviewWrap}>
+          <Suspense fallback={<ComponentFallback />}>
           <WebCameraView
             ref={webCameraRef}
             onCapture={handleWebCapture}
@@ -934,6 +989,7 @@ export default function CameraScreen() {
             onCameraReady={setCameraReady}
             simplified
           />
+          </Suspense>
         </View>
 
         <View style={[styles.bottomBar, { paddingBottom: theme.spacing.sm }]}>
@@ -957,6 +1013,7 @@ export default function CameraScreen() {
           </Text>
         </View>
 
+        <Suspense fallback={null}>
         <MultiAngleCaptureGuide
           visible={multiAngleVisible}
           onClose={() => { setMultiAngleVisible(false); setIsActive(true); }}
@@ -964,7 +1021,9 @@ export default function CameraScreen() {
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
         />
+        </Suspense>
 
+        <Suspense fallback={null}>
         <PostCaptureWorkflow
           key={`pcw-web-${workflowMountKey}`}
           visible={postCaptureVisible}
@@ -973,6 +1032,7 @@ export default function CameraScreen() {
           onProceedToAnalysis={handlePostCaptureProceed}
           onClose={handlePostCaptureClose}
         />
+        </Suspense>
 
         <CreditPurchaseModal
           visible={creditModalVisible}
@@ -1071,6 +1131,7 @@ export default function CameraScreen() {
       </View>
 
       {/* Multi-Angle Capture Guide */}
+      <Suspense fallback={null}>
       <MultiAngleCaptureGuide
         visible={multiAngleVisible}
         onClose={() => { setMultiAngleVisible(false); setIsActive(true); }}
@@ -1078,6 +1139,7 @@ export default function CameraScreen() {
         onPickImage={handleMultiAnglePick}
         onCaptureImage={handleMultiAngleCapture}
       />
+      </Suspense>
 
       {/* Auto-save toast */}
       <Modal visible={!!autoSaveToast} transparent animationType="fade">
@@ -1111,6 +1173,7 @@ export default function CameraScreen() {
         </View>
       </Modal>
 
+      <Suspense fallback={null}>
       <PostCaptureWorkflow
         key={`pcw-native-${workflowMountKey}`}
         visible={postCaptureVisible}
@@ -1119,6 +1182,7 @@ export default function CameraScreen() {
         onProceedToAnalysis={handlePostCaptureProceed}
         onClose={handlePostCaptureClose}
       />
+      </Suspense>
 
       <CreditPurchaseModal
         visible={creditModalVisible}
