@@ -302,25 +302,23 @@ export async function runStereoPipeline(
     }
   }
 
-  const anglePayloads: AngleImagePayload[] = sorted
-    .filter((s) => s.base64)
-    .map((s) => ({
-      key: ['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front',
-      label: s.label,
-      base64: s.base64!,
-      mimeType: s.mimeType,
-      orderIndex: s.orderIndex,
-    }));
-
-  const angleInputs: AngleInput[] = sorted
-    .filter((s) => s.base64)
-    .map((s) => ({
-      key: (['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front') as AngleInput['key'],
-      label: s.label,
-      base64: s.base64!,
-      mimeType: s.mimeType,
-      orderIndex: s.orderIndex,
-    }));
+  // Build a single filtered array and derive both payloads from it to
+  // avoid duplicating base64 strings in memory (each can be multi-MB).
+  const validShots = sorted.filter((s) => s.base64);
+  const anglePayloads: AngleImagePayload[] = validShots.map((s) => ({
+    key: ['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front',
+    label: s.label,
+    base64: s.base64!,
+    mimeType: s.mimeType,
+    orderIndex: s.orderIndex,
+  }));
+  const angleInputs: AngleInput[] = validShots.map((s) => ({
+    key: (['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front') as AngleInput['key'],
+    label: s.label,
+    base64: s.base64!,
+    mimeType: s.mimeType,
+    orderIndex: s.orderIndex,
+  }));
 
   // Run local synthesis and cloud stereo analysis in parallel — local synthesis
   // is CPU-only and doesn't depend on the upload, so it can overlap with the
@@ -332,10 +330,19 @@ export async function runStereoPipeline(
     : contentTone === 'raw'
     ? '날것의 심리자극 생활용품 식품 가성비 꿀팁 꿀템'
     : '';
-  const [localSynthesis, cloudResultRaw] = await Promise.all([
-    Promise.resolve(runSynthesis(angleInputs, tonePrompt)),
-    invokeStereoCutAuto(anglePayloads, tonePrompt, contentTone ?? '', scanId).catch(() => null),
-  ]);
+  let localSynthesis: ReturnType<typeof runSynthesis>;
+  let cloudResultRaw: CloudPipelineResult | null;
+  try {
+    [localSynthesis, cloudResultRaw] = await Promise.all([
+      Promise.resolve().then(() => runSynthesis(angleInputs, tonePrompt)),
+      invokeStereoCutAuto(anglePayloads, tonePrompt, contentTone ?? '', scanId).catch(() => null),
+    ]);
+  } catch (synthesisErr) {
+    // runSynthesis threw synchronously — degrade gracefully instead of
+    // letting the error propagate as an unhandled rejection.
+    localSynthesis = runSynthesis(angleInputs.slice(0, 1), tonePrompt);
+    cloudResultRaw = null;
+  }
 
   let cloudResult: CloudPipelineResult | null = cloudResultRaw;
   if (cloudResult && !cloudResult?.synthesis?.spatialDepthHint) {
@@ -390,11 +397,11 @@ export async function runStereoPipeline(
 
   const directingSummary = cleanMode
     ? '클린 모드: 텍스트 오버레이 없이 순수 비주얼만 추출'
-    : getDirectingSummary(directingPlan!);
+    : (directingPlan ? getDirectingSummary(directingPlan) : '디렉팅 계획 생성 생략');
 
-  if (!cleanMode) {
+  if (!cleanMode && directingPlan) {
     await new Promise((r) => setTimeout(r, 600));
-    steps[1].detail = `훅: ${directingPlan!.hookTransition.description} | SFX ${directingPlan!.sfxPlans.length}건 | 킬링포인트 자막 ${directingPlan!.killPointCaptions.length}건`;
+    steps[1].detail = `훅: ${directingPlan.hookTransition.description} | SFX ${directingPlan.sfxPlans.length}건 | 킬링포인트 자막 ${directingPlan.killPointCaptions.length}건`;
   }
 
   steps[2].status = 'active';
@@ -425,7 +432,9 @@ export async function runStereoPipeline(
   steps[3].detail = '비차단 갤러리 저장 처리 및 퍼블리시 딥링크 준비 중...';
   report(3, 0.8);
 
-  const firstDataUrl = `data:${sorted[0].mimeType};base64,${sorted[0].base64}`;
+  const firstDataUrl = validShots.length > 0
+    ? `data:${validShots[0].mimeType};base64,${validShots[0].base64}`
+    : '';
 
   await new Promise((r) => setTimeout(r, 400));
 

@@ -151,12 +151,17 @@ function tryInstallErrorHandler(): boolean {
       const stack = error instanceof Error ? error.stack : undefined;
       if (isFatal) {
         logFatal(msg, { action: 'globalHandler', extra: { isFatal: true, stack } });
-        if (Platform.OS !== 'web' && stack) {
-          Alert.alert(
-            'Fatal Error',
-            msg + '\n\n' + stack.split('\n').slice(0, 8).join('\n'),
-            [{ text: 'OK' }],
-          );
+        if (Platform.OS !== 'web' && typeof stack === 'string' && stack.length > 0) {
+          try {
+            Alert.alert(
+              'Fatal Error',
+              msg + '\n\n' + stack.split('\n').slice(0, 8).join('\n'),
+              [{ text: 'OK' }],
+            );
+          } catch {
+            // Alert.alert itself can throw if the native module isn't ready
+            // or during a crash loop — never let the error handler throw.
+          }
         }
       } else {
         logError(msg, { action: 'globalHandler', extra: { isFatal: false } });

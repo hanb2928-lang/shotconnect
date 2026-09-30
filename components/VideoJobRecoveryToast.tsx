@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, Pressable } from 'react-native';
 import { useVideoJobRecovery } from '@/hooks/useVideoJobRecovery';
 import { useI18n } from '@/hooks/useI18n';
@@ -9,10 +9,12 @@ export function VideoJobRecoveryToast() {
   const { info, dismiss } = useVideoJobRecovery();
   const { t } = useI18n();
   const fadeAnim = useRef(new Animated.Value(0));
+  const mountedRef = useRef(true);
 
   const visible = info.state === 'in_progress' || info.state === 'completed' || info.state === 'failed';
 
   useEffect(() => {
+    mountedRef.current = true;
     if (visible) {
       Animated.timing(fadeAnim.current, {
         toValue: 1,
@@ -24,11 +26,28 @@ export function VideoJobRecoveryToast() {
         toValue: 0,
         duration: 250,
         useNativeDriver: true,
-      }).start();
+      }).start(({ finished }) => {
+        if (!finished) return;
+      });
+    }
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [visible]);
+
+  // Only render when visible — but keep the Animated.View mounted briefly
+  // during fade-out by deferring the unmount by the animation duration.
+  const [shouldRender, setShouldRender] = useState(visible);
+  useEffect(() => {
+    if (visible) {
+      setShouldRender(true);
+    } else {
+      const timer = setTimeout(() => setShouldRender(false), 260);
+      return () => clearTimeout(timer);
     }
   }, [visible]);
 
-  if (info.state === 'idle' || info.state === 'checking' || info.state === 'not_found') {
+  if (!shouldRender) {
     return null;
   }
 

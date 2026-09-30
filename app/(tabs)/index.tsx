@@ -454,7 +454,6 @@ export default function CameraScreen() {
           base64: true,
           quality: 0.7,
           shutterSound: false,
-          ...({ mute: true } as Record<string, unknown>),
         }) as Promise<{ base64?: string; uri: string }>,
         CAPTURE_TIMEOUT_MS,
         '다각도 촬영',
@@ -836,7 +835,7 @@ export default function CameraScreen() {
               facing={facing}
               onCameraReady={() => setCameraReady(true)}
               onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
-              mode="video"
+              mode="picture"
             />
           ) : (
             <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>
@@ -1041,7 +1040,7 @@ export default function CameraScreen() {
             facing={facing}
             onCameraReady={() => setCameraReady(true)}
             onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
-            mode="video"
+            mode="picture"
           />
         ) : (
           <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>

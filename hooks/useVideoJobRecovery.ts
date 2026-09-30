@@ -118,7 +118,7 @@ export function useVideoJobRecovery() {
       cleanupFns.push(() => document.removeEventListener('visibilitychange', handleVisibility));
     }
 
-    if (typeof window !== 'undefined') {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('online', handleOnline);
       cleanupFns.push(() => window.removeEventListener('online', handleOnline));
     }

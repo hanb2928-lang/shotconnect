@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 
 export type JobType =
@@ -142,7 +143,7 @@ export async function waitForJob<T = Record<string, unknown>>(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (initialPollTimer) clearTimeout(initialPollTimer);
       if (channel) {
-        supabase.removeChannel(channel);
+        try { supabase.removeChannel(channel); } catch { /* channel already closed */ }
       }
     };
 
@@ -174,7 +175,7 @@ export async function waitForJob<T = Record<string, unknown>>(
         .subscribe((status) => {
           if (status === 'CHANNEL_ERROR' && !settled) {
             if (channel) {
-              supabase.removeChannel(channel);
+              try { supabase.removeChannel(channel); } catch { /* channel already closed */ }
               channel = undefined;
             }
             channelRetryCount++;
@@ -254,7 +255,7 @@ export function subscribeToJob(
         if (disposed) return;
         if (status === 'CHANNEL_ERROR') {
           if (currentChannel) {
-            supabase.removeChannel(currentChannel);
+            try { supabase.removeChannel(currentChannel); } catch { /* channel already closed */ }
             currentChannel = null;
           }
           retryCount++;
@@ -274,7 +275,7 @@ export function subscribeToJob(
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
       if (currentChannel) {
-        supabase.removeChannel(currentChannel);
+        try { supabase.removeChannel(currentChannel); } catch { /* channel already closed */ }
         currentChannel = null;
       }
     },
@@ -328,7 +329,7 @@ function registerTriggerRetryOnRecovery(): void {
     triggerQueueProcessor().catch(() => {});
   };
 
-  if (typeof window !== 'undefined') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('online', retry, { once: true });
   } else {
     // On native, retry after a short delay since we can't listen to 'online'

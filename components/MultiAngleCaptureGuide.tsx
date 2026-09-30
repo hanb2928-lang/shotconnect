@@ -117,7 +117,6 @@ export function MultiAngleCaptureGuide({
       const guideIndex = guides.findIndex((g) => g.id === angleId);
       const guide = guides[guideIndex];
       if (!guide || !base64) return;
-      const dataUrl = `data:${mimeType};base64,${base64}`;
 
       setCaptureError(null);
       setShots((prev) => {
@@ -128,7 +127,6 @@ export function MultiAngleCaptureGuide({
           label: guide.label,
           hint: guide.hint,
           base64,
-          dataUrl,
           mimeType,
         };
         return next;
@@ -285,9 +283,9 @@ export function MultiAngleCaptureGuide({
                     )}
                   </View>
 
-                  {shot?.dataUrl ? (
+                  {shot?.base64 ? (
                     <View style={styles.shotPreview}>
-                      <RNImage source={{ uri: shot.dataUrl }} style={styles.shotImage} resizeMode="cover" />
+                      <RNImage source={{ uri: `data:${shot.mimeType};base64,${shot.base64}` }} style={styles.shotImage} resizeMode="cover" />
                       <View style={styles.shotIndexBadge}>
                         <Text style={styles.shotIndexText}>{String(idx + 1).padStart(2, '0')}</Text>
                       </View>
