@@ -167,6 +167,8 @@ export async function compressImageToBase64(
     actions,
     { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
   );
+  const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+  if (!fileInfo.exists) throw new Error('이미지 변환 실패');
   const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
     encoding: FileSystem.EncodingType.Base64,
   });

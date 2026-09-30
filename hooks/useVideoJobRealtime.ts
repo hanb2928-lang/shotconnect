@@ -59,7 +59,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
     setStatus('processing');
     setResultUrl(null);
     setErrorMsg(null);
-    saveActiveVideoJob(jobId, 'uploading');
+    void saveActiveVideoJob(jobId, 'uploading').catch(() => {});
 
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;

@@ -197,7 +197,9 @@ async function invokeStereoCutAuto(
   }
 }
 
-export async function createScanFromAngleShots(shots: AngleShot[]): Promise<string> {
+export async function createScanFromAngleShots(
+  shots: AngleShot[],
+): Promise<{ scanId: string; uploadedUrls: string[] }> {
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
@@ -233,7 +235,7 @@ export async function createScanFromAngleShots(shots: AngleShot[]): Promise<stri
     }
   }
 
-  return scanId;
+  return { scanId, uploadedUrls: results.map((r) => r.url) };
 }
 
 export async function runStereoPipeline(
@@ -243,6 +245,7 @@ export async function runStereoPipeline(
   existingScanId?: string,
   contentTone?: 'studio' | 'raw',
   studioSliders?: { facetSparkle: number; fabricDetail: number; blendStrength: number; smartFit?: boolean },
+  existingUploadUrls?: string[],
 ): Promise<StereoPipelineResult> {
   const steps = makeInitialSteps();
   const report = (currentStep: number, overallProgress: number, error: string | null = null, result: StereoPipelineResult | null = null) => {
@@ -253,24 +256,31 @@ export async function runStereoPipeline(
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
 
-  steps[0].status = 'active';
-  steps[0].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
-  report(0, 0.05);
+  let imageUrl: string;
+  let additionalUrls: string[];
+  let uploadedPaths: string[] = [];
 
-  const { results: uploadResults, failures, uploadedPaths } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY);
+  if (existingUploadUrls && existingUploadUrls.length > 0) {
+    imageUrl = existingUploadUrls[0];
+    additionalUrls = existingUploadUrls.slice(1);
+  } else {
+    steps[0].status = 'active';
+    steps[0].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
+    report(0, 0.05);
 
-  if (uploadResults.length === 0) {
-    await rollbackUploads(uploadedPaths);
-    throw new Error('이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');
+    const { results: uploadResults, failures } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY);
+
+    if (uploadResults.length === 0) {
+      throw new Error('이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');
+    }
+
+    if (failures >= 2) {
+      throw new Error('이미지 업로드 중 네트워크 연결이 불안정합니다. 다시 시도해주세요.');
+    }
+
+    imageUrl = uploadResults[0].url;
+    additionalUrls = uploadResults.slice(1).map((r) => r.url);
   }
-
-  if (failures >= 2) {
-    await rollbackUploads(uploadedPaths);
-    throw new Error('이미지 업로드 중 네트워크 연결이 불안정합니다. 다시 시도해주세요.');
-  }
-
-  const imageUrl = uploadResults[0].url;
-  const additionalUrls = uploadResults.slice(1).map((r) => r.url);
 
   let scanId: string;
   if (existingScanId) {

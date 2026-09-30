@@ -391,8 +391,11 @@ export default function CameraScreen() {
     setStereoOverlayVisible(true);
 
     let scanId: string;
+    let uploadedUrls: string[];
     try {
-      scanId = await createScanFromAngleShots(sorted);
+      const result = await createScanFromAngleShots(sorted);
+      scanId = result.scanId;
+      uploadedUrls = result.uploadedUrls;
     } catch (err) {
       if (!isMountedRef.current) return;
       setStereoOverlayVisible(false);
@@ -406,7 +409,15 @@ export default function CameraScreen() {
     }
 
     // Background: run synthesis/directing/publish pipeline without blocking UI
-    runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders).catch(() => {});
+    runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls).catch((err) => {
+      console.error('[StereoPipeline] background pipeline failed:', err);
+      Promise.resolve(
+        supabase
+          .from('scans')
+          .update({ summary: '파이프라인 오류: ' + (err instanceof Error ? err.message : String(err)) })
+          .eq('id', scanId),
+      ).catch(() => {});
+    });
   };
 
   const handleMultiAngleCapture = async (_angleId: string): Promise<{ base64: string; mimeType: string } | null> => {
@@ -557,7 +568,8 @@ export default function CameraScreen() {
 
     let scanId: string;
     try {
-      scanId = await createScanFromAngleShots(sorted);
+      const result = await createScanFromAngleShots(sorted);
+      scanId = result.scanId;
     } catch (err) {
       if (!isMountedRef.current) return;
       setStereoOverlayVisible(false);
@@ -571,7 +583,9 @@ export default function CameraScreen() {
     }
 
     // Background: run virtual fitting pipeline without blocking UI
-    runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders).catch(() => {});
+    runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders).catch((err) => {
+      console.error('[FittingPipeline] background pipeline failed:', err);
+    });
   }, [router, cleanMode, studioSliders, stereoOverlayVisible]);
 
   const handleModeSelect = useCallback((mode: CaptureMode) => {

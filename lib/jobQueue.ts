@@ -33,6 +33,18 @@ const MAX_POLL_ERRORS = 5;
 
 const ENQUEUE_TIMEOUT_MS = 15000;
 
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for environments without crypto.randomUUID
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     promise,
@@ -47,29 +59,54 @@ export async function enqueueJob(
   payload: Record<string, unknown>,
   options: { priority?: number; scanId?: string } = {},
 ): Promise<string> {
-  const { data, error } = await withTimeout(
-    Promise.resolve(
-      supabase
-        .from('render_jobs')
-        .insert({
-          job_type: jobType,
-          status: 'queued',
-          priority: options.priority ?? 5,
-          payload,
-          scan_id: options.scanId ?? null,
-        })
-        .select('id')
-        .single()
-    ),
-    ENQUEUE_TIMEOUT_MS,
-    '작업 등록',
-  );
+  // Generate a client-side UUID so a timeout+retry cannot create a duplicate job.
+  // The server insert uses this as the primary key; a retry will conflict on the
+  // same id and return the existing row instead of creating a second one.
+  const clientId = generateUUID();
 
-  if (error) throw new Error(`Job enqueue failed: ${error.message}`);
+  const insertPromise = supabase
+    .from('render_jobs')
+    .insert({
+      id: clientId,
+      job_type: jobType,
+      status: 'queued',
+      priority: options.priority ?? 5,
+      payload,
+      scan_id: options.scanId ?? null,
+    })
+    .select('id')
+    .single();
+
+  let data: { id: string } | null = null;
+  let error: unknown = null;
+  try {
+    const result = await withTimeout(
+      Promise.resolve(insertPromise),
+      ENQUEUE_TIMEOUT_MS,
+      '작업 등록',
+    );
+    data = result.data;
+    error = result.error;
+  } catch (timeoutErr) {
+    // The insert may still succeed in the background. Try to fetch the row we
+    // just inserted — if it exists, return it; otherwise surface the timeout.
+    const { data: fetched } = await supabase
+      .from('render_jobs')
+      .select('id')
+      .eq('id', clientId)
+      .maybeSingle();
+    if (fetched) {
+      data = fetched as { id: string };
+    } else {
+      throw timeoutErr;
+    }
+  }
+
+  if (error) throw new Error(`Job enqueue failed: ${(error as { message?: string }).message ?? String(error)}`);
 
   triggerQueueProcessor().catch(() => {});
 
-  return data.id;
+  return data!.id;
 }
 
 export async function getJob(jobId: string): Promise<RenderJob | null> {

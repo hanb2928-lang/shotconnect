@@ -192,6 +192,17 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       }
       if (recorderRef.current && recorderRef.current.state !== 'inactive') {
         stopVideoRecording(recorderRef.current);
+        // Await the recording promise to ensure the MediaRecorder flushes
+        // all chunks before we stop the stream tracks. Without this, stopping
+        // the stream can cause the recorder's final ondataavailable to fire
+        // on already-stopped tracks, producing a corrupt or empty blob.
+        recordingPromiseRef.current?.catch(() => {}).finally(() => {
+          recorderRef.current = null;
+          recordingPromiseRef.current = null;
+          isRecordingRef.current = false;
+          stopStream();
+        });
+        return;
       }
       isRecordingRef.current = false;
       stopStream();

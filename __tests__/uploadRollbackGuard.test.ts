@@ -136,8 +136,9 @@ describe('Upload Rollback Guard', () => {
     mockUploadBlobImpl.mockResolvedValue(makeUrl(0));
 
     const shots = [makeShot(0), makeShot(1), makeShot(2), makeShot(3), makeShot(4)];
-    const scanId = await createScanFromAngleShots(shots);
-    expect(scanId).toBe('scan-123');
+    const result = await createScanFromAngleShots(shots);
+    expect(result.scanId).toBe('scan-123');
+    expect(result.uploadedUrls).toHaveLength(5);
     expect(getStorageRemoveMock()).not.toHaveBeenCalled();
   });
 
