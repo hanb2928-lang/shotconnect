@@ -181,7 +181,7 @@ export const InlineCameraViewfinder = forwardRef<
   }, [cameraReady, facing]);
 
   const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
-    if (!nativeCameraRef.current) return null;
+    if (!nativeCameraRef.current || !cameraReady) return null;
     try {
       const photo = await nativeCameraRef.current.takePictureAsync({
         base64: true,
@@ -190,14 +190,18 @@ export const InlineCameraViewfinder = forwardRef<
       });
       if (!mountedRef.current) return null;
       if (photo?.base64) {
-        return await compressCaptureFrameToBlob(photo.base64, 'image/jpeg');
+        const result = await compressCaptureFrameToBlob(photo.base64, 'image/jpeg');
+        // Release the original photo base64 from memory ASAP — the compressed
+        // copy is smaller and sufficient for downstream use.
+        photo.base64 = '';
+        return result;
       }
       return null;
     } catch (err) {
       console.error('[InlineCameraViewfinder] captureNative failed:', err);
       return null;
     }
-  }, []);
+  }, [cameraReady]);
 
   useImperativeHandle(
     ref,
@@ -300,7 +304,9 @@ export const InlineCameraViewfinder = forwardRef<
     );
   }
 
-  // Native platform
+  // Native platform — only mount CameraView when active to prevent
+  // camera session leaks that crash when another app grabs the camera
+  // or the OS reclaims resources while this tab is in the background.
   if (!permission) {
     return (
       <View style={styles.wrapper}>
@@ -333,13 +339,18 @@ export const InlineCameraViewfinder = forwardRef<
   return (
     <View style={styles.wrapper}>
       <View style={styles.viewfinder}>
-        <CameraView
-          ref={nativeCameraRef}
-          style={StyleSheet.absoluteFillObject as ViewStyle}
-          facing={nativeFacing}
-          onCameraReady={() => setCameraReady(true)}
-          onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
-        />
+        {isActive && (
+          <CameraView
+            ref={nativeCameraRef}
+            style={StyleSheet.absoluteFillObject as ViewStyle}
+            facing={nativeFacing}
+            onCameraReady={() => setCameraReady(true)}
+            onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
+          />
+        )}
+        {!isActive && (
+          <View style={[StyleSheet.absoluteFillObject as ViewStyle, { backgroundColor: '#000' }]} />
+        )}
         <View style={styles.guideFrame} pointerEvents="none">
           <View style={[styles.corner, styles.cornerTL]} />
           <View style={[styles.corner, styles.cornerTR]} />

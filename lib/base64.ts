@@ -66,11 +66,15 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
   if (Platform.OS !== 'web' && typeof btoa === 'undefined') {
     return encodeBase64Native(bytes);
   }
-  const chunkSize = 0x8000;
+  // Keep chunk size well below JS engine argument limits (~65K on V8/Hermes,
+  // lower on JSC). 0x2000 (8192) is safe across all engines.
+  const chunkSize = 0x2000;
   let binary = '';
   for (let i = 0; i < bytes.length; i += chunkSize) {
     const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
-    binary += String.fromCharCode(...chunk);
+    for (let j = 0; j < chunk.length; j++) {
+      binary += String.fromCharCode(chunk[j]);
+    }
   }
   return btoa(binary);
 }

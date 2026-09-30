@@ -53,6 +53,7 @@
       "expo-image-picker",
       "expo-camera",
       "expo-media-library",
+      "react-native-view-shot",
       [
         "expo-build-properties",
         {

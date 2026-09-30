@@ -41,11 +41,21 @@ export async function getImageSize(uri: string): Promise<{ width: number; height
       img.src = uri;
     });
   }
+  // Android native: RNImage.getSize with data: URLs can silently hang.
+  // Use a timeout wrapper and fall back to a default size for data URLs.
+  if (uri.startsWith('data:')) {
+    // ImageManipulator will handle resize regardless of source dimensions;
+    // return a large value so the resize logic kicks in.
+    return { width: 4096, height: 4096 };
+  }
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('이미지 크기 로딩 시간 초과'));
+    }, 8000);
     RNImage.getSize(
       uri,
-      (width, height) => resolve({ width, height }),
-      () => reject(new Error('이미지 크기를 불러올 수 없습니다')),
+      (width, height) => { clearTimeout(timer); resolve({ width, height }); },
+      () => { clearTimeout(timer); reject(new Error('이미지 크기를 불러올 수 없습니다')); },
     );
   });
 }
@@ -154,26 +164,39 @@ export async function compressImageToBase64(
   maxDimension = 1080,
   quality = 0.7,
 ): Promise<{ base64: string; mimeType: string }> {
-  const { width: origW, height: origH } = await getImageSize(uri);
-  const longer = Math.max(origW, origH);
-  const actions =
-    longer > maxDimension
-      ? origW >= origH
-        ? [{ resize: { width: maxDimension } }]
-        : [{ resize: { height: maxDimension } }]
-      : [];
-  const manipulated = await ImageManipulator.manipulateAsync(
-    uri,
-    actions,
-    { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
-  );
-  const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-  if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-  const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
-  return { base64, mimeType: 'image/jpeg' };
+  try {
+    const { width: origW, height: origH } = await getImageSize(uri);
+    const longer = Math.max(origW, origH);
+    const actions =
+      longer > maxDimension
+        ? origW >= origH
+          ? [{ resize: { width: maxDimension } }]
+          : [{ resize: { height: maxDimension } }]
+        : [];
+    const manipulated = await ImageManipulator.manipulateAsync(
+      uri,
+      actions,
+      { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+    return { base64, mimeType: 'image/jpeg' };
+  } catch {
+    // Fallback: read the original file as base64 without compression.
+    // Better to send a larger image than to crash the app.
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    if (fileInfo.exists) {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      return { base64, mimeType: 'image/jpeg' };
+    }
+    throw new Error('이미지를 불러올 수 없습니다.');
+  }
 }
 
 export async function uploadEditedImage(base64: string, mimeType: string): Promise<string> {
@@ -345,27 +368,34 @@ export async function prepareImageForApi(
     }
   }
 
-  const { width: origW, height: origH } = await getImageSize(normalizedDataUrl);
-  const longer = Math.max(origW, origH);
-  const actions =
-    longer > maxDimension
-      ? origW >= origH
-        ? [{ resize: { width: maxDimension } }]
-        : [{ resize: { height: maxDimension } }]
-      : [];
-  const manipulated = await ImageManipulator.manipulateAsync(
-    normalizedDataUrl,
-    actions,
-    { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
-  );
+  try {
+    const { width: origW, height: origH } = await getImageSize(normalizedDataUrl);
+    const longer = Math.max(origW, origH);
+    const actions =
+      longer > maxDimension
+        ? origW >= origH
+          ? [{ resize: { width: maxDimension } }]
+          : [{ resize: { height: maxDimension } }]
+        : [];
+    const manipulated = await ImageManipulator.manipulateAsync(
+      normalizedDataUrl,
+      actions,
+      { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+    );
 
-  const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-  if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-  const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
-  return `data:image/jpeg;base64,${base64}`;
+    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+    return `data:image/jpeg;base64,${base64}`;
+  } catch {
+    // ImageManipulator can fail on Android with data URLs (native decoder
+    // may not handle base64 data URLs). Return the original so the caller
+    // can still proceed — the edge function will resize server-side.
+    return normalizedDataUrl;
+  }
 }
 
 export async function prepareImageForEdit(
@@ -393,27 +423,31 @@ export async function prepareImageForEdit(
     }
   }
 
-  const { width: origW, height: origH } = await getImageSize(normalizedDataUrl);
-  const longer = Math.max(origW, origH);
-  const actions =
-    longer > maxDimension
-      ? origW >= origH
-        ? [{ resize: { width: maxDimension } }]
-        : [{ resize: { height: maxDimension } }]
-      : [];
-  const manipulated = await ImageManipulator.manipulateAsync(
-    normalizedDataUrl,
-    actions,
-    { compress: 1, format: ImageManipulator.SaveFormat.PNG },
-  );
+  try {
+    const { width: origW, height: origH } = await getImageSize(normalizedDataUrl);
+    const longer = Math.max(origW, origH);
+    const actions =
+      longer > maxDimension
+        ? origW >= origH
+          ? [{ resize: { width: maxDimension } }]
+          : [{ resize: { height: maxDimension } }]
+        : [];
+    const manipulated = await ImageManipulator.manipulateAsync(
+      normalizedDataUrl,
+      actions,
+      { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+    );
 
-  const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-  if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-  const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
-  return `data:image/png;base64,${base64}`;
+    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+    return `data:image/png;base64,${base64}`;
+  } catch {
+    return normalizedDataUrl;
+  }
 }
 
 export function normalizeImageDataUrl(dataUrl: string): string {

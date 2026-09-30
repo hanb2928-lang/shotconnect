@@ -1,9 +1,12 @@
+import { Platform } from 'react-native';
 import { prepareImageForApi } from './imageEdit';
 import { cleanBase64, getMimeTypeFromDataUrl, buildDataUrl } from './base64';
 
 const EDGE_FN_MAX_DIMENSION = 1080;
 const EDGE_FN_QUALITY = 0.72;
-const PARALLEL_BATCH_SIZE = 5;
+// Native has limited memory and native thread pool for image manipulation;
+// 5 concurrent ImageManipulator calls can OOM on low-end Android devices.
+const PARALLEL_BATCH_SIZE = Platform.OS === 'web' ? 5 : 2;
 
 export interface CompressedImage {
   base64: string;
