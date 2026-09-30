@@ -61,8 +61,6 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   const [density, setDensityState] = useState<DisplayDensity>('standard');
   const [preset, setPresetState] = useState<ThemePreset>('studio-light');
 
-  const [themeReady, setThemeReady] = useState(false);
-
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -84,21 +82,20 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
         }
       } catch {}
 
-      try {
-        const s = await getUserSettings();
-        if (!mounted) return;
-        const tm = (s?.theme_mode as ThemeMode) || 'light';
-        const dn = (s?.display_density as DisplayDensity) || 'standard';
-        const tp = (s?.theme_preset as ThemePreset) || 'studio-light';
-        setModeState(tm);
-        setDensityState(dn);
-        if (VALID_PRESETS.includes(tp)) setPresetState(tp);
-        await setItem('theme_mode', tm);
-        await setItem('display_density', dn);
-        await setItem('theme_preset', tp);
-      } catch {}
-
-      if (mounted) setThemeReady(true);
+      getUserSettings()
+        .then(async (s) => {
+          if (!mounted) return;
+          const tm = (s?.theme_mode as ThemeMode) || 'light';
+          const dn = (s?.display_density as DisplayDensity) || 'standard';
+          const tp = (s?.theme_preset as ThemePreset) || 'studio-light';
+          setModeState(tm);
+          setDensityState(dn);
+          if (VALID_PRESETS.includes(tp)) setPresetState(tp);
+          await setItem('theme_mode', tm);
+          await setItem('display_density', dn);
+          await setItem('theme_preset', tp);
+        })
+        .catch(() => {});
     })();
     return () => {
       mounted = false;
@@ -141,8 +138,6 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     }),
     [mode, density, preset, spacing, typography, presetColors, setMode, setDensity, setPreset],
   );
-
-  if (!themeReady) return null;
 
   return <AppThemeContext.Provider value={value}>{children}</AppThemeContext.Provider>;
 }
