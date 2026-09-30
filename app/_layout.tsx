@@ -161,6 +161,9 @@ export default function RootLayout() {
   const fontsReady = fontsLoaded || fontError || fontTimedOut;
   const isReady = fontsReady && ready !== 'loading';
 
+  const bootKeyRef = useRef(0);
+  if (bootKeyRef.current === 0) bootKeyRef.current = Date.now();
+
   return (
     <ErrorBoundary>
       <I18nProvider>
@@ -168,10 +171,12 @@ export default function RootLayout() {
           <AffiliateToastProvider>
             <SafeAreaProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
-                <AppShell />
-                <NetworkBanner />
-                <VideoJobRecoveryToast />
-                <StatusBar style="light" />
+                <View key={`boot-${bootKeyRef.current}`} style={{ flex: 1 }}>
+                  <AppShell />
+                  <NetworkBanner />
+                  <VideoJobRecoveryToast />
+                  <StatusBar style="light" />
+                </View>
               </GestureHandlerRootView>
             </SafeAreaProvider>
           </AffiliateToastProvider>
