@@ -101,7 +101,7 @@ export default function RootLayout() {
     }
   }, []);
 
-  // Font timeout: if fonts don't resolve in 6s, proceed with system fonts
+  // Font timeout: if fonts don't resolve in 3s, proceed with system fonts
   useEffect(() => {
     if (fontsLoaded || fontError) return;
     const id = setTimeout(() => setFontTimedOut(true), 3000);
@@ -110,9 +110,7 @@ export default function RootLayout() {
 
   // Init effect: runs exactly once. The finally block is the sole
   // trigger for setReady('app'). A hard 8s outer timeout prevents
-  // a hung native module from blocking the app forever — but it
-  // races the init promise as a whole, so it can never fire while
-  // initStorage() is mid-flight and let providers mount early.
+  // a hung native module from blocking the app forever.
   useEffect(() => {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
