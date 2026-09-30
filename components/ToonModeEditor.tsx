@@ -973,23 +973,23 @@ export function ToonModeEditor({
                         <View style={styles.bubbleTail} />
                       </Pressable>
                     )}
-                  </View>
 
-                  {/* Affiliate link badge — bottom */}
-                  {cut.affiliateLink && cut.affiliateLink.productId ? (
-                    <View style={styles.linkBadgeBound}>
-                      <Link2 size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
-                      <Text style={styles.linkBadgeBoundText} numberOfLines={1}>{cut.affiliateLink.productName}</Text>
-                      <Check size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
-                    </View>
-                  ) : (
-                    <View style={styles.linkBadgeEmpty}>
-                      <Link2 size={8} color={TEXT_FAINT} strokeWidth={2} />
-                      <Text style={styles.linkBadgeEmptyText}>
-                        {isSelected ? '우측 인스펙터에서 바인딩' : '제휴 링크 없음'}
-                      </Text>
-                    </View>
-                  )}
+                    {/* Affiliate link badge — overlaid at bottom of cut panel */}
+                    {cut.affiliateLink && cut.affiliateLink.productId ? (
+                      <View style={styles.linkBadgeBound}>
+                        <Link2 size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
+                        <Text style={styles.linkBadgeBoundText} numberOfLines={1}>{cut.affiliateLink.productName}</Text>
+                        <Check size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
+                      </View>
+                    ) : (
+                      <View style={styles.linkBadgeEmpty}>
+                        <Link2 size={8} color={TEXT_FAINT} strokeWidth={2} />
+                        <Text style={styles.linkBadgeEmptyText}>
+                          {isSelected ? '우측 인스펙터에서 바인딩' : '제휴 링크 없음'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
 
                   {/* Fair-trade disclosure — auto-injected on last cut */}
                   {isLastCut && cut.disclosureText && (
@@ -1149,7 +1149,6 @@ const styles = StyleSheet.create({
   cutPanelImage: {
     width: '100%',
     height: '100%',
-    opacity: 0.92,
   },
   cutPanelEmpty: {
     width: '100%',
@@ -1158,13 +1157,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: CARD_SURFACE,
   },
-  // Speech bubble — compact
+  // Speech bubble — compact, above image layer
   bubbleFloat: {
     position: 'absolute',
     top: 4,
     right: 4,
     maxWidth: '78%',
-    zIndex: 2,
+    zIndex: 5,
   },
   bubbleFloatShape: {
     backgroundColor: '#ffffff',
@@ -1203,14 +1202,28 @@ const styles = StyleSheet.create({
     borderRightColor: 'transparent',
     borderTopColor: '#cbd5e1',
   },
-  // Affiliate badge — slim
+  // Affiliate badge — slim, overlaid at bottom of cut panel
   linkBadgeBound: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row', alignItems: 'center', gap: 2,
     paddingHorizontal: 4, paddingVertical: 2,
-    backgroundColor: theme.colors.success[500] + '15',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    zIndex: 4,
   },
   linkBadgeBoundText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.medium, color: theme.colors.success[600] },
-  linkBadgeEmpty: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 4, paddingVertical: 2 },
+  linkBadgeEmpty: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    paddingHorizontal: 4, paddingVertical: 2,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    zIndex: 4,
+  },
   linkBadgeEmptyText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.regular, color: TEXT_FAINT },
   // Disclosure badge — auto on last cut
   disclosureBadge: {
