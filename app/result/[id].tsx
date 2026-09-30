@@ -1490,7 +1490,10 @@ export default function ResultScreen() {
         const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
           if (!cancelled) setMuxProgress(p.progress);
         });
-        if (!result || cancelled) return;
+        if (!result || cancelled) {
+          result?.revoke();
+          return;
+        }
 
         // Persist the muxed video to Supabase Storage so it can be
         // shared/downloaded with the narration baked in.
@@ -1519,6 +1522,8 @@ export default function ResultScreen() {
         }
         if (!cancelled) {
           setMuxedVideoUrl(finalUrl);
+        } else if (finalUrl === result.url) {
+          result.revoke();
         }
       } catch {
         // Muxing failed — the original silent video is still playable

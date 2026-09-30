@@ -82,10 +82,15 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   const recordingPromiseRef = useRef<Promise<VideoRecordingResult> | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRecordingRef = useRef(false);
+  const trackListenersRef = useRef<Array<{ track: MediaStreamTrack; handler: () => void }>>([]);
   const pulseScale = useSharedValue(1);
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
+      trackListenersRef.current.forEach(({ track, handler }) => {
+        track.removeEventListener('ended', handler);
+      });
+      trackListenersRef.current = [];
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
@@ -119,13 +124,15 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       }
       streamRef.current = stream;
       stream.getVideoTracks().forEach((track) => {
-        track.addEventListener('ended', () => {
+        const handler = () => {
           if (streamRef.current === stream) {
             streamRef.current = null;
             setCameraReady(false);
             onCameraReady?.(false);
           }
-        });
+        };
+        track.addEventListener('ended', handler);
+        trackListenersRef.current.push({ track, handler });
       });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -178,6 +185,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      setPreviewBase64(null);
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;

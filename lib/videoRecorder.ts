@@ -77,6 +77,7 @@ export function startVideoRecording(
     recorder.onstop = () => {
       const mimeType = recorder.mimeType || 'video/webm';
       const blob = new Blob(chunks, { type: mimeType });
+      chunks.length = 0;
       resolve({ blob, mimeType, durationMs: Date.now() - startTime });
     };
 
@@ -109,8 +110,9 @@ export function stopVideoRecording(recorder: MediaRecorder): void {
   }
 }
 
-export function getRecordingTimeMs(recorder: MediaRecorder | null): number {
-  return recorder && recorder.state === 'recording' ? Date.now() - (recorder as any)._startTime : 0;
+// Not used — recording duration is tracked by the caller via recordingTimerRef.
+export function getRecordingTimeMs(_recorder: MediaRecorder | null): number {
+  return 0;
 }
 
 export async function blobToBase64(blob: Blob): Promise<{ base64: string; mimeType: string }> {

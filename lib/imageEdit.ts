@@ -170,6 +170,7 @@ export async function compressImageToBase64(
   const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
+  FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
   return { base64, mimeType: 'image/jpeg' };
 }
 
@@ -248,7 +249,10 @@ async function compositeOnBackgroundWeb(productDataUrl: string, bgUrl: string): 
   ctx.drawImage(productImg, dx, dy, dw, dh);
   ctx.shadowColor = 'transparent';
 
-  return canvas.toDataURL('image/png', 0.95);
+  const result = canvas.toDataURL('image/png', 0.95);
+  canvas.width = 0;
+  canvas.height = 0;
+  return result;
 }
 
 function loadImageElement(src: string, timeoutMs = 15000): Promise<HTMLImageElement> {
@@ -356,6 +360,7 @@ export async function prepareImageForApi(
   const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
+  FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
   return `data:image/jpeg;base64,${base64}`;
 }
 
@@ -402,6 +407,7 @@ export async function prepareImageForEdit(
   const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
+  FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
   return `data:image/png;base64,${base64}`;
 }
 

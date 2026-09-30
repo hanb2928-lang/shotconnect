@@ -77,6 +77,8 @@ export async function removeBackgroundOnDevice(
 
     ctx.putImageData(imageData, 0, 0);
     const resultDataUrl = canvas.toDataURL('image/png');
+    canvas.width = 0;
+    canvas.height = 0;
     return { ok: true, dataUrl: resultDataUrl };
   } catch (err) {
     return {

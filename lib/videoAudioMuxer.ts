@@ -12,6 +12,7 @@ export interface MuxResult {
   blob: Blob;
   url: string;
   durationSec: number;
+  revoke: () => void;
 }
 
 export interface MuxProgress {
@@ -185,7 +186,14 @@ export async function muxVideoWithAudio(
       if (rafId !== null) cancelAnimationFrame(rafId);
       audio.pause();
       video.pause();
+      audio.src = '';
+      video.src = '';
       audioCtx.close().catch(() => {});
+      videoStream.getTracks().forEach((t) => t.stop());
+      audioTracks.forEach((t) => t.stop());
+      canvas.width = 0;
+      canvas.height = 0;
+      chunks.length = 0;
     };
 
     recorder.onstop = () => {
@@ -201,7 +209,7 @@ export async function muxVideoWithAudio(
       const blob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(blob);
       onProgress?.({ phase: 'finalizing', progress: 1 });
-      resolve({ blob, url, durationSec });
+      resolve({ blob, url, durationSec, revoke: () => URL.revokeObjectURL(url) });
     };
 
     recorder.onerror = () => {

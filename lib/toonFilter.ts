@@ -175,31 +175,30 @@ export async function applyToonFilter(
   }
 
   // ── Step 6: Slight contrast boost for punchy manga look ──
+  // Reuse srcData in-place instead of allocating a second ImageData
   const contrast = 1 + intensity * (isDigital ? 0.15 : isAnalog ? 0.25 : 0.1);
   const midtone = 128;
-  const finalData = ctx.getImageData(0, 0, width, height);
-  const fd = finalData.data;
-  for (let i = 0; i < fd.length; i += 4) {
-    fd[i] = clamp(((fd[i] - midtone) * contrast + midtone) | 0);
-    fd[i + 1] = clamp(((fd[i + 1] - midtone) * contrast + midtone) | 0);
-    fd[i + 2] = clamp(((fd[i + 2] - midtone) * contrast + midtone) | 0);
+  const data2 = srcData.data;
+  for (let i = 0; i < data2.length; i += 4) {
+    data2[i] = clamp(((data2[i] - midtone) * contrast + midtone) | 0);
+    data2[i + 1] = clamp(((data2[i + 1] - midtone) * contrast + midtone) | 0);
+    data2[i + 2] = clamp(((data2[i + 2] - midtone) * contrast + midtone) | 0);
   }
 
-  // ── Step 7: Vintage warm tint overlay ──
+  // ── Step 7: Vintage warm tint overlay (in-place) ──
   if (isVintage) {
-    const vintageData = ctx.getImageData(0, 0, width, height);
-    const vd = vintageData.data;
-    for (let i = 0; i < vd.length; i += 4) {
-      vd[i] = clamp(vd[i] * 0.95 + 10);          // slightly reduce red, add warmth
-      vd[i + 1] = clamp(vd[i + 1] * 0.88 + 6);   // reduce green for sepia lean
-      vd[i + 2] = clamp(vd[i + 2] * 0.75 + 4);   // reduce blue for warm tone
+    for (let i = 0; i < data2.length; i += 4) {
+      data2[i] = clamp(data2[i] * 0.95 + 10);          // slightly reduce red, add warmth
+      data2[i + 1] = clamp(data2[i + 1] * 0.88 + 6);   // reduce green for sepia lean
+      data2[i + 2] = clamp(data2[i + 2] * 0.75 + 4);   // reduce blue for warm tone
     }
-    ctx.putImageData(vintageData, 0, 0);
-  } else {
-    ctx.putImageData(finalData, 0, 0);
   }
+  ctx.putImageData(srcData, 0, 0);
 
-  return canvas.toDataURL('image/png');
+  const result = canvas.toDataURL('image/png');
+  canvas.width = 0;
+  canvas.height = 0;
+  return result;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
