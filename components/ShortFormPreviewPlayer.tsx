@@ -509,10 +509,10 @@ useEffect(() => {
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    const existing = document.getElementById('snap-connect-cam-keyframes');
+    const existing = document.getElementById('shotconnect-cam-keyframes');
     if (existing) return;
     const style = document.createElement('style');
-    style.id = 'snap-connect-cam-keyframes';
+    style.id = 'shotconnect-cam-keyframes';
     style.textContent = [
       '@keyframes cam_fade_in{from{opacity:0;transform:scale(1.08)}to{opacity:1;transform:scale(1.08)}}',
       '@keyframes cam_flash{0%{opacity:0}15%{opacity:1}100%{opacity:1}}',

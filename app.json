@@ -1,19 +1,19 @@
 {
   "expo": {
-    "name": "ShortConnect",
-    "slug": "snap-and-connect",
+    "name": "ShotConnect",
+    "slug": "shot-connect",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "snapconnect",
+    "scheme": "shotconnect",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.snapconnect.app"
+      "bundleIdentifier": "com.shotconnect.app"
     },
     "android": {
-      "package": "com.snapconnect.app",
+      "package": "com.shotconnect.app",
       "versionCode": 1,
       "jsEngine": "hermes",
       "adaptiveIcon": {

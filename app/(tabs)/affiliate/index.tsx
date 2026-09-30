@@ -881,7 +881,7 @@ export default function AffiliateScreen() {
           try {
             const a = document.createElement('a');
             a.href = allImages[i];
-            a.download = `snapconnect-cut-${i + 1}-${Date.now()}.png`;
+            a.download = `shotconnect-cut-${i + 1}-${Date.now()}.png`;
             a.click();
             await new Promise((resolve) => setTimeout(resolve, 300));
           } catch { /* skip failed download */ }

@@ -157,7 +157,7 @@ export function StockVideoPicker({
         throw new Error('영상 다운로드에 실패했습니다.');
       }
       const asset = await MediaLibrary.createAssetAsync(downloadRes.uri);
-      await MediaLibrary.createAlbumAsync('SnapConnect', asset, false);
+      await MediaLibrary.createAlbumAsync('ShotConnect', asset, false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
@@ -392,7 +392,7 @@ export function StockVideoPicker({
         return;
       }
       const asset = await MediaLibrary.createAssetAsync(mobileCapturedUri);
-      await MediaLibrary.createAlbumAsync('SnapConnect', asset, false);
+      await MediaLibrary.createAlbumAsync('ShotConnect', asset, false);
       setMobileSaveSuccess(true);
       setTimeout(() => setMobileSaveSuccess(false), 3000);
     } catch {

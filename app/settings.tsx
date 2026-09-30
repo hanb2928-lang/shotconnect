@@ -2254,7 +2254,7 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      <Text style={styles.footer}>ShortConnect (숏커넥트) — 온·오프라인 셀러를 위한 올인원 AI 커머스</Text>
+      <Text style={styles.footer}>ShotConnect (숏커넥트) — 온·오프라인 셀러를 위한 올인원 AI 커머스</Text>
 
       <Modal
         visible={revModalVisible}

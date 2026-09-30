@@ -289,7 +289,7 @@ async function fetchAndParse(url: string): Promise<ProductMeta> {
 
   const response = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; SnapConnectBot/1.0; +https://snapconnect.app/bot)",
+      "User-Agent": "Mozilla/5.0 (compatible; ShotConnectBot/1.0; +https://shotconnect.app/bot)",
       "Accept": "text/html,application/xhtml+xml",
       "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
     },
@@ -502,7 +502,7 @@ async function captureImageAsBase64(imageUrl: string): Promise<{ base64: string;
   try {
     const response = await fetch(imageUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; SnapConnectBot/1.0; +https://snapconnect.app/bot)",
+        "User-Agent": "Mozilla/5.0 (compatible; ShotConnectBot/1.0; +https://shotconnect.app/bot)",
         "Accept": "image/*,*/*;q=0.8",
       },
       signal: controller.signal,
@@ -543,7 +543,7 @@ async function captureImagesFromPage(pageUrl: string, maxImages: number): Promis
   try {
     const response = await fetch(pageUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; SnapConnectBot/1.0; +https://snapconnect.app/bot)",
+        "User-Agent": "Mozilla/5.0 (compatible; ShotConnectBot/1.0; +https://shotconnect.app/bot)",
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
       },

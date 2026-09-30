@@ -276,7 +276,7 @@ export default function GuideScreen() {
         <View style={styles.card}>
           <TouchableOpacity
             style={styles.feedbackRow}
-            onPress={() => Linking.openURL('https://forms.gle/shortconnect-feedback').catch(() => {})}
+            onPress={() => Linking.openURL('https://forms.gle/shotconnect-feedback').catch(() => {})}
             activeOpacity={0.7}
           >
             <View style={styles.featureIconWrap}>
@@ -291,7 +291,7 @@ export default function GuideScreen() {
           <Divider />
           <TouchableOpacity
             style={styles.feedbackRow}
-            onPress={() => Linking.openURL('https://open.kakao.com/o/shortconnect').catch(() => {})}
+            onPress={() => Linking.openURL('https://open.kakao.com/o/shotconnect').catch(() => {})}
             activeOpacity={0.7}
           >
             <View style={styles.featureIconWrap}>

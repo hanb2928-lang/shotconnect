@@ -300,7 +300,7 @@ export function ToonModeEditor({
       rawMap: rawEntries,
       savedAt: Date.now(),
     };
-    localStorage.setItem('shopformer_toon_slots', JSON.stringify(data));
+    localStorage.setItem('shotconnect_toon_slots', JSON.stringify(data));
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 2000);
   }, []);
@@ -308,7 +308,7 @@ export function ToonModeEditor({
   // Load slots from localStorage
   const handleLoadSlots = useCallback(() => {
     if (Platform.OS !== 'web' || typeof localStorage === 'undefined') return;
-    const raw = localStorage.getItem('shopformer_toon_slots');
+    const raw = localStorage.getItem('shotconnect_toon_slots');
     if (!raw) return;
     try {
       const data = JSON.parse(raw);
@@ -558,7 +558,7 @@ export function ToonModeEditor({
         return `<figure><img src="${c.imageUrl}" alt="${c.label}" />${bubbleHtml}${linkHtml ? `<figcaption>${linkHtml}</figcaption>` : ''}</figure>`;
       })
       .join('\n');
-    return `<section class="shopformer-toon">\n${cutImages}\n<aside class="affiliate-disclosure">${disclosure}</aside>\n</section>`;
+    return `<section class="shotconnect-toon">\n${cutImages}\n<aside class="affiliate-disclosure">${disclosure}</aside>\n</section>`;
   }, [lastCutDisclosure]);
 
   const handlePublish = useCallback(() => {

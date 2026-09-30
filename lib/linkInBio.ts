@@ -115,6 +115,6 @@ export async function getProductsForLinkInBio(
 }
 
 export function buildLinkInBioUrl(slug: string): string {
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://snapconnect.app';
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://shotconnect.app';
   return `${baseUrl}/bio/${slug}`;
 }

@@ -133,7 +133,7 @@ async function getVapidKeys(): Promise<VapidKeys | null> {
     return {
       publicKey: envPub,
       privateKey: envPriv,
-      subject: Deno.env.get("VAPID_SUBJECT") ?? "mailto:admin@snapconnect.app",
+      subject: Deno.env.get("VAPID_SUBJECT") ?? "mailto:admin@shotconnect.app",
     };
   }
 
@@ -153,7 +153,7 @@ async function getVapidKeys(): Promise<VapidKeys | null> {
     return {
       publicKey,
       privateKey,
-      subject: map.get("vapid_subject") ?? "mailto:admin@snapconnect.app",
+      subject: map.get("vapid_subject") ?? "mailto:admin@shotconnect.app",
     };
   } catch {
     return null;

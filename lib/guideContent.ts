@@ -570,7 +570,7 @@ const ko: GuideContent = {
     { iconKey: 'MessageSquare', title: '의견 보내기', desc: '구글 설문지로 피드백을 남겨주세요' },
     { iconKey: 'Bug', title: '오류 신고 & 오픈채팅', desc: '카카오톡 오픈채팅방에서 빠르게 도움받기' },
   ],
-  footer: 'ShortConnect (숏커넥트) — 온·오프라인 셀러를 위한 올인원 AI 커머스',
+  footer: 'ShotConnect (숏커넥트) — 온·오프라인 셀러를 위한 올인원 AI 커머스',
   onboardingTitle: '앱 둘러보기 다시 보기',
   onboardingDesc: '처음 안내를 다시 확인하고 싶다면 눌러주세요',
 };
@@ -1080,7 +1080,7 @@ const en: GuideContent = {
     { iconKey: 'MessageSquare', title: 'Send Feedback', desc: 'Leave feedback via the Google Form' },
     { iconKey: 'Bug', title: 'Bug Reports & Open Chat', desc: 'Get quick help in the KakaoTalk open chat room' },
   ],
-  footer: 'ShortConnect — All-in-one AI commerce for online and offline sellers',
+  footer: 'ShotConnect — All-in-one AI commerce for online and offline sellers',
   onboardingTitle: 'Replay App Tour',
   onboardingDesc: 'Tap to see the initial guide again',
 };
@@ -1140,7 +1140,7 @@ const ja: GuideContent = {
   feedbackTitle: 'フィードバック & バグ報告',
   feedbackDesc: 'ご不便やバグがあればお知らせください。',
   feedbackItems: en.feedbackItems,
-  footer: 'ShortConnect — オンライン・オフラインセラーのためのオールインワンAIコマース',
+  footer: 'ShotConnect — オンライン・オフラインセラーのためのオールインワンAIコマース',
   onboardingTitle: 'アプリツアーをもう一度見る',
   onboardingDesc: '初期ガイドをもう一度確認',
 };
@@ -1200,7 +1200,7 @@ const vi: GuideContent = {
   feedbackTitle: 'Phản hồi & Báo cáo lỗi',
   feedbackDesc: 'Cho chúng tôi biết về bất tiện hoặc lỗi.',
   feedbackItems: en.feedbackItems,
-  footer: 'ShortConnect — AI commerce all-in-one cho nhà bán online và offline',
+  footer: 'ShotConnect — AI commerce all-in-one cho nhà bán online và offline',
   onboardingTitle: 'Xem lại hướng dẫn ứng dụng',
   onboardingDesc: 'Nhấn để xem lại hướng dẫn ban đầu',
 };
@@ -1260,7 +1260,7 @@ const es: GuideContent = {
   feedbackTitle: 'Comentarios y Reporte de Errores',
   feedbackDesc: 'Cuéntanos sobre inconvenientes o errores.',
   feedbackItems: en.feedbackItems,
-  footer: 'ShortConnect — AI commerce todo-en-uno para vendedores online y offline',
+  footer: 'ShotConnect — AI commerce todo-en-uno para vendedores online y offline',
   onboardingTitle: 'Ver Recorrido de la App',
   onboardingDesc: 'Toca para ver la guía inicial nuevamente',
 };
@@ -1320,7 +1320,7 @@ const zh: GuideContent = {
   feedbackTitle: '反馈 & 错误报告',
   feedbackDesc: '请告诉我们不便或错误。',
   feedbackItems: en.feedbackItems,
-  footer: 'ShortConnect — 面向线上线下卖家的一站式 AI 电商',
+  footer: 'ShotConnect — 面向线上线下卖家的一站式 AI 电商',
   onboardingTitle: '重新查看应用导览',
   onboardingDesc: '点击重新查看初始指南',
 };

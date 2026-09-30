@@ -1379,7 +1379,7 @@ export default function ResultScreen() {
       if (autoSavedVideoRef.current === videoUrl) return;
       autoSavedVideoRef.current = videoUrl;
       try {
-        const fileName = `snap-connect-video-${scan.id}-${Date.now()}.mp4`;
+        const fileName = `shotconnect-video-${scan.id}-${Date.now()}.mp4`;
         let cloudUrl: string | null = null;
         if (Platform.OS === 'web') {
           const res = await fetch(videoUrl);
@@ -1903,7 +1903,7 @@ export default function ResultScreen() {
 
     let fallbackObjectUrl: string | null = null;
     try {
-      const fileName = `snap-connect-video-${scan?.id ?? 'card'}-${Date.now()}.mp4`;
+      const fileName = `shotconnect-video-${scan?.id ?? 'card'}-${Date.now()}.mp4`;
 
       if (Platform.OS === 'web') {
         let fetchRes: Response;
@@ -1962,7 +1962,7 @@ export default function ResultScreen() {
     let fallbackObjectUrl: string | null = null;
     try {
       let uri: string;
-      const fileName = `snap-connect-${scan?.id ?? 'card'}-${Date.now()}.png`;
+      const fileName = `shotconnect-${scan?.id ?? 'card'}-${Date.now()}.png`;
 
       if (Platform.OS === 'web') {
         // Web: skip DOM canvas capture (CORS/tainted-canvas issues) — fetch source image directly
@@ -1992,7 +1992,7 @@ export default function ResultScreen() {
           uri = await captureRef(cardRef, {
             format: 'png',
             quality: 1,
-            fileName: `snap-connect-${scan?.id ?? 'card'}.png`,
+            fileName: `shotconnect-${scan?.id ?? 'card'}.png`,
           });
         } catch (captureError) {
           throw new Error('화면 캡처에 실패했습니다. 이미지를 불러온 후 다시 시도해주세요.');
@@ -2275,11 +2275,11 @@ export default function ResultScreen() {
     const fullShareText = `${shareText}${shortUrl ? `\n\n${shortUrl}` : ''}`;
     try {
       if (Platform.OS === 'web' && navigator.share) {
-        await navigator.share({ title: activeProductName || scan?.title || 'SnapConnect', text: fullShareText, url: shortUrl || undefined });
+        await navigator.share({ title: activeProductName || scan?.title || 'ShotConnect', text: fullShareText, url: shortUrl || undefined });
       } else if (Platform.OS === 'web') {
         if (navigator.clipboard) await navigator.clipboard.writeText(fullShareText);
       } else {
-        await RNShare.share({ message: fullShareText, title: activeProductName || scan?.title || 'SnapConnect' });
+        await RNShare.share({ message: fullShareText, title: activeProductName || scan?.title || 'ShotConnect' });
       }
     } catch {
       // user cancelled or share failed — silently ignore
@@ -2688,7 +2688,7 @@ export default function ResultScreen() {
               hashtags={allDisplayHashtags}
               accentColor={td?.accentColor || theme.colors.primary[400]}
               category={td?.category || ''}
-              fileName={`snap-connect-${scan.id}.png`}
+              fileName={`shotconnect-${scan.id}.png`}
               affiliatePlatforms={affiliatePlatforms}
               platform={activePlatform}
               shortUrl={shortUrl || ''}
@@ -2709,7 +2709,7 @@ export default function ResultScreen() {
               shareText={shareText}
               affiliateUrl={primaryAffiliateUrl}
               shortUrl={shortUrl}
-              fileName={`snap-connect-${scan.id}.png`}
+              fileName={`shotconnect-${scan.id}.png`}
               affiliatePlatforms={affiliatePlatforms}
             />
           ),

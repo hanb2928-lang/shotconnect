@@ -38,5 +38,5 @@ CREATE POLICY "anon_select_public_vapid_key" ON public.push_config
 INSERT INTO public.push_config (key, value) VALUES
   ('vapid_public_key', 'BFW3j0NsLMRs_dChlzaXmQol-6j4KQJxguAlXZAbyk_XUgnqK3K6OEevYKiB62d98xsz13RJ-l1beW-Hzy_j5Lk'),
   ('vapid_private_key', 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg888RPaARuBpIoFXCs8jDz2-csDLLk5zXTdp6Xzhp--GhRANCAARVt49DbCzEbP3QoZc2l5kKJfuo-CkCcYLgJV2QG8pP11IJ6ityujhHr2CogetnffMbM9d0SfpdW3lvh88v4-S5'),
-  ('vapid_subject', 'mailto:admin@snapconnect.app')
+  ('vapid_subject', 'mailto:admin@shotconnect.app')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
