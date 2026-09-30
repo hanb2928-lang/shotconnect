@@ -36,6 +36,7 @@ import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipelin
 import { useResultPolling } from '@/hooks/useResultPolling';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
+import { notifyVideoCompleted } from '@/lib/pushNotify';
 
 export default function SynthesisScreen() {
   const router = useRouter();
@@ -210,6 +211,7 @@ export default function SynthesisScreen() {
       } else {
         setResultVideoUrl(videoUrl);
       }
+      notifyVideoCompleted();
     },
     onError: (errMsg) => {
       setIsGenerating(false);

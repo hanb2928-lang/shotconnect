@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { getItem, setItem } from '@/lib/storage';
 
 type PermissionState = 'default' | 'granted' | 'denied' | 'unsupported';
 
@@ -10,12 +11,12 @@ interface UseWebPushResult {
   isSubscribed: boolean;
   subscribe: () => Promise<boolean>;
   unsubscribe: () => Promise<boolean>;
+  sendTestNotification: () => Promise<{ sent: number; failed: number; message?: string }>;
   error: string | null;
 }
 
-// VAPID public key — will be set from server or env
-// For now we use a placeholder that the send-push function checks against
 const SW_PATH = '/sw-push.js';
+const DEVICE_ID_KEY = 'push_device_id';
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -28,11 +29,21 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return output;
 }
 
+async function getOrCreateDeviceId(): Promise<string> {
+  let id = await getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = `device-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    await setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
 export function useWebPush(): UseWebPushResult {
   const [permission, setPermission] = useState<PermissionState>('default');
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [vapidPublicKey, setVapidPublicKey] = useState<string | null>(null);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
   const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
 
   const isWeb = Platform.OS === 'web';
@@ -46,19 +57,18 @@ export function useWebPush(): UseWebPushResult {
 
     let cancelled = false;
 
-    // Check current permission
     if ('Notification' in window) {
       setPermission(Notification.permission as PermissionState);
     }
 
-    // Fetch VAPID public key from server
     fetchVapidKey().then((key) => {
       if (!cancelled && key) setVapidPublicKey(key);
-    }).catch(() => {
-      // VAPID key not configured yet — push won't work until it is
-    });
+    }).catch(() => {});
 
-    // Register service worker and check existing subscription
+    getOrCreateDeviceId().then((id) => {
+      if (!cancelled) setDeviceId(id);
+    }).catch(() => {});
+
     (async () => {
       try {
         const reg = await navigator.serviceWorker.register(SW_PATH, { scope: '/' });
@@ -67,7 +77,7 @@ export function useWebPush(): UseWebPushResult {
         const sub = await reg.pushManager.getSubscription();
         if (!cancelled) setIsSubscribed(!!sub);
       } catch {
-        // SW registration failed — push won't work
+        // SW registration failed
       }
     })();
 
@@ -96,24 +106,18 @@ export function useWebPush(): UseWebPushResult {
         return false;
       }
 
-      // Check auth before subscribing to avoid orphaned browser subscriptions
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) {
-        setError('알림을 구독하려면 로그인이 필요합니다.');
-        return false;
-      }
-
       const sub = await registrationRef.current.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(key).buffer as ArrayBuffer,
       });
 
       const subJson = sub.toJSON();
+      const did = deviceId ?? (await getOrCreateDeviceId());
+
       const { error: dbError } = await supabase
         .from('push_subscriptions')
         .upsert({
-          user_id: userId,
+          user_id: did,
           endpoint: subJson.endpoint,
           keys: subJson.keys ?? {},
         }, { onConflict: 'user_id,endpoint' });
@@ -130,7 +134,7 @@ export function useWebPush(): UseWebPushResult {
       setError(err instanceof Error ? err.message : '알림 구독에 실패했습니다.');
       return false;
     }
-  }, [supported, vapidPublicKey]);
+  }, [supported, vapidPublicKey, deviceId]);
 
   const unsubscribe = useCallback(async (): Promise<boolean> => {
     if (!registrationRef.current) return false;
@@ -142,13 +146,12 @@ export function useWebPush(): UseWebPushResult {
         await sub.unsubscribe();
       }
 
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (userId && endpoint) {
+      const did = deviceId ?? (await getOrCreateDeviceId());
+      if (endpoint) {
         await supabase
           .from('push_subscriptions')
           .delete()
-          .eq('user_id', userId)
+          .eq('user_id', did)
           .eq('endpoint', endpoint);
       }
 
@@ -159,9 +162,40 @@ export function useWebPush(): UseWebPushResult {
       setError(err instanceof Error ? err.message : '알림 구독 해지에 실패했습니다.');
       return false;
     }
-  }, []);
+  }, [deviceId]);
 
-  return { supported, permission, isSubscribed, subscribe, unsubscribe, error };
+  const sendTestNotification = useCallback(async (): Promise<{ sent: number; failed: number; message?: string }> => {
+    try {
+      const did = deviceId ?? (await getOrCreateDeviceId());
+      const { data, error: invokeError } = await supabase.functions.invoke('send-push', {
+        method: 'POST',
+        body: {
+          userId: did,
+          title: '테스트 알림',
+          body: '푸시 알림이 정상적으로 작동합니다! 영상 완성 알림을 받을 준비가 되었어요.',
+          url: '/',
+        },
+      });
+
+      if (invokeError) {
+        return { sent: 0, failed: 1, message: invokeError.message };
+      }
+
+      const result = data as { sent?: number; failed?: number; message?: string; error?: string };
+      if (result.error) {
+        return { sent: 0, failed: 1, message: result.error };
+      }
+      return {
+        sent: result.sent ?? 0,
+        failed: result.failed ?? 0,
+        message: result.message,
+      };
+    } catch (err) {
+      return { sent: 0, failed: 1, message: err instanceof Error ? err.message : '알 수 없는 오류' };
+    }
+  }, [deviceId]);
+
+  return { supported, permission, isSubscribed, subscribe, unsubscribe, sendTestNotification, error };
 }
 
 async function fetchVapidKey(): Promise<string | null> {

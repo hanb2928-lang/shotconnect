@@ -22,6 +22,12 @@ interface SubscriptionRow {
   keys: { p256dh: string; auth: string };
 }
 
+interface VapidKeys {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -29,9 +35,9 @@ Deno.serve(async (req: Request) => {
 
   // GET: return VAPID public key for client subscription
   if (req.method === "GET") {
-    const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
+    const vapid = await getVapidKeys();
     return new Response(
-      JSON.stringify({ vapidPublicKey: vapidPublicKey || null }),
+      JSON.stringify({ vapidPublicKey: vapid?.publicKey ?? null }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
@@ -53,11 +59,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
-    const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
-    const vapidSubject = Deno.env.get("VAPID_SUBJECT") ?? "mailto:admin@snapconnect.app";
-
-    if (!vapidPublicKey || !vapidPrivateKey) {
+    const vapid = await getVapidKeys();
+    if (!vapid || !vapid.publicKey || !vapid.privateKey) {
       return new Response(
         JSON.stringify({ error: "VAPID keys not configured" }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -83,7 +86,7 @@ Deno.serve(async (req: Request) => {
       subs.map(async (sub) => {
         try {
           const audience = new URL(sub.endpoint).origin;
-          const jwt = await generateVapidJwt(vapidSubject, audience, vapidPrivateKey);
+          const jwt = await generateVapidJwt(vapid.subject, audience, vapid.privateKey);
           const body = await encryptMessage(sub.keys.p256dh, sub.keys.auth, messageJson);
           const resp = await sendWebPush(sub.endpoint, body, jwt);
 
@@ -121,6 +124,41 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+async function getVapidKeys(): Promise<VapidKeys | null> {
+  // First try environment variables
+  const envPub = Deno.env.get("VAPID_PUBLIC_KEY");
+  const envPriv = Deno.env.get("VAPID_PRIVATE_KEY");
+  if (envPub && envPriv) {
+    return {
+      publicKey: envPub,
+      privateKey: envPriv,
+      subject: Deno.env.get("VAPID_SUBJECT") ?? "mailto:admin@snapconnect.app",
+    };
+  }
+
+  // Fall back to database config table
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/push_config?select=key,value`,
+      { headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` } },
+    );
+    if (!resp.ok) return null;
+    const rows = await resp.json() as Array<{ key: string; value: string }>;
+    const map = new Map(rows.map((r) => [r.key, r.value]));
+    const publicKey = map.get("vapid_public_key");
+    const privateKey = map.get("vapid_private_key");
+    if (!publicKey || !privateKey) return null;
+    return {
+      publicKey,
+      privateKey,
+      subject: map.get("vapid_subject") ?? "mailto:admin@snapconnect.app",
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function fetchAllSubscriptions(): Promise<SubscriptionRow[]> {
   if (!supabaseUrl || !serviceRoleKey) return [];
@@ -283,30 +321,24 @@ async function encryptMessage(
   const subscriberPubKeyBytes = base64urlToBytes(p256dh);
   const authSecretBytes = base64urlToBytes(authSecretB64);
 
-  // 1. Import subscriber's public ECDH key
   const subscriberPublicKey = await crypto.subtle.importKey(
     "raw", subscriberPubKeyBytes, { name: "ECDH", namedCurve: "P-256" }, false, [],
   );
 
-  // 2. Generate ephemeral server key pair
   const serverKeyPair = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"],
   );
 
-  // 3. ECDH shared secret
   const ecdhSecret = new Uint8Array(
     await crypto.subtle.deriveBits({ name: "ECDH", public: subscriberPublicKey }, serverKeyPair.privateKey, 256),
   );
 
-  // 4. Export server public key (uncompressed P-256: 65 bytes)
   const serverPubKey = new Uint8Array(
     await crypto.subtle.exportKey("raw", serverKeyPair.publicKey),
   );
 
-  // 5. PRK_key = HMAC-SHA-256(auth_secret, ecdh_secret) — HKDF-Extract
   const prkKey = await hmacSha256(authSecretBytes, ecdhSecret);
 
-  // 6. IKM = HKDF-Expand(PRK_key, "WebPush: info\0" || server_pub || subscriber_pub, 32)
   const keyInfo = concatBytes(
     new TextEncoder().encode("WebPush: info\0"),
     serverPubKey,
@@ -314,32 +346,28 @@ async function encryptMessage(
   );
   const ikm = await hkdfExpand(prkKey, keyInfo, 32);
 
-  // 7. CEK = HKDF-Expand(IKM, "Content-Encoding: aes128gcm\0", 16)
   const cekInfo = new TextEncoder().encode("Content-Encoding: aes128gcm\0");
   const cek = await hkdfExpand(ikm, cekInfo, 16);
 
-  // 8. nonce = HKDF-Expand(IKM, "Content-Encoding: nonce\0", 12)
   const nonceInfo = new TextEncoder().encode("Content-Encoding: nonce\0");
   const nonce = await hkdfExpand(ikm, nonceInfo, 12);
 
-  // 9. Encrypt with AES-128-GCM
   const messageBytes = new TextEncoder().encode(message);
   const padded = new Uint8Array(messageBytes.length + 1);
   padded.set(messageBytes, 0);
-  padded[messageBytes.length] = 2; // padding delimiter
+  padded[messageBytes.length] = 2;
 
   const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
   const encrypted = new Uint8Array(
     await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, aesKey, padded),
   );
 
-  // 10. Build RFC 8291 header: salt(16) || rs(4) || idlen(1) || keyid(65)
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const header = new Uint8Array(16 + 4 + 1 + 65);
   header.set(salt, 0);
   const dv = new DataView(header.buffer);
-  dv.setUint32(16, 4096); // record size
-  header[20] = 65;        // key ID length
+  dv.setUint32(16, 4096);
+  header[20] = 65;
   header.set(serverPubKey, 21);
 
   return concatBytes(header, encrypted);
@@ -393,14 +421,12 @@ async function generateVapidJwt(
     ),
   );
 
-  // Convert DER signature to raw r||s for ES256 JWT
   const rawSig = derToRaw(signature);
   const encodedSignature = base64urlEncodeBytes(rawSig);
   return `${signingInput}.${encodedSignature}`;
 }
 
 function derToRaw(derSig: Uint8Array): Uint8Array {
-  // ECDSA signatures from Web Crypto are in DER format; JWT needs raw r||s
   const rLen = derSig[3];
   const r = derSig.subarray(4, 4 + rLen);
   const sOffset = 4 + rLen + 1;
@@ -408,7 +434,6 @@ function derToRaw(derSig: Uint8Array): Uint8Array {
   const s = derSig.subarray(sOffset + 1, sOffset + 1 + sLen);
 
   const raw = new Uint8Array(64);
-  // Right-align r and s into 32 bytes each (trim leading zeros or pad)
   raw.set(r.subarray(Math.max(0, r.length - 32)), Math.max(0, 32 - r.length));
   raw.set(s.subarray(Math.max(0, s.length - 32)), 32 + Math.max(0, 32 - s.length));
   return raw;

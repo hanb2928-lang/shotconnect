@@ -1440,6 +1440,7 @@ export default function SettingsScreen() {
             </View>
             <PushNotificationToggle />
           </View>
+          <PushTestButton />
         </View>
         <TouchableOpacity
           style={[styles.saveIdButton, savedDefaults && styles.saveIdButtonDone]}
@@ -4083,7 +4084,6 @@ const styles = StyleSheet.create({
 function PushNotificationToggle() {
   const { supported, isSubscribed, subscribe, unsubscribe, error } = useWebPush();
   const [toggling, setToggling] = useState(false);
-  const colors = useAppTheme().colors;
 
   if (!supported) {
     return (
@@ -4114,5 +4114,69 @@ function PushNotificationToggle() {
         <View style={[styles.toggleKnob, isSubscribed && styles.toggleKnobActive]} />
       </View>
     </TouchableOpacity>
+  );
+}
+
+function PushTestButton() {
+  const { supported, isSubscribed, sendTestNotification } = useWebPush();
+  const [testing, setTesting] = useState(false);
+  const [resultMsg, setResultMsg] = useState<string | null>(null);
+
+  if (!supported || !isSubscribed) return null;
+
+  const handleTest = async () => {
+    setTesting(true);
+    setResultMsg(null);
+    const result = await sendTestNotification();
+    setTesting(false);
+    if (result.sent > 0) {
+      setResultMsg('알림이 전송되었습니다. 브라우저 알림을 확인하세요.');
+    } else {
+      setResultMsg(result.message ?? '알림 전송에 실패했습니다.');
+    }
+    setTimeout(() => setResultMsg(null), 4000);
+  };
+
+  return (
+    <View style={{ marginTop: 10 }}>
+      <TouchableOpacity
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          paddingVertical: 10,
+          paddingHorizontal: 16,
+          borderRadius: 10,
+          backgroundColor: staticTheme.colors.primary[400] + '20',
+          borderWidth: 1,
+          borderColor: staticTheme.colors.primary[400] + '40',
+        }}
+        onPress={handleTest}
+        disabled={testing}
+        activeOpacity={0.7}
+      >
+        {testing ? (
+          <ActivityIndicator size="small" color={staticTheme.colors.primary[400]} />
+        ) : (
+          <>
+            <Zap size={16} color={staticTheme.colors.primary[400]} strokeWidth={2} />
+            <Text style={{ color: staticTheme.colors.primary[400], fontSize: 14, fontWeight: '600' }}>
+              테스트 알림 보내기
+            </Text>
+          </>
+        )}
+      </TouchableOpacity>
+      {resultMsg && (
+        <Text style={{
+          marginTop: 8,
+          fontSize: 12,
+          color: resultMsg.includes('실패') ? staticTheme.colors.error[400] : staticTheme.colors.success[400],
+          textAlign: 'center',
+        }}>
+          {resultMsg}
+        </Text>
+      )}
+    </View>
   );
 }
