@@ -47,7 +47,11 @@ export function useWebPush(): UseWebPushResult {
   const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
 
   const isWeb = Platform.OS === 'web';
-  const supported = isWeb && typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window;
+  const supported = isWeb
+    && typeof window !== 'undefined'
+    && typeof navigator !== 'undefined'
+    && 'serviceWorker' in navigator
+    && 'PushManager' in window;
 
   useEffect(() => {
     if (!supported) {
