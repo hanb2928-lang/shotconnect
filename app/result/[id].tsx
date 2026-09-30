@@ -1000,12 +1000,6 @@ export default function ResultScreen() {
           if (imgResp.ok) {
             const arrayBuffer = await imgResp.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
-            let binary = '';
-            const chunkSize = 0x8000;
-            for (let i = 0; i < bytes.length; i += chunkSize) {
-              const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
-              binary += String.fromCharCode(...chunk);
-            }
             const rawBase64 = uint8ArrayToBase64(bytes);
             const rawDataUrl = `data:image/jpeg;base64,${rawBase64}`;
             const compressed = await compressForEdgeFunction(rawDataUrl);

@@ -209,7 +209,11 @@ export async function muxVideoWithAudio(
       const blob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(blob);
       onProgress?.({ phase: 'finalizing', progress: 1 });
-      resolve({ blob, url, durationSec, revoke: () => URL.revokeObjectURL(url) });
+      // Yield to the event loop before resolving so pending UI updates
+      // and bridge messages can flush after the heavy blob construction.
+      setTimeout(() => {
+        resolve({ blob, url, durationSec, revoke: () => URL.revokeObjectURL(url) });
+      }, 0);
     };
 
     recorder.onerror = () => {

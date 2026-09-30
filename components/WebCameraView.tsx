@@ -4,7 +4,6 @@ import Animated, { useSharedValue, withRepeat, withSequence, withTiming } from '
 import { theme } from '@/lib/theme';
 import { Camera, RotateCcw, Zap, X, Image as ImageIcon, Sparkles, Check, ShieldAlert, Video, Square } from 'lucide-react-native';
 import { cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
-import { prepareImageForApi } from '@/lib/imageEdit';
 import { startVideoRecording, stopVideoRecording, blobToBase64, type VideoRecordingResult } from '@/lib/videoRecorder';
 import { getSafeVideoConstraints, clampCaptureDimensions, CAPTURE_MAX_WIDTH } from '@/lib/captureConstraints';
 import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery';
@@ -248,10 +247,9 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
         ctx.scale(-1, 1);
       }
       ctx.drawImage(video, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const compressed = canvas.toDataURL('image/jpeg', 0.85);
       canvas.width = 0;
       canvas.height = 0;
-      const compressed = await prepareImageForApi(dataUrl, 1280, 0.85);
       if (!mountedRef.current) return null;
       const b64 = cleanBase64(compressed);
       const mime = getMimeTypeFromDataUrl(compressed);
@@ -310,6 +308,9 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     try {
       const result = await recordingPromiseRef.current;
       if (!mountedRef.current) return null;
+      // Yield before heavy base64 encoding so pending bridge messages
+      // and UI updates can flush — prevents ANR on native.
+      await new Promise<void>((r) => setTimeout(r, 0));
       const { base64, mimeType } = await blobToBase64(result.blob);
       if (!mountedRef.current) return null;
       isRecordingRef.current = false;

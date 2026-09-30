@@ -131,10 +131,25 @@ export async function blobToBase64(blob: Blob): Promise<{ base64: string; mimeTy
       reader.readAsDataURL(blob);
     });
   }
-  // Native: FileReader doesn't exist on Hermes/JSC
+  // Native: FileReader doesn't exist on Hermes/JSC.
+  // Encode in chunks with yields between them so the UI thread can process
+  // bridge messages and React Native timers between chunks. Without this,
+  // encoding a 15MB+ video blob synchronously can block for seconds and
+  // trigger an ANR / WebView bridge timeout.
   const arrayBuffer = await blob.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
-  const base64 = uint8ArrayToBase64(bytes);
+  const CHUNK_SIZE = 49_152; // 48KB → 64KB base64 output per chunk
+  const parts: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
+    const end = Math.min(offset + CHUNK_SIZE, bytes.length);
+    parts.push(uint8ArrayToBase64(bytes.subarray(offset, end)));
+    // Yield to the event loop every ~256KB of input to let pending
+    // bridge messages and timers fire.
+    if ((offset / CHUNK_SIZE) % 5 === 4) {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
+  }
+  const base64 = parts.join('');
   const mimeType = blob.type || 'video/webm';
   return { base64, mimeType };
 }

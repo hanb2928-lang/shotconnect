@@ -250,6 +250,7 @@ async function compositeOnBackgroundWeb(productDataUrl: string, bgUrl: string): 
   ctx.shadowOffsetY = 10;
   ctx.drawImage(productImg, dx, dy, dw, dh);
   ctx.shadowColor = 'transparent';
+  await new Promise<void>((r) => setTimeout(r, 0));
 
   const result = canvas.toDataURL('image/png', 0.95);
   canvas.width = 0;
@@ -334,6 +335,7 @@ export async function prepareImageForApi(
         applyMoodOverlay(ctx, canvas.width, canvas.height, moodFilter);
       }
       // Use WebP when the browser supports it (smaller payload), fall back to JPEG
+      await new Promise<void>((r) => setTimeout(r, 0));
       const result = canvas.toDataURL('image/webp', quality);
       canvas.width = 0;
       canvas.height = 0;
@@ -381,6 +383,7 @@ export async function prepareImageForEdit(
       const ctx = canvas.getContext('2d');
       if (!ctx) return normalizedDataUrl;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      await new Promise<void>((r) => setTimeout(r, 0));
       const result = canvas.toDataURL('image/png');
       canvas.width = 0;
       canvas.height = 0;

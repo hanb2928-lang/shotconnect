@@ -83,6 +83,7 @@ export async function applyToonFilter(
     const b = data[i * 4 + 2];
     gray[i] = (r * 0.299 + g * 0.587 + b * 0.114) | 0;
   }
+  await yieldToEventLoop();
 
   // ── Step 2: Sobel edge detection ──
   const edges = new Uint8ClampedArray(width * height);
@@ -100,6 +101,7 @@ export async function applyToonFilter(
       edges[idx] = mag > effectiveEdgeThreshold ? 0 : 255;
     }
   }
+  await yieldToEventLoop();
 
   // ── Step 3: Posterize colors for cel-shading (color mode only) ──
   const step = 255 / (effectivePosterize - 1);
@@ -125,6 +127,7 @@ export async function applyToonFilter(
       data[i * 4 + 2] = v;
     }
   }
+  await yieldToEventLoop();
 
   // ── Step 4: Apply edge lines (darken where edges detected) ──
   // Analog manga: thicker, darker pen lines; Vintage: softer pencil-like lines
@@ -140,6 +143,7 @@ export async function applyToonFilter(
       data[i * 4 + 2] = (data[i * 4 + 2] * (1 - edgeStrength)) | 0;
     }
   }
+  await yieldToEventLoop();
 
   // ── Step 5: Halftone dot screen overlay (manga texture) ──
   // Analog manga: strong halftone; Vintage: light scattered dots; Digital: none
@@ -173,6 +177,7 @@ export async function applyToonFilter(
       }
     }
   }
+  await yieldToEventLoop();
 
   // ── Step 6: Slight contrast boost for punchy manga look ──
   // Reuse srcData in-place instead of allocating a second ImageData
@@ -184,6 +189,7 @@ export async function applyToonFilter(
     data2[i + 1] = clamp(((data2[i + 1] - midtone) * contrast + midtone) | 0);
     data2[i + 2] = clamp(((data2[i + 2] - midtone) * contrast + midtone) | 0);
   }
+  await yieldToEventLoop();
 
   // ── Step 7: Vintage warm tint overlay (in-place) ──
   if (isVintage) {
@@ -194,6 +200,7 @@ export async function applyToonFilter(
     }
   }
   ctx.putImageData(srcData, 0, 0);
+  await yieldToEventLoop();
 
   const result = canvas.toDataURL('image/png');
   canvas.width = 0;
@@ -213,4 +220,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 function clamp(v: number): number {
   return v < 0 ? 0 : v > 255 ? 255 : v;
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
