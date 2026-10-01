@@ -43,6 +43,7 @@ export function generateBeatTimeline(
   totalDurationSec: number,
   segments: EditSegment[],
 ): BeatMarker[] {
+  if (bpm <= 0 || totalDurationSec <= 0) return [];
   const beatInterval = 60 / bpm;
   const beats: BeatMarker[] = [];
   const cutTimes = segments.map((s) => s.startSec);
@@ -70,6 +71,9 @@ export function snapCutsToBeats(
 ): CutOffset[] {
   return segments.map((seg, cutIdx) => {
     const original = seg.startSec;
+    if (beats.length === 0) {
+      return { cutIndex: cutIdx, originalSec: original, snappedSec: original, offsetMs: 0 };
+    }
     let bestBeat = beats[0];
     let bestDist = Infinity;
     for (const b of beats) {
@@ -205,6 +209,7 @@ export function buildBeatSync(
   moodLabel: string,
   seed?: number,
 ): BeatSyncResult {
+  if (bpm <= 0) return { bpm, beatIntervalSec: 0, beats: [], cutOffsets: snapCutsToBeats(segments, []), duckingCurve: generateDuckingCurve(segments, totalDurationSec), selectedTrack: null, selectionReason: '유효하지 않은 BPM' };
   const beats = generateBeatTimeline(bpm, totalDurationSec, segments);
   const cutOffsets = snapCutsToBeats(segments, beats);
   const duckingCurve = generateDuckingCurve(segments, totalDurationSec);

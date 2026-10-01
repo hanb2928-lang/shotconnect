@@ -148,7 +148,7 @@ function buildHookTransition(context: UsageContext, segments: EditSegment[]): Tr
     startSec: hookSeg?.startSec ?? 0,
     durationSec: 3,
     description: descriptions[type],
-    cameraMove: getCameraMoveForSegment(hookSeg),
+    cameraMove: hookSeg ? getCameraMoveForSegment(hookSeg) : { ...STORY_CAMERA_MOVES.gaze_hook, segmentIndex: 0 },
   };
 }
 
@@ -256,6 +256,9 @@ function buildSfxPlans(transitions: TransitionPlan[]): SfxPlan[] {
 
 function buildBeatSync(bgmTemplate: BgmTemplate, totalDurationSec: number, platform: string): BeatSyncPlan {
   const bpm = bgmTemplate.bpm;
+  if (bpm <= 0 || totalDurationSec <= 0) {
+    return { bpm: bpm || 0, beatIntervalSec: 0, cutPoints: [], highlightStartSec: bgmTemplate.highlightStartSec ?? 5, highlightDurationSec: bgmTemplate.highlightDurationSec ?? 10 };
+  }
   const beatInterval = 60 / bpm;
   const cutPoints: number[] = [];
   const interval = platform === 'tiktok' ? beatInterval * 1.5 : platform === 'youtube' ? beatInterval * 2 : beatInterval * 1.75;

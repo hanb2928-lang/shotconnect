@@ -801,9 +801,9 @@ export default function SettingsScreen() {
             {creditBalance && (
               <>
                 <Text style={styles.creditBalanceStatLabel}>총 충전</Text>
-                <Text style={styles.creditBalanceStatValue}>{creditBalance.total_purchased.toLocaleString()}</Text>
+                <Text style={styles.creditBalanceStatValue}>{(creditBalance.total_purchased ?? 0).toLocaleString()}</Text>
                 <Text style={[styles.creditBalanceStatLabel, { marginTop: 6 }]}>총 사용</Text>
-                <Text style={styles.creditBalanceStatValue}>{creditBalance.total_consumed.toLocaleString()}</Text>
+                <Text style={styles.creditBalanceStatValue}>{(creditBalance.total_consumed ?? 0).toLocaleString()}</Text>
               </>
             )}
           </View>

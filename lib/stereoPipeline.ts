@@ -270,7 +270,8 @@ export async function runStereoPipeline(
     steps[0].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
     report(0, 0.05);
 
-    const { results: uploadResults, failures } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY);
+    const { results: uploadResults, failures, uploadedPaths: uploadedPathsResult } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY);
+    uploadedPaths = uploadedPathsResult;
 
     if (uploadResults.length === 0) {
       throw new Error('이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');

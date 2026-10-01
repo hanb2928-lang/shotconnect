@@ -253,6 +253,7 @@ export default function CameraScreen() {
     } catch {
       pulseAnimationRef.current = null;
     }
+    if (autoSaveStepTimer.current) clearInterval(autoSaveStepTimer.current);
     autoSaveStepTimer.current = setInterval(() => {
       setAutoSaveStep((s) => (s >= 3 ? 3 : s + 1));
     }, 800);
@@ -295,7 +296,8 @@ export default function CameraScreen() {
     }
     try {
       if (cameraRef.current) {
-        cameraRef.current.pausePreview?.().catch(() => {});
+        const p = cameraRef.current.pausePreview?.();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
       }
     } catch {
       // session may already be dead
@@ -395,7 +397,7 @@ export default function CameraScreen() {
       return;
     }
     autoSavingRef.current = true;
-    acquirePipelineLock();
+    if (!acquirePipelineLock()) { autoSavingRef.current = false; return; }
     const controller = new AbortController();
     autoAnalysisAbortRef.current = controller;
     const genId = genIdRef.current;
@@ -451,7 +453,7 @@ export default function CameraScreen() {
     const videoUri = postCaptureVideoUriRef.current;
 
     autoSavingRef.current = true;
-    acquirePipelineLock('postCapture');
+    if (!acquirePipelineLock('postCapture')) { autoSavingRef.current = false; return; }
     try {
       // Native heap cooldown before heavy upload/frame extraction: prevents
       // native heap double-burst → LMK SIGKILL after photo capture.
@@ -634,9 +636,10 @@ export default function CameraScreen() {
       router.replace({ pathname: '/result/[id]', params: { id: scanId } });
     }
 
+    const pipelineShots = [...sorted];
     nativeHeapCooldownGuard().finally(() => {
-      if (controller.signal.aborted || !isMountedRef.current) { releasePipelineLock(); return; }
-      runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
+      if (controller.signal.aborted) { releasePipelineLock(); return; }
+      runStereoPipeline(pipelineShots, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
         if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
         releasePipelineLock();
       });
@@ -896,9 +899,10 @@ export default function CameraScreen() {
       router.replace({ pathname: '/result/[id]', params: { id: scanId } });
     }
 
+    const pipelineShots = [...sorted];
     nativeHeapCooldownGuard().finally(() => {
-      if (controller.signal.aborted || !isMountedRef.current) { releasePipelineLock(); return; }
-      runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders, controller.signal).catch(() => {}).finally(() => {
+      if (controller.signal.aborted) { releasePipelineLock(); return; }
+      runFittingPipeline(pipelineShots, scanId, undefined, cleanMode, studioSliders, controller.signal).catch(() => {}).finally(() => {
         if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
         releasePipelineLock();
       });
