@@ -195,6 +195,7 @@ async function invokeStereoCutAuto(
         productName: style === 'studio' ? '프리미엄 스튜디오 제품' : '프리미엄 추천 상품',
         targetPlatforms: ['youtube', 'instagram', 'tiktok'],
       },
+      signal,
     });
     if (error || !data) return null;
     return data as CloudPipelineResult;

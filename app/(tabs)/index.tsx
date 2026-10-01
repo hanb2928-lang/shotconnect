@@ -85,6 +85,7 @@ async function runFittingPipeline(
         blendStrength: studioSliders?.blendStrength,
         smartFit: studioSliders?.smartFit,
       },
+      signal,
     });
     if (signal?.aborted) return;
     if (error || !data?.image) {
@@ -115,6 +116,8 @@ async function runFittingPipeline(
     await supabase.from('scans').update(updatePayload).eq('id', scanId);
   } catch {
     // Background pipeline — errors are silently ignored; user already has the scan
+  } finally {
+    nativeHeapCooldownGuard().catch(() => {});
   }
 }
 
