@@ -44,6 +44,33 @@ const LOADING_TEXT = '로딩 중...';
 const ERROR_TITLE = '문제가 발생했어요';
 const ERROR_DESC = '예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 const RETRY_TEXT = '다시 시도';
+const SHOTCONNECT_PREVIEW_VERSION = '20261001-shotconnect';
+
+function purgeLegacyWebSession(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  const legacyPattern = /shopformer|샵포머/i;
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
+        (key): key is string => key !== null && legacyPattern.test(key),
+      );
+      keys.forEach((key) => storage.removeItem(key));
+    } catch {
+      // Restricted storage should not prevent the app from starting.
+    }
+  }
+}
+
+function refreshStalePreview(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  try {
+    if (window.sessionStorage.getItem('shotconnect-preview-version') === SHOTCONNECT_PREVIEW_VERSION) return;
+    window.sessionStorage.setItem('shotconnect-preview-version', SHOTCONNECT_PREVIEW_VERSION);
+    window.location.reload();
+  } catch {
+    // Restricted session storage should not prevent the app from starting.
+  }
+}
 
 function AppShell() {
   const { t } = useI18n();
@@ -84,6 +111,7 @@ export default function RootLayout() {
   useFrameworkReady();
   const [ready, setReady] = useState<ReadyState>('loading');
   const [fontTimedOut, setFontTimedOut] = useState(false);
+  const [bootKey] = useState(() => `shotconnect-${Date.now()}`);
   const initStartedRef = useRef(false);
   const splashHiddenRef = useRef(false);
 
@@ -114,6 +142,8 @@ export default function RootLayout() {
   useEffect(() => {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
+    purgeLegacyWebSession();
+    refreshStalePreview();
 
     const initPromise = (async () => {
       try {
@@ -161,9 +191,6 @@ export default function RootLayout() {
   const fontsReady = fontsLoaded || fontError || fontTimedOut;
   const isReady = fontsReady && ready !== 'loading';
 
-  const bootKeyRef = useRef(0);
-  if (bootKeyRef.current === 0) bootKeyRef.current = Date.now();
-
   return (
     <ErrorBoundary>
       <I18nProvider>
@@ -171,7 +198,7 @@ export default function RootLayout() {
           <AffiliateToastProvider>
             <SafeAreaProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
-                <View key={`boot-${bootKeyRef.current}`} style={{ flex: 1 }}>
+                <View key={bootKey} style={{ flex: 1 }}>
                   <AppShell />
                   <NetworkBanner />
                   <VideoJobRecoveryToast />

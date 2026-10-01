@@ -40,7 +40,7 @@ import { TriggerBanner } from '@/components/TriggerBanner';
 import { StudioPremiumAccordion, type StudioSliderValues } from '@/components/StudioPremiumPanel';
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
 import type { StereoPipelineProgress } from '@/lib/stereoPipeline';
-import type { ToonCut } from '@/components/ToonModeEditor';
+import { ToonModeEditor, type ToonCut } from '@/components/ToonModeEditor';
 import { useInspectorContext } from '@/lib/inspectorContext';
 
 // Lazy-load heavy components to reduce native memory at startup.
@@ -55,24 +55,11 @@ const MultiAngleCaptureGuide = lazy(() =>
 const PostCaptureWorkflow = lazy(() =>
   import('@/components/PostCaptureWorkflow').then((m) => ({ default: m.PostCaptureWorkflow })),
 );
-const ToonModeEditor = lazy(() =>
-  import('@/components/ToonModeEditor').then((m) => ({ default: m.ToonModeEditor })),
-);
 
 // Lazy-load the stereo pipeline module — it imports aiSynthesisEngine,
 // shortFormEditEngine, directingEngine, publishManager, etc. at module level.
 async function loadStereoPipeline() {
   return await import('@/lib/stereoPipeline');
-}
-
-function ComponentFallback() {
-  return (
-    <View style={styles.bootFallback}>
-      <Sparkles size={28} color={theme.colors.primary[400]} strokeWidth={2} />
-      <Text style={styles.bootFallbackText}>숏커넥트 부팅 중...</Text>
-      <ActivityIndicator size="small" color={theme.colors.primary[400]} style={{ marginTop: 12 }} />
-    </View>
-  );
 }
 
 async function runFittingPipeline(
@@ -713,7 +700,6 @@ export default function CameraScreen() {
   if (screenPhase === 'toon') {
     return (
       <View style={styles.container}>
-        <Suspense fallback={<ComponentFallback />}>
         <ToonModeEditor
           visible
           onClose={() => setScreenPhase('mode_select')}
@@ -725,7 +711,6 @@ export default function CameraScreen() {
             inspectorCtx.setInspectorMode('persona');
           }}
         />
-        </Suspense>
         {error && (
           <View style={styles.modeSelectErrorInline}>
             <Text style={styles.modeSelectErrorText}>{error}</Text>
@@ -762,7 +747,7 @@ export default function CameraScreen() {
           </View>
 
           <View style={styles.cameraPreviewWrap}>
-            <Suspense fallback={<ComponentFallback />}>
+            <Suspense fallback={null}>
             <WebCameraView
               ref={webCameraRef}
               onCapture={handleFittingWebCapture}
@@ -973,7 +958,7 @@ export default function CameraScreen() {
         </View>
 
         <View style={styles.cameraPreviewWrap}>
-          <Suspense fallback={<ComponentFallback />}>
+          <Suspense fallback={null}>
           <WebCameraView
             ref={webCameraRef}
             onCapture={handleWebCapture}
@@ -1254,18 +1239,6 @@ const styles = StyleSheet.create({
     flex: 1,
     height: '100%',
     backgroundColor: C.bg,
-  },
-  bootFallback: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: C.bg,
-    gap: 10,
-  },
-  bootFallbackText: {
-    fontSize: 16,
-    fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.primary[400],
   },
   // Mode selection screen
   modeSelectContainer: {
