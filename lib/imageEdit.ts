@@ -552,3 +552,58 @@ export async function readUriAsBase64(uri: string): Promise<{ base64: string; mi
   const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
   return { base64, mimeType };
 }
+
+export async function compressImageToBase64WithUri(
+  uri: string,
+  maxDimension = 1080,
+  quality = 0.7,
+): Promise<{ base64: string; mimeType: string; compressedUri: string | null }> {
+  try {
+    const { width: origW, height: origH } = await getImageSize(uri);
+    const longer = Math.max(origW, origH);
+    const actions =
+      longer > maxDimension
+        ? origW >= origH
+          ? [{ resize: { width: maxDimension } }]
+          : [{ resize: { height: maxDimension } }]
+        : [];
+    const manipulated = await ImageManipulator.manipulateAsync(
+      uri,
+      actions,
+      { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { base64, mimeType: 'image/jpeg', compressedUri: manipulated.uri };
+  } catch {
+    const result = await compressImageToBase64(uri, maxDimension, quality);
+    return { ...result, compressedUri: null };
+  }
+}
+
+export async function compressCaptureUriToBlob(
+  uri: string,
+  maxDimension = 1080,
+  quality = 0.7,
+): Promise<{ blob: Blob | Uint8Array; base64: string; mimeType: string }> {
+  const { base64, mimeType } = await compressImageToBase64(uri, maxDimension, quality);
+  const blob = base64ToBlob(base64, mimeType);
+  return { blob, base64, mimeType };
+}
+
+export async function waitForUriFlush(uri: string): Promise<boolean> {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists;
+  } catch {
+    return false;
+  }
+}
+
+export async function nativeHeapCooldownGuard(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  await new Promise((resolve) => setTimeout(resolve, 200));
+}

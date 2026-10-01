@@ -17,6 +17,10 @@ export function getSafeVideoConstraints(facing?: 'user' | 'environment'): SafeVi
   };
 }
 
+export function getDeviceCaptureMaxDim(): number {
+  return CAPTURE_IDEAL_WIDTH;
+}
+
 export function clampCaptureDimensions(
   rawW: number,
   rawH: number,
