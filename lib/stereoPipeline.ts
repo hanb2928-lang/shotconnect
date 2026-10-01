@@ -13,7 +13,7 @@ import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
 
 const UPLOAD_MAX_RETRIES = 2;
 const UPLOAD_RETRY_DELAY_MS = 1500;
-const UPLOAD_CONCURRENCY = 3;
+const UPLOAD_CONCURRENCY = 2;
 
 function extractStoragePath(publicUrl: string): string | null {
   const marker = '/storage/v1/object/public/scans/';
@@ -82,6 +82,8 @@ async function uploadAngleShotsConcurrently(
       const shot = shots[idx];
       try {
         const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg');
+        // Release this shot's base64 immediately after upload to free native heap
+        shot.base64 = undefined;
         results.push({ url, shot });
         const p = extractStoragePath(url);
         if (p) uploadedPaths.push(p);
@@ -302,8 +304,9 @@ export async function runStereoPipeline(
     }
   }
 
-  // Build a single filtered array and derive both payloads from it to
-  // avoid duplicating base64 strings in memory (each can be multi-MB).
+  // Build a single filtered array and derive both payloads from it.
+  // Reuse the same base64 reference (not a copy) and release shots' base64
+  // after building payloads to avoid holding multiple multi-MB strings in memory.
   const validShots = sorted.filter((s) => s.base64);
   const anglePayloads: AngleImagePayload[] = validShots.map((s) => ({
     key: ['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front',
@@ -312,13 +315,17 @@ export async function runStereoPipeline(
     mimeType: s.mimeType,
     orderIndex: s.orderIndex,
   }));
-  const angleInputs: AngleInput[] = validShots.map((s) => ({
-    key: (['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front') as AngleInput['key'],
-    label: s.label,
-    base64: s.base64!,
-    mimeType: s.mimeType,
-    orderIndex: s.orderIndex,
+  const angleInputs: AngleInput[] = anglePayloads.map((p) => ({
+    key: p.key as AngleInput['key'],
+    label: p.label,
+    base64: p.base64,
+    mimeType: p.mimeType ?? 'image/jpeg',
+    orderIndex: p.orderIndex,
   }));
+
+  // Release the original shots' base64 references so only one copy remains
+  // during the pipeline. Each shot's base64 can be several MB.
+  for (const s of sorted) { s.base64 = undefined; }
 
   // Run local synthesis and cloud stereo analysis in parallel — local synthesis
   // is CPU-only and doesn't depend on the upload, so it can overlap with the
@@ -348,6 +355,13 @@ export async function runStereoPipeline(
   if (cloudResult && !cloudResult?.synthesis?.spatialDepthHint) {
     cloudResult = null;
   }
+
+  // Release base64 payloads now that synthesis + cloud call are done.
+  // The remaining pipeline steps (directing, render, publish) don't need
+  // the raw image data — keeping multi-MB base64 strings in memory through
+  // the rest of the pipeline risks native heap overflow on low-end devices.
+  anglePayloads.length = 0;
+  angleInputs.length = 0;
 
   const synthesisSummary = cloudResult
     ? `${cloudResult.synthesis.spatialDepthHint} · 볼륨 신뢰도 ${Math.round(cloudResult.synthesis.volumeEstimate.confidence * 100)}% · ${cloudResult.synthesis.contextMatch.label} 맥락`
@@ -432,10 +446,6 @@ export async function runStereoPipeline(
   steps[3].detail = '비차단 갤러리 저장 처리 및 퍼블리시 딥링크 준비 중...';
   report(3, 0.8);
 
-  const firstDataUrl = validShots.length > 0
-    ? `data:${validShots[0].mimeType};base64,${validShots[0].base64}`
-    : '';
-
   await new Promise((r) => setTimeout(r, 400));
 
   steps[3].status = 'done';
@@ -498,7 +508,6 @@ export async function runStereoPipeline(
   report(4, 1.0, null, result);
 
   if (Platform.OS !== 'web') {
-    void firstDataUrl;
     void Linking;
   }
 

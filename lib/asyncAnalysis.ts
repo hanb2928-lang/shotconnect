@@ -123,7 +123,10 @@ export async function startAsyncAnalysis(
     }
   }
 
-  // Cache miss — enqueue job and create pending scan
+  // Cache miss — enqueue job and create pending scan.
+  // Build data URLs for the job payload — the edge function sends these to
+  // OpenAI Vision. The base64 strings are already in memory; building the
+  // data URL creates a temporary copy that gets released after enqueue.
   const payload =
     additionalBase64Images.length > 0
       ? {

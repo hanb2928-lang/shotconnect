@@ -4,6 +4,7 @@ import { Platform, Image as RNImage } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
+import { isLowEndDevice } from '@/lib/devicePerformance';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -605,5 +606,6 @@ export async function waitForUriFlush(uri: string): Promise<boolean> {
 
 export async function nativeHeapCooldownGuard(): Promise<void> {
   if (Platform.OS === 'web') return;
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  const ms = isLowEndDevice() ? 400 : 200;
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }

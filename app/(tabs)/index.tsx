@@ -48,6 +48,7 @@ import { StudioPremiumAccordion, type StudioSliderValues } from '@/components/St
 import { PostCaptureWorkflow } from '@/components/PostCaptureWorkflow';
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
 import { runStereoPipeline, createScanFromAngleShots, makeInitialProgress, type StereoPipelineProgress } from '@/lib/stereoPipeline';
+import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -166,6 +167,11 @@ export default function CameraScreen() {
   const bufferReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraRemountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genIdRef = useRef(0);
+  const autoSavingRef = useRef(false);
+  const stereoOverlayRef = useRef(false);
+  const processingRef = useRef(false);
+  const stereoAbortRef = useRef<AbortController | null>(null);
+  const autoAnalysisAbortRef = useRef<AbortController | null>(null);
   const [postCaptureVisible, setPostCaptureVisible] = useState(false);
   const [postCaptureVideoUri, setPostCaptureVideoUri] = useState<string | null>(null);
   const [postCaptureBase64, setPostCaptureBase64] = useState<string | null>(null);
@@ -322,13 +328,20 @@ export default function CameraScreen() {
           setIsActive(false);
         }
         setProcessing(false);
+        processingRef.current = false;
         setAutoSaving(false);
+        autoSavingRef.current = false;
+        setStereoOverlayVisible(false);
+        stereoOverlayRef.current = false;
         setPostCaptureVisible(false);
         setPostCaptureVideoUri(null);
         postCaptureVideoUriRef.current = null;
         setPostCaptureBase64(null);
         postCaptureBase64Ref.current = null;
         genIdRef.current += 1;
+        if (stereoAbortRef.current) { stereoAbortRef.current.abort(); stereoAbortRef.current = null; }
+        if (autoAnalysisAbortRef.current) { autoAnalysisAbortRef.current.abort(); autoAnalysisAbortRef.current = null; }
+        releasePipelineLock();
         if (typeof stopAutoSaveAnimation === 'function') {
           stopAutoSaveAnimation();
         }
@@ -364,10 +377,15 @@ export default function CameraScreen() {
   }, [scheduleCameraReactivation, deactivateCamera]);
 
   const runAutoAnalysis = useCallback(async (base64: string, mimeType: string, additionalB64s: string[] = []) => {
+    if (autoSavingRef.current || isPipelineLocked()) return;
     if (!isOnline()) {
       setError('네트워크 연결을 확인해주세요. 인터넷이 연결되지 않아 AI 분석을 시작할 수 없습니다.');
       return;
     }
+    autoSavingRef.current = true;
+    acquirePipelineLock();
+    const controller = new AbortController();
+    autoAnalysisAbortRef.current = controller;
     const genId = genIdRef.current;
     setAutoSaving(true);
     setAutoSaveToast(null);
@@ -402,6 +420,9 @@ export default function CameraScreen() {
         setError(friendlyError(err, 'AI 자동 분석 중 오류가 발생했습니다. 다시 시도해주세요.'));
       }
     } finally {
+      if (autoAnalysisAbortRef.current === controller) autoAnalysisAbortRef.current = null;
+      autoSavingRef.current = false;
+      releasePipelineLock();
       if (genIdRef.current === genId && isMountedRef.current) {
         stopAutoSaveAnimation();
         setAutoSaving(false);
@@ -410,12 +431,15 @@ export default function CameraScreen() {
   }, [router, startAutoSaveAnimation, stopAutoSaveAnimation]);
 
   const handlePostCaptureProceed = useCallback(async (customPrompt: string, _platform: string, _editPlan: ShortFormEditPlan) => {
+    if (autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
     setPostCaptureVisible(false);
 
     const base64 = postCaptureBase64Ref.current;
     const mimeType = postCaptureMimeRef.current;
     const videoUri = postCaptureVideoUriRef.current;
 
+    autoSavingRef.current = true;
+    acquirePipelineLock('postCapture');
     try {
       // Native heap cooldown before heavy upload/frame extraction: prevents
       // native heap double-burst → LMK SIGKILL after photo capture.
@@ -439,6 +463,9 @@ export default function CameraScreen() {
     } catch (err) {
       if (!isMountedRef.current) return;
       setError(friendlyError(err, '편집 화면을 여는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+    } finally {
+      autoSavingRef.current = false;
+      releasePipelineLock('postCapture');
     }
   }, [router]);
 
@@ -465,39 +492,47 @@ export default function CameraScreen() {
   }, []);
 
   const handleCapture = async () => {
-    if (!cameraRef.current || processing || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || autoSaving) return;
-    setMultiAngleVisible(true);
+    if (!cameraRef.current || processingRef.current || processing || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
+    processingRef.current = true;
+    setProcessing(true);
+    try {
+      setMultiAngleVisible(true);
+    } finally {
+      processingRef.current = false;
+      setProcessing(false);
+    }
   };
 
   const handlePickImage = async () => {
-    if (processing || autoSaving) return;
-
-    if (isWebPlatform()) {
-      try {
-        const images = await withTimeout(pickImageWeb(false, 1), PICK_TIMEOUT_MS, '사진 선택');
-        if (images.length === 0) return;
-        if (!isMountedRef.current) return;
-        const compressed = await withTimeout(
-          prepareImageForApi(buildDataUrl(cleanBase64(images[0].base64), images[0].mimeType), getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7, 'none' as MoodFilterType),
-          PICK_TIMEOUT_MS,
-          '이미지 압축',
-        );
-        if (!isMountedRef.current) return;
-        setPostCaptureBase64(cleanBase64(compressed));
-        postCaptureBase64Ref.current = cleanBase64(compressed);
-        setPostCaptureMime(getMimeTypeFromDataUrl(compressed));
-        postCaptureMimeRef.current = getMimeTypeFromDataUrl(compressed);
-        setPostCaptureVideoUri(null);
-        postCaptureVideoUriRef.current = null;
-        setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
-      } catch (err) {
-        if (!isMountedRef.current) return;
-        setError(friendlyError(err, '사진 선택에 실패했습니다. 다시 시도해주세요.'));
-      }
-      return;
-    }
-
+    if (processingRef.current || processing || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
+    processingRef.current = true;
+    setProcessing(true);
     try {
+      if (isWebPlatform()) {
+        try {
+          const images = await withTimeout(pickImageWeb(false, 1), PICK_TIMEOUT_MS, '사진 선택');
+          if (images.length === 0) return;
+          if (!isMountedRef.current) return;
+          const compressed = await withTimeout(
+            prepareImageForApi(buildDataUrl(cleanBase64(images[0].base64), images[0].mimeType), getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7, 'none' as MoodFilterType),
+            PICK_TIMEOUT_MS,
+            '이미지 압축',
+          );
+          if (!isMountedRef.current) return;
+          setPostCaptureBase64(cleanBase64(compressed));
+          postCaptureBase64Ref.current = cleanBase64(compressed);
+          setPostCaptureMime(getMimeTypeFromDataUrl(compressed));
+          postCaptureMimeRef.current = getMimeTypeFromDataUrl(compressed);
+          setPostCaptureVideoUri(null);
+          postCaptureVideoUriRef.current = null;
+          setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
+        } catch (err) {
+          if (!isMountedRef.current) return;
+          setError(friendlyError(err, '사진 선택에 실패했습니다. 다시 시도해주세요.'));
+        }
+        return;
+      }
+
       const result = await withTimeout(
         ImagePicker.launchImageLibraryAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -527,16 +562,23 @@ export default function CameraScreen() {
     } catch (err) {
       if (!isMountedRef.current) return;
       setError(friendlyError(err, '사진 선택에 실패했습니다. 다시 시도해주세요.'));
+    } finally {
+      processingRef.current = false;
+      setProcessing(false);
     }
   };
 
   const handleMultiAngleComplete = async (shots: AngleShot[]) => {
-    if (stereoOverlayVisible) return;
+    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked()) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     const validShots = sorted.filter((s) => s.base64);
     setMultiAngleVisible(false);
     if (validShots.length === 0) return;
 
+    stereoOverlayRef.current = true;
+    acquirePipelineLock();
+    const controller = new AbortController();
+    stereoAbortRef.current = controller;
     setStereoProgress(makeInitialProgress());
     setStereoOverlayVisible(true);
 
@@ -548,23 +590,26 @@ export default function CameraScreen() {
       uploadedUrls = result.uploadedUrls;
     } catch (err) {
       if (!isMountedRef.current) return;
+      stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
+      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+      releasePipelineLock();
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
 
     if (isMountedRef.current) {
+      stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
       router.replace({ pathname: '/result/[id]', params: { id: scanId } });
     }
 
-    // Background: run synthesis/directing/publish pipeline without blocking UI.
-    // Native heap cooldown: photo capture/compression leaves large bitmap buffers
-    // on the C++ native heap that the ART GC hasn't reclaimed yet. Launching the
-    // synthesis pipeline immediately causes a native heap double-burst that can
-    // trigger the OS Low-Memory Killer (SIGKILL) on low-end Android devices.
     nativeHeapCooldownGuard().finally(() => {
-      runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls).catch(() => {});
+      if (controller.signal.aborted) { releasePipelineLock(); return; }
+      runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls).catch(() => {}).finally(() => {
+        if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+        releasePipelineLock();
+      });
     });
     sorted.length = 0;
     validShots.length = 0;
@@ -596,7 +641,7 @@ export default function CameraScreen() {
       }
     }
     const cam = cameraRef.current;
-    if (!cam || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || !isMountedRef.current) return null;
+    if (!cam || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || !isMountedRef.current || isPipelineLocked()) return null;
     if (bufferReleaseTimerRef.current) clearTimeout(bufferReleaseTimerRef.current);
     bufferReleasedRef.current = false;
     try {
@@ -743,8 +788,8 @@ export default function CameraScreen() {
       try {
         const compressed = await prepareImageForApi(
           buildDataUrl(cleanBase64(payload), mimeType),
-          1080,
-          0.7,
+          getDeviceCaptureMaxDim(),
+          isLowEndDevice() ? 0.6 : 0.7,
           'none' as MoodFilterType,
         );
         if (!isMountedRef.current) return;
@@ -770,23 +815,28 @@ export default function CameraScreen() {
 
   // ─── Fitting multi-angle capture (reuses stereo-cut handlers) ───
   const handleFittingPickImage = async () => {
-    if (stereoOverlayVisible) return;
+    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked()) return;
     setFittingGuideVisible(true);
   };
 
   const handleFittingWebCapture = useCallback(async (payload: string, mimeType: string) => {
     if (mimeType.startsWith('video/')) return;
+    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked()) return;
     if (isMountedRef.current) setFittingGuideVisible(true);
   }, []);
 
   // ─── Virtual fitting: complete multi-angle guide (async, same pattern as 입체컷 오토) ───
   const handleFittingGuideComplete = useCallback(async (shots: AngleShot[]) => {
-    if (stereoOverlayVisible) return;
+    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked()) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     const validShots = sorted.filter((s) => s.base64);
     setFittingGuideVisible(false);
     if (validShots.length < 2) return;
 
+    stereoOverlayRef.current = true;
+    acquirePipelineLock();
+    const controller = new AbortController();
+    stereoAbortRef.current = controller;
     setStereoProgress(makeInitialProgress());
     setStereoOverlayVisible(true);
     setError(null);
@@ -797,26 +847,31 @@ export default function CameraScreen() {
       scanId = result.scanId;
     } catch (err) {
       if (!isMountedRef.current) return;
+      stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
+      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+      releasePipelineLock();
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
 
     if (isMountedRef.current) {
+      stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
       router.replace({ pathname: '/result/[id]', params: { id: scanId } });
     }
 
-    // Background: run virtual fitting pipeline without blocking UI.
-    // Native heap cooldown guard prevents LMK SIGKILL on low-end devices
-    // where unreclaimed bitmap buffers collide with pipeline allocations.
     nativeHeapCooldownGuard().finally(() => {
-      runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders).catch(() => {});
+      if (controller.signal.aborted) { releasePipelineLock(); return; }
+      runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders).catch(() => {}).finally(() => {
+        if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+        releasePipelineLock();
+      });
     });
     sorted.length = 0;
     validShots.length = 0;
     shots.length = 0;
-  }, [router, cleanMode, studioSliders, stereoOverlayVisible]);
+  }, [router, cleanMode, studioSliders]);
 
   const handleModeSelect = useCallback((mode: CaptureMode) => {
     setCaptureMode(mode);
