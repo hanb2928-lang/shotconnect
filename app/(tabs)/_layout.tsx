@@ -3,8 +3,8 @@ import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
 import { Tabs } from 'expo-router';
 import { theme } from '@/lib/theme';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react-native';
-import { InspectorPanel, type BoundAffiliateLink } from '@/components/InspectorPanel';
-import { InspectorContext, type InspectorContextValue, type InspectorMode, type ToonStyle, type ArtStyle, type InspectorCutData } from '@/lib/inspectorContext';
+import { InspectorPanel } from '@/components/InspectorPanel';
+import { InspectorContext, type InspectorContextValue, type ToonStyle, type ArtStyle, type InspectorCutData } from '@/lib/inspectorContext';
 import type { ToonCharacter } from '@/components/PhotoToonUpload';
 
 const ScrollableTabBar = lazy(() =>
@@ -22,10 +22,8 @@ const C = theme.colors.light;
 
 export default function TabLayout() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [boundLinks, setBoundLinks] = useState<BoundAffiliateLink[]>([]);
   const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
   const [cuts, setCuts] = useState<InspectorCutData[]>([]);
-  const [inspectorMode, setInspectorMode] = useState<InspectorMode>('affiliate');
   const [toonCharacter, setToonCharacter] = useState<ToonCharacter | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState('veteran');
   const [toneLevel, setToneLevel] = useState(50);
@@ -44,20 +42,13 @@ export default function TabLayout() {
     ? cuts.findIndex((c) => c.id === selectedCutId)
     : -1;
 
-  const handleLinkBound = useCallback((link: BoundAffiliateLink) => {
-    setBoundLinks((prev) => [...prev.filter((b) => b.productId !== link.productId), link]);
-  }, []);
-
   const ctxValue: InspectorContextValue = {
-    boundLinks,
     selectedCutId,
     setSelectedCutId,
     cuts,
     setCuts,
     onUpdateCut: handleUpdateCut,
     selectedCutIndex,
-    inspectorMode,
-    setInspectorMode,
     toonCharacter,
     setToonCharacter,
     selectedPresetId,
@@ -105,7 +96,7 @@ export default function TabLayout() {
             {inspectorOpen ? (
               <View style={styles.inspectorInner}>
                 <View style={styles.inspectorHeader}>
-                  <Text style={styles.inspectorTitle}>다이나믹 인스펙터</Text>
+                  <Text style={styles.inspectorTitle}>인스펙터</Text>
                   <Pressable onPress={toggleInspector} hitSlop={12}>
                     <PanelRightClose size={18} color={C.textDim} strokeWidth={2} />
                   </Pressable>
@@ -117,8 +108,6 @@ export default function TabLayout() {
                     currentCutLabel={selectedCutIndex >= 0 ? `${selectedCutIndex + 1}번째 컷 편집 모드` : '현재 워크스페이스'}
                     selectedCut={selectedCutIndex >= 0 ? cuts[selectedCutIndex] : undefined}
                     onUpdateCut={handleUpdateCut}
-                    onLinkBound={handleLinkBound}
-                    inspectorMode={inspectorMode}
                     toonCharacter={toonCharacter}
                     onCharacterCreated={setToonCharacter}
                     selectedPresetId={selectedPresetId}

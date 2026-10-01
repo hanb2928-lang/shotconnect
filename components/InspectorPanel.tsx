@@ -26,26 +26,16 @@ import {
 import { theme } from '@/lib/theme';
 import type { ToonCharacter } from '@/components/PhotoToonUpload';
 import { TOON_PERSONA_PRESETS } from '@/components/PhotoToonUpload';
-import type { InspectorMode, ToonStyle, ArtStyle } from '@/lib/inspectorContext';
+import type { ToonStyle, ArtStyle } from '@/lib/inspectorContext';
 import type { InspectorCutData } from '@/lib/inspectorContext';
 import { applyToonFilter } from '@/lib/toonFilter';
 
 const isWeb = Platform.OS === 'web';
 
-export interface BoundAffiliateLink {
-  productId: string;
-  productName: string;
-  platform: string;
-  url: string;
-  subId: string;
-}
-
 interface InspectorPanelProps {
   visible: boolean;
   onClose: () => void;
   currentCutLabel?: string;
-  onLinkBound?: (link: BoundAffiliateLink) => void;
-  inspectorMode?: InspectorMode;
   toonCharacter?: ToonCharacter | null;
   onCharacterCreated?: (char: ToonCharacter) => void;
   selectedPresetId?: string;
@@ -66,8 +56,6 @@ export function InspectorPanel({
   visible,
   onClose,
   currentCutLabel,
-  onLinkBound,
-  inspectorMode = 'affiliate',
   toonCharacter = null,
   onCharacterCreated,
   selectedPresetId = 'veteran',
@@ -196,9 +184,7 @@ export function InspectorPanel({
             )}
             <View style={styles.selectedCutInfo}>
               <Text style={styles.selectedCutLinkLabel} numberOfLines={1}>
-                {selectedCut.affiliateLink
-                  ? selectedCut.affiliateLink.productName
-                  : '제휴 링크 미바인딩'}
+                {selectedCut.imageUrl ? '이미지 등록됨' : '이미지 미등록'}
               </Text>
               <Text style={styles.selectedCutBubblePreview} numberOfLines={1}>
                 {selectedCut.speechBubble || '말풍선 미입력'}

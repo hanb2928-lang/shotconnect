@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import {
   Plus,
-  Link2,
   Check,
   Trash2,
   X,
@@ -30,19 +29,15 @@ import {
   Camera,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
-import type { BoundAffiliateLink } from '@/components/InspectorPanel';
 import { TOON_PERSONA_PRESETS, type ToonCharacter } from '@/components/PhotoToonUpload';
 import { useInspectorContext } from '@/lib/inspectorContext';
 import { applyToonFilter } from '@/lib/toonFilter';
-import { COUPANG_DISCLOSURE, getDisclosureForPlatforms } from '@/lib/disclosure';
 
 export interface ToonCut {
   id: string;
   label: string;
   speechBubble: string;
-  affiliateLink: BoundAffiliateLink | null;
   imageUrl: string | null;
-  disclosureText?: string;
 }
 
 interface CaptureSlot {
@@ -55,7 +50,6 @@ interface ToonModeEditorProps {
   onClose: () => void;
   onPublish?: (cuts: ToonCut[], blogHtml?: string) => void;
   onCutSelected?: (cutId: string) => void;
-  boundLinks?: BoundAffiliateLink[];
   toonCharacter?: ToonCharacter | null;
   onCharacterCreated?: (char: ToonCharacter) => void;
 }
@@ -98,7 +92,6 @@ export function ToonModeEditor({
   onClose,
   onPublish,
   onCutSelected,
-  boundLinks = [],
   toonCharacter = null,
   onCharacterCreated,
 }: ToonModeEditorProps) {
@@ -117,7 +110,6 @@ export function ToonModeEditor({
     id: makeCutId(),
     label: '1컷',
     speechBubble: '',
-    affiliateLink: null,
     imageUrl: null,
   }]);
   const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
@@ -135,7 +127,6 @@ export function ToonModeEditor({
       id: c.id,
       label: c.label,
       speechBubble: c.speechBubble,
-      affiliateLink: c.affiliateLink,
       imageUrl: c.imageUrl,
     })));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,20 +136,14 @@ export function ToonModeEditor({
   const lastSyncRef = useRef<string>('');
   useEffect(() => {
     if (inspectorCtx.cuts.length === 0) return;
-    // Build a signature to detect if context cuts changed externally
-    const sig = inspectorCtx.cuts.map((c) => `${c.id}:${c.speechBubble}:${c.affiliateLink?.productId ?? ''}`).join('|');
+    const sig = inspectorCtx.cuts.map((c) => `${c.id}:${c.speechBubble}`).join('|');
     if (sig === lastSyncRef.current) return;
     lastSyncRef.current = sig;
-    // Merge external changes into local cuts (only speech bubble and affiliate link)
     setCuts((prev) => prev.map((localCut) => {
       const ctxCut = inspectorCtx.cuts.find((c) => c.id === localCut.id);
       if (!ctxCut) return localCut;
-      // Only update if there's an actual difference to avoid loops
       if (ctxCut.speechBubble !== localCut.speechBubble) {
         return { ...localCut, speechBubble: ctxCut.speechBubble };
-      }
-      if ((ctxCut.affiliateLink?.productId ?? '') !== (localCut.affiliateLink?.productId ?? '')) {
-        return { ...localCut, affiliateLink: ctxCut.affiliateLink };
       }
       return localCut;
     }));
@@ -194,7 +179,6 @@ export function ToonModeEditor({
               id: makeCutId(),
               label: `${newCuts.length + 1}컷`,
               speechBubble: '',
-              affiliateLink: null,
               imageUrl: null,
             });
           }
@@ -411,7 +395,6 @@ export function ToonModeEditor({
         id: makeCutId(),
         label: `${prev.length + 1}컷`,
         speechBubble: '',
-        affiliateLink: null,
         imageUrl: null,
       }];
     });
@@ -436,26 +419,11 @@ export function ToonModeEditor({
   const handleSelectCut = useCallback((id: string) => {
     setSelectedCutId(id);
     onCutSelected?.(id);
-    inspectorCtx.setInspectorMode('affiliate');
-  }, [onCutSelected, inspectorCtx]);
+  }, [onCutSelected]);
 
   const handleUpdateBubble = useCallback((id: string, text: string) => {
     setCuts((prev) => prev.map((c) => c.id === id ? { ...c, speechBubble: text } : c));
   }, []);
-
-  const handleBindToCut = useCallback((cutId: string, link: BoundAffiliateLink) => {
-    setCuts((prev) => prev.map((c) => c.id === cutId ? { ...c, affiliateLink: link } : c));
-  }, []);
-
-  const lastBoundIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (boundLinks.length === 0 || !selectedCutId) return;
-    const latest = boundLinks[boundLinks.length - 1];
-    if (latest.productId !== lastBoundIdRef.current) {
-      lastBoundIdRef.current = latest.productId;
-      handleBindToCut(selectedCutId, latest);
-    }
-  }, [boundLinks, selectedCutId, handleBindToCut]);
 
   const handleGenerate = useCallback(async () => {
     if (generating) return;
@@ -482,7 +450,6 @@ export function ToonModeEditor({
             id: existingCut?.id ?? makeCutId(),
             label: `${i + 1}컷`,
             speechBubble: existingCut?.speechBubble ?? '',
-            affiliateLink: existingCut?.affiliateLink ?? null,
             imageUrl: toonedUri,
           });
         } catch {
@@ -490,7 +457,6 @@ export function ToonModeEditor({
             id: existingCut?.id ?? makeCutId(),
             label: `${i + 1}컷`,
             speechBubble: existingCut?.speechBubble ?? '',
-            affiliateLink: existingCut?.affiliateLink ?? null,
             imageUrl: slot.uri,
           });
         }
@@ -522,44 +488,17 @@ export function ToonModeEditor({
     setGenerating(false);
   }, [generating, toonCharacter, slots, cuts, selectedPresetId, inspectorCtx.toneLevel, inspectorCtx.artStyle, onCharacterCreated, relabelCuts]);
 
-  // Compute the disclosure text for the last cut based on all bound affiliate platforms
-  const lastCutDisclosure = useCallback((allCuts: ToonCut[]): string => {
-    const platforms = new Set<string>();
-    allCuts.forEach((c) => {
-      if (c.affiliateLink && c.affiliateLink.productId && c.affiliateLink.platform) {
-        platforms.add(c.affiliateLink.platform);
-      }
-    });
-    if (platforms.size === 0) return COUPANG_DISCLOSURE;
-    return getDisclosureForPlatforms(Array.from(platforms));
-  }, []);
-
-  // Inject disclosure into the last cut whenever cuts or affiliate links change
-  useEffect(() => {
-    if (cuts.length === 0) return;
-    const lastIdx = cuts.length - 1;
-    const disclosure = lastCutDisclosure(cuts);
-    const lastCut = cuts[lastIdx];
-    if (lastCut.disclosureText !== disclosure) {
-      setCuts((prev) => prev.map((c, i) => i === lastIdx ? { ...c, disclosureText: disclosure } : c));
-    }
-  }, [cuts, lastCutDisclosure]);
-
-  // Build blog HTML markup with images, affiliate links, and disclosure
+  // Build blog HTML markup with images and speech bubbles
   const buildBlogHtml = useCallback((allCuts: ToonCut[]): string => {
-    const disclosure = lastCutDisclosure(allCuts);
     const cutImages = allCuts
       .filter((c) => c.imageUrl)
-      .map((c, i) => {
-        const linkHtml = c.affiliateLink && c.affiliateLink.url
-          ? `<a href="${c.affiliateLink.url}" target="_blank" rel="nofollow noopener sponsored">${c.affiliateLink.productName || '제품 보기'}</a>`
-          : '';
+      .map((c) => {
         const bubbleHtml = c.speechBubble ? `<figcaption>${c.speechBubble}</figcaption>` : '';
-        return `<figure><img src="${c.imageUrl}" alt="${c.label}" />${bubbleHtml}${linkHtml ? `<figcaption>${linkHtml}</figcaption>` : ''}</figure>`;
+        return `<figure><img src="${c.imageUrl}" alt="${c.label}" />${bubbleHtml}</figure>`;
       })
       .join('\n');
-    return `<section class="shotconnect-toon">\n${cutImages}\n<aside class="affiliate-disclosure">${disclosure}</aside>\n</section>`;
-  }, [lastCutDisclosure]);
+    return `<section class="shotconnect-toon">\n${cutImages}\n</section>`;
+  }, []);
 
   const handlePublish = useCallback(() => {
     const html = buildBlogHtml(cuts);
@@ -642,7 +581,6 @@ export function ToonModeEditor({
             id: existingCut?.id ?? makeCutId(),
             label: `${i + 1}컷`,
             speechBubble: existingCut?.speechBubble ?? '',
-            affiliateLink: existingCut?.affiliateLink ?? null,
             imageUrl: toonedUri,
           });
         } catch {
@@ -651,7 +589,6 @@ export function ToonModeEditor({
             id: makeCutId(),
             label: `${i + 1}컷`,
             speechBubble: '',
-            affiliateLink: null,
             imageUrl: rawUri,
           });
         }
@@ -686,7 +623,7 @@ export function ToonModeEditor({
           </View>
           <View>
             <Text style={[styles.headerTitle, { color: TEXT_DARK }]}>만화 숏툰 에디터</Text>
-            <Text style={[styles.headerSub, { color: TEXT_FAINT }]}>손그림 텍스처 · 리얼 말풍선 · 제휴 링크 바인딩</Text>
+            <Text style={[styles.headerSub, { color: TEXT_FAINT }]}>손그림 텍스처 · 리얼 말풍선 · 만화 타일 편집</Text>
           </View>
         </View>
         <Pressable onPress={onClose} hitSlop={12}>
@@ -974,29 +911,7 @@ export function ToonModeEditor({
                       </Pressable>
                     )}
 
-                    {/* Affiliate link badge — overlaid at bottom of cut panel */}
-                    {cut.affiliateLink && cut.affiliateLink.productId ? (
-                      <View style={styles.linkBadgeBound}>
-                        <Link2 size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
-                        <Text style={styles.linkBadgeBoundText} numberOfLines={1}>{cut.affiliateLink.productName}</Text>
-                        <Check size={8} color={theme.colors.success[600]} strokeWidth={2.5} />
-                      </View>
-                    ) : (
-                      <View style={styles.linkBadgeEmpty}>
-                        <Link2 size={8} color={TEXT_FAINT} strokeWidth={2} />
-                        <Text style={styles.linkBadgeEmptyText}>
-                          {isSelected ? '우측 인스펙터에서 바인딩' : '제휴 링크 없음'}
-                        </Text>
-                      </View>
-                    )}
                   </View>
-
-                  {/* Fair-trade disclosure — auto-injected on last cut */}
-                  {isLastCut && cut.disclosureText && (
-                    <View style={styles.disclosureBadge}>
-                      <Text style={styles.disclosureText}>{cut.disclosureText}</Text>
-                    </View>
-                  )}
                 </Pressable>
               );
             })}
@@ -1007,23 +922,8 @@ export function ToonModeEditor({
             <View style={[styles.detailPanel, { backgroundColor: PAPER, borderColor: BORDER_SLATE }]}>
               <Text style={[styles.detailTitle, { color: ACCENT }]}>{selectedCut.label} 편집 중</Text>
               <Text style={[styles.detailHint, { color: TEXT_DIM }]}>
-                우측 인스펙터에서 쿠팡 파트너스 상품을 검색하고 "바인딩" 버튼을 누르면 이 컷에 제휴 링크가 자동 연결됩니다.
+                말풍선을 입력하고 만화 스타일을 조정하려면 우측 인스펙터를 사용하세요.
               </Text>
-              {selectedCut.affiliateLink && selectedCut.affiliateLink.productId && (
-                <View style={[styles.detailLinkCard, { backgroundColor: CARD_SURFACE, borderColor: BORDER_SLATE }]}>
-                  <View style={styles.detailLinkInfo}>
-                    <Text style={[styles.detailLinkName, { color: TEXT_DARK }]} numberOfLines={1}>{selectedCut.affiliateLink.productName}</Text>
-                    <Text style={[styles.detailLinkUrl, { color: TEXT_FAINT }]} numberOfLines={1}>{selectedCut.affiliateLink.url}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.detailLinkRemove}
-                    onPress={() => handleBindToCut(selectedCut.id, { productId: '', productName: '', platform: '', url: '', subId: '' })}
-                    activeOpacity={0.7}
-                  >
-                    <Trash2 size={14} color={theme.colors.error[400]} strokeWidth={2} />
-                  </TouchableOpacity>
-                </View>
-              )}
             </View>
           )}
 
@@ -1202,52 +1102,10 @@ const styles = StyleSheet.create({
     borderRightColor: 'transparent',
     borderTopColor: '#cbd5e1',
   },
-  // Affiliate badge — slim, overlaid at bottom of cut panel
-  linkBadgeBound: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row', alignItems: 'center', gap: 2,
-    paddingHorizontal: 4, paddingVertical: 2,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    zIndex: 4,
-  },
-  linkBadgeBoundText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.medium, color: theme.colors.success[600] },
-  linkBadgeEmpty: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row', alignItems: 'center', gap: 2,
-    paddingHorizontal: 4, paddingVertical: 2,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    zIndex: 4,
-  },
-  linkBadgeEmptyText: { flex: 1, fontSize: 7, fontFamily: theme.typography.fontFamily.regular, color: TEXT_FAINT },
-  // Disclosure badge — auto on last cut
-  disclosureBadge: {
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-    backgroundColor: PAPER,
-    borderTopWidth: 0.5,
-    borderTopColor: BORDER_SLATE,
-  },
-  disclosureText: {
-    fontSize: 6,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: TEXT_FAINT,
-    lineHeight: 9,
-  },
   // Detail panel
   detailPanel: { padding: 14, borderRadius: 10, borderWidth: 1, gap: 8, marginTop: 4 },
   detailTitle: { fontSize: 13, fontFamily: theme.typography.fontFamily.semiBold },
   detailHint: { fontSize: 11, fontFamily: theme.typography.fontFamily.regular, lineHeight: 17 },
-  detailLinkCard: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1 },
-  detailLinkInfo: { flex: 1, gap: 2 },
-  detailLinkName: { fontSize: 12, fontFamily: theme.typography.fontFamily.medium },
-  detailLinkUrl: { fontSize: 10, fontFamily: theme.typography.fontFamily.regular },
-  detailLinkRemove: { width: 28, height: 28, borderRadius: 7, backgroundColor: 'rgba(239, 68, 68, 0.08)', justifyContent: 'center', alignItems: 'center' },
   // Publish
   publishBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46, borderRadius: 12, marginTop: 6 },
   publishBtnText: { fontSize: 14, fontFamily: theme.typography.fontFamily.semiBold, color: '#fff' },
