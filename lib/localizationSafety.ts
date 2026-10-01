@@ -138,7 +138,7 @@ const TABOO_WORDS: TabooWordEntry[] = [
   { word: '최고', severity: 'medium', reason: '한국 공정위 최고/제일 표현 제한', countries: ['KR'] },
   { word: '治病', severity: 'high', reason: '중국 의료/치료 효과 표현 금지', countries: ['CN'] },
   { word: 'cure', severity: 'high', reason: '미국 FDA 의료 효능 주장 금지', countries: ['US'] },
-  { word: ' miraculous', severity: 'medium', reason: '기적적 효과 과장 표현', countries: ['US', 'KR', 'JP'] },
+  { word: 'miraculous', severity: 'medium', reason: '기적적 효과 과장 표현', countries: ['US', 'KR', 'JP'] },
   { word: '100% guaranteed', severity: 'high', reason: '근거 없는 100% 보장 표현 금지', countries: ['US', 'KR'] },
   { word: '完全無料', severity: 'medium', reason: '일본 완전 무료 표현 제한 (조건 명시 필요)', countries: ['JP'] },
   { word: '绝对', severity: 'medium', reason: '중국 절대적 표현 금지 (광고법)', countries: ['CN'] },

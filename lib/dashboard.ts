@@ -285,7 +285,7 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   const styleInsights: StyleInsight[] = styleEntries
     .map(([style, v]) => {
       const avgCtr = v.count > 0 ? (v.totalClicks / v.count) * 100 : 0;
-      const isTop = maxStyleCtr > 0 && (v.totalClicks / v.count) === maxStyleCtr && v.totalClicks > 0;
+      const isTop = maxStyleCtr > 0 && Math.abs((v.totalClicks / v.count) - maxStyleCtr) < 1e-9 && v.totalClicks > 0;
       let recommendation = '';
       if (isTop) {
         recommendation = `이 스타일이 클릭률 ${avgCtr.toFixed(0)}%로 가장 높습니다. 이 스타일로 추가 콘텐츠를 제작하세요.`;

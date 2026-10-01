@@ -324,9 +324,10 @@ export async function runStereoPipeline(
     orderIndex: p.orderIndex,
   }));
 
-  // Release the original shots' base64 references so only one copy remains
+  // Release the sorted copies' base64 references so only one copy remains
   // during the pipeline. Each shot's base64 can be several MB.
-  for (const s of sorted) { s.base64 = undefined; }
+  // We only null out the copies in `sorted`, not the caller's originals.
+  for (const s of sorted) { (s as { base64?: string }).base64 = undefined; }
 
   // Run local synthesis and cloud stereo analysis in parallel — local synthesis
   // is CPU-only and doesn't depend on the upload, so it can overlap with the

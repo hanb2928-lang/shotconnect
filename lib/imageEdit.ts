@@ -366,8 +366,8 @@ export async function prepareImageForApi(
       const rawW = Math.round(img.naturalWidth * scale);
       const rawH = Math.round(img.naturalHeight * scale);
       const canvas = document.createElement('canvas');
-      canvas.width = rawW - (rawW % 8);
-      canvas.height = rawH - (rawH % 8);
+      canvas.width = Math.max(8, rawW - (rawW % 8));
+      canvas.height = Math.max(8, rawH - (rawH % 8));
       const ctx = canvas.getContext('2d');
       if (!ctx) return normalizedDataUrl;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);

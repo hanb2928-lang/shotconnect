@@ -496,6 +496,7 @@ function resolveUrl(imageUrl: string, baseUrl: string): string {
 }
 
 async function captureImageAsBase64(imageUrl: string): Promise<{ base64: string; mimeType: string } | null> {
+  if (!isSafeFetchUrl(imageUrl)) return null;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
 
@@ -537,6 +538,7 @@ async function captureImageAsBase64(imageUrl: string): Promise<{ base64: string;
 }
 
 async function captureImagesFromPage(pageUrl: string, maxImages: number): Promise<Array<{ base64: string; mimeType: string }>> {
+  if (!isSafeFetchUrl(pageUrl)) return [];
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
 

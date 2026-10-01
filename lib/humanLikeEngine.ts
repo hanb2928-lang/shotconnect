@@ -260,8 +260,12 @@ export function mutateHashtags(
     }
   }
 
-  // Shuffle pool tags and pick random ones
-  const shuffled = [...poolTags].sort(() => Math.random() - 0.5);
+  // Shuffle pool tags using Fisher-Yates for uniform randomness
+  const shuffled = [...poolTags];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
   for (const tag of shuffled) {
     if (result.length >= targetCount) break;
     const lower = tag.toLowerCase();

@@ -123,7 +123,7 @@ export function generateDuckingCurve(
         startSec: prevTime,
         endSec: ev.time,
         levelDb: prevLevel,
-        fadeType: prevLevel === FULL_LEVEL_DB ? 'hold' : 'hold',
+        fadeType: prevLevel === FULL_LEVEL_DB ? 'hold' : 'restore',
       });
     }
     const fadeDuration = ev.fade === 'fadeOut' ? DUCK_FADE_SEC : RESTORE_FADE_SEC;
@@ -235,7 +235,7 @@ export function formatBeatSyncSummary(sync: BeatSyncResult): string {
   return [
     `BPM: ${sync.bpm} | 비트 간격: ${sync.beatIntervalSec}초 | 총 비트: ${beatCount} (다운비트 ${downbeatCount})`,
     `컷 비트 스냅: ${sync.cutOffsets.length}개 중 ${snappedCuts}개 조정됨 (최대 오프셋: ${Math.max(0, ...sync.cutOffsets.map((c) => Math.abs(c.offsetMs)))}ms)`,
-    `오디오 더킹: ${duckSegments}개 구간 자동 볼륨 조절 (나레이션 시 -${Math.abs(-18)}dB)`,
+    `오디오 더킹: ${duckSegments}개 구간 자동 볼륨 조절 (나레이션 시 -${Math.abs(DUCK_LEVEL_DB)}dB)`,
     `BGM 트랙: ${sync.selectedTrack?.title ?? 'N/A'} (${sync.selectedTrack?.bpm ?? 0}BPM) — ${sync.selectionReason}`,
   ].join('\n');
 }

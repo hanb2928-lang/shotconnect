@@ -211,7 +211,7 @@ async function fetchSubscriptions(userId: string): Promise<SubscriptionRow[]> {
   const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/push_subscriptions?user_id=eq.${userId}&select=endpoint,keys`,
+      `${supabaseUrl}/rest/v1/push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=endpoint,keys`,
       {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
         signal: controller.signal,
@@ -236,7 +236,7 @@ async function cleanupExpiredSubscriptions(userId: string, endpoints: string[]):
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       await fetch(
-        `${supabaseUrl}/rest/v1/push_subscriptions?user_id=eq.${userId}&endpoint=eq.${encodeURIComponent(endpoint)}`,
+        `${supabaseUrl}/rest/v1/push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&endpoint=eq.${encodeURIComponent(endpoint)}`,
         {
           method: "DELETE",
           headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },

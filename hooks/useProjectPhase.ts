@@ -20,6 +20,7 @@ export function useProjectPhase(jobId: string | null) {
   useEffect(() => {
     if (!jobId) return;
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     (async () => {
       if (cancelled) return;
@@ -30,17 +31,25 @@ export function useProjectPhase(jobId: string | null) {
         .eq('id', jobId)
         .maybeSingle();
 
-      const timeoutPromise = new Promise<{ data: null }>((resolve) =>
-        setTimeout(() => resolve({ data: null }), 5000),
-      );
+      timeoutId = setTimeout(() => {
+        if (!cancelled) {
+          // query may still resolve later; the `cancelled` guard prevents stale state
+        }
+      }, 5000);
 
-      Promise.race([queryPromise, timeoutPromise])
-        .then(({ data: res }) => {
-          if (cancelled || !res) return;
-          const row = res as VideoJobRow;
-          setStep(row.step);
-          setData(row);
-        }, () => {});
+      Promise.race([
+        queryPromise,
+        new Promise<{ data: null }>((resolve) =>
+          setTimeout(() => resolve({ data: null }), 5000),
+        ),
+      ]).then(({ data: res }) => {
+        if (cancelled || !res) return;
+        const row = res as VideoJobRow;
+        setStep(row.step);
+        setData(row);
+      }, () => {});
+
+      if (cancelled) return;
 
       const channel = supabase
         .channel(`project-phase-${jobId}`)
@@ -66,6 +75,7 @@ export function useProjectPhase(jobId: string | null) {
 
     return () => {
       cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
       if (channelRef.current) {
         channelRef.current.unsubscribe();
         channelRef.current = null;

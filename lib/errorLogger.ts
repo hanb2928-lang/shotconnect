@@ -56,10 +56,15 @@ async function flushQueue(): Promise<void> {
       created_at: item.timestamp,
     }));
     const insertPromise = supabase.from('error_logs').insert(rows);
-    const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) =>
-      setTimeout(() => resolve({ error: { message: 'flush timeout' } }), FLUSH_TIMEOUT_MS),
-    );
-    await Promise.race([insertPromise, timeoutPromise]);
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) => {
+      flushTimer = setTimeout(() => resolve({ error: { message: 'flush timeout' } }), FLUSH_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([insertPromise, timeoutPromise]);
+    } finally {
+      if (flushTimer) clearTimeout(flushTimer);
+    }
   } catch {
     if (pendingQueue.length < 50) {
       pendingQueue.unshift(...batch);

@@ -15,6 +15,9 @@ function notify(status: NetworkStatus) {
   }
 }
 
+const onlineHandler = () => notify('online');
+const offlineHandler = () => notify('offline');
+
 function init() {
   if (initialized) return;
   initialized = true;
@@ -24,8 +27,8 @@ function init() {
       currentStatus = navigator.onLine ? 'online' : 'offline';
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-      window.addEventListener('online', () => notify('online'));
-      window.addEventListener('offline', () => notify('offline'));
+      window.addEventListener('online', onlineHandler);
+      window.addEventListener('offline', offlineHandler);
     }
   } else {
     currentStatus = 'online';
