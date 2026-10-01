@@ -14,20 +14,38 @@ import { hashObject } from '@/lib/contentHash';
 import { cleanBase64 } from '@/lib/base64';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
 
+function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
+      (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
+    );
+  });
+}
+
 export async function uploadImage(
   base64: string,
   mimeType: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   // Compress before upload: resize to max 1280px, convert to WebP at quality 0.75
   const { base64: compressedBase64, mimeType: compressedMime } = await compressBase64ForUpload(base64, mimeType);
+  if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
 
   const uploadMime = compressedMime || 'image/jpeg';
   const ext = uploadMime === 'image/png' ? 'png' : uploadMime === 'image/webp' ? 'webp' : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-  const { error } = await supabase.storage
+  const uploadPromise = supabase.storage
     .from('scans')
     .upload(fileName, base64ToUint8Array(compressedBase64), { contentType: uploadMime, cacheControl: '360000' });
+
+  const { error } = signal
+    ? await raceWithAbort(uploadPromise, signal)
+    : await uploadPromise;
 
   if (error) throw new Error(`Upload failed: ${error.message}`);
 
@@ -39,6 +57,7 @@ export async function uploadImageBlob(
   blob: Blob | Uint8Array,
   mimeType: string,
   alreadyCompressed = false,
+  signal?: AbortSignal,
 ): Promise<string> {
   // If the blob is already small enough, upload as-is to avoid double-compression
   const MAX_RAW_BLOB_BYTES = 800_000; // ~800KB threshold
@@ -61,9 +80,13 @@ export async function uploadImageBlob(
   const ext = uploadMime === 'image/png' ? 'png' : uploadMime === 'image/webp' ? 'webp' : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-  const { error } = await supabase.storage
+  const uploadPromise = supabase.storage
     .from('scans')
     .upload(fileName, uploadBlob, { contentType: uploadMime, cacheControl: '360000' });
+
+  const { error } = signal
+    ? await raceWithAbort(uploadPromise, signal)
+    : await uploadPromise;
 
   if (error) throw new Error(`Upload failed: ${error.message}`);
 

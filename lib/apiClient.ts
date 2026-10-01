@@ -94,9 +94,23 @@ async function doFetch(
 
   let lastError: unknown = null;
 
+  const callerSignal = fetchOptions.signal;
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    // Link caller's abort signal to the per-attempt controller so that
+    // external cancellation (user navigation) aborts in-flight requests,
+    // not just the timeout.
+    const callerAbortListener = () => controller.abort();
+    if (callerSignal) {
+      if (callerSignal.aborted) {
+        controller.abort();
+      } else {
+        callerSignal.addEventListener('abort', callerAbortListener, { once: true });
+      }
+    }
 
     try {
       const headers = {
@@ -111,6 +125,7 @@ async function doFetch(
       });
 
       clearTimeout(timeoutId);
+      if (callerSignal) callerSignal.removeEventListener('abort', callerAbortListener);
 
       if (response.status === 401 || response.status === 403) {
         throw new ApiError('인증이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.', response.status);
@@ -149,6 +164,7 @@ async function doFetch(
       return response;
     } catch (err) {
       clearTimeout(timeoutId);
+      if (callerSignal) callerSignal.removeEventListener('abort', callerAbortListener);
 
       if (cacheKey && err instanceof Error && /failed to fetch|network|abort/i.test(err.message)) {
         const stale = await getStaleCached<Response>(cacheKey);

@@ -60,6 +60,7 @@ interface GenerateAiVideoOptions {
   enableCaustics?: boolean;
   enableVirtualFitting?: boolean;
   enableFabricPhysics?: boolean;
+  signal?: AbortSignal;
 }
 
 
@@ -273,7 +274,7 @@ export async function generateAiVideo(
   // Runway's webhook writes the result to video_jobs — we subscribe to that DB
   // change instead of polling the Runway API in a tight loop. A low-frequency
   // fallback poll guards against missed realtime events.
-  const result = await waitForVideoCompletion(submitData, options.scanId, startTime, report);
+  const result = await waitForVideoCompletion(submitData, options.scanId, startTime, report, options.signal);
 
   // Cache miss path: now that rendering is complete, archive the result
   // into ai_analysis_cache so future requests for the same image+tone
@@ -394,6 +395,7 @@ function waitForVideoCompletion(
   scanId: string | undefined,
   startTime: number,
   report: (phase: VideoGenPhase, progress: number, message: string) => void,
+  signal?: AbortSignal,
 ): Promise<VideoGenResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -418,8 +420,21 @@ function waitForVideoCompletion(
       if (settled) return;
       settled = true;
       cleanup();
+      if (abortListener) signal?.removeEventListener('abort', abortListener);
       fn();
     };
+
+    // External abort: user navigated away or cancelled the operation
+    const abortListener = () => {
+      finish(() => reject(new DOMException('Aborted', 'AbortError')));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        finish(() => reject(new DOMException('Aborted', 'AbortError')));
+        return;
+      }
+      signal.addEventListener('abort', abortListener, { once: true });
+    }
 
     const handleRow = (row: VideoJobRow) => {
       if (row.status === 'SUCCESS' && row.video_url) {

@@ -93,7 +93,7 @@ async function runFittingPipeline(
     }
 
     const imageData = data.image as string;
-    const imageUrl = await uploadImage(imageData, 'image/png');
+    const imageUrl = await uploadImage(imageData, 'image/png', signal);
     if (signal?.aborted) return;
     const updatePayload: Record<string, unknown> = { edited_image_url: imageUrl };
     if (cleanMode) {
@@ -484,14 +484,14 @@ export default function CameraScreen() {
           '동영상 프레임 추출',
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
-        const imageUrl = await uploadImage(frame.base64, frame.mimeType);
+        const imageUrl = await uploadImage(frame.base64, frame.mimeType, controller.signal);
         if (!isMountedRef.current || controller.signal.aborted) return;
         const scanId = await saveManualScan(imageUrl);
         if (!isMountedRef.current || controller.signal.aborted) return;
         router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
         return;
       }
-      const imageUrl = await uploadImage(base64, mimeType);
+      const imageUrl = await uploadImage(base64, mimeType, controller.signal);
       if (!isMountedRef.current || controller.signal.aborted) return;
       const scanId = await saveManualScan(imageUrl);
       if (!isMountedRef.current || controller.signal.aborted) return;

@@ -82,7 +82,7 @@ export async function startAsyncAnalysis(
   if (cached?.analysis_result) {
     // Cache hit — upload image for the scan record, then create scan with full data
     if (aborted()) throw new Error('분석이 취소되었습니다.');
-    const imageUrl = await uploadImage(base64, mimeType);
+    const imageUrl = await uploadImage(base64, mimeType, signal);
     const cacheUploadedPath = extractStoragePath(imageUrl);
     const analysis = cached.analysis_result as unknown as AnalysisResult;
     let scanId: string;
@@ -104,7 +104,7 @@ export async function startAsyncAnalysis(
   let imageUrl: string;
   try {
     if (aborted()) throw new Error('분석이 취소되었습니다.');
-    imageUrl = await uploadImage(base64, mimeType);
+    imageUrl = await uploadImage(base64, mimeType, signal);
     const p = extractStoragePath(imageUrl);
     if (p) uploadedPaths.push(p);
   } catch (err) {
@@ -119,7 +119,7 @@ export async function startAsyncAnalysis(
       throw new Error('분석이 취소되었습니다.');
     }
     try {
-      const url = await uploadImage(additionalBase64Images[i], 'image/jpeg');
+      const url = await uploadImage(additionalBase64Images[i], 'image/jpeg', signal);
       additionalUrls.push(url);
       const ap = extractStoragePath(url);
       if (ap) uploadedPaths.push(ap);

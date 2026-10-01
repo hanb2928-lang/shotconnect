@@ -43,12 +43,13 @@ function waitForOnline(): Promise<boolean> {
   });
 }
 
-async function uploadWithRetry(base64: string, mimeType: string): Promise<string> {
+async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortSignal): Promise<string> {
   let lastErr: unknown = null;
   const blob = base64ToBlob(base64, mimeType);
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
     try {
-      return await uploadImageBlob(blob, mimeType, true);
+      return await uploadImageBlob(blob, mimeType, true, signal);
     } catch (err) {
       lastErr = err;
       if (attempt < UPLOAD_MAX_RETRIES) {
@@ -71,6 +72,7 @@ interface ParallelUploadResult {
 async function uploadAngleShotsConcurrently(
   shots: AngleShot[],
   concurrency: number,
+  signal?: AbortSignal,
 ): Promise<{ results: ParallelUploadResult[]; failures: number; uploadedPaths: string[] }> {
   const results: ParallelUploadResult[] = [];
   let failures = 0;
@@ -79,10 +81,11 @@ async function uploadAngleShotsConcurrently(
 
   async function processNext(): Promise<void> {
     while (cursor < shots.length) {
+      if (signal?.aborted) return;
       const idx = cursor++;
       const shot = shots[idx];
       try {
-        const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg');
+        const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg', signal);
         results.push({ url, shot });
         const p = extractStoragePath(url);
         if (p) uploadedPaths.push(p);
@@ -180,7 +183,9 @@ async function invokeStereoCutAuto(
   context: string,
   style: string,
   scanId: string,
+  signal?: AbortSignal,
 ): Promise<CloudPipelineResult | null> {
+  if (signal?.aborted) return null;
   try {
     const { data, error } = await supabase.functions.invoke('stereo-cut-auto', {
       body: {
@@ -207,7 +212,7 @@ export async function createScanFromAngleShots(
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
 
-  const { results, failures, uploadedPaths } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY);
+  const { results, failures, uploadedPaths } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
   if (aborted()) {
     await rollbackUploads(uploadedPaths);
     throw new Error('업로드가 취소되었습니다.');
@@ -277,7 +282,7 @@ export async function runStereoPipeline(
     steps[0].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
     report(0, 0.05);
 
-    const { results: uploadResults, failures, uploadedPaths: uploadedPathsResult } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY);
+    const { results: uploadResults, failures, uploadedPaths: uploadedPathsResult } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
     uploadedPaths = uploadedPathsResult;
 
     if (uploadResults.length === 0) {
@@ -361,7 +366,7 @@ export async function runStereoPipeline(
   try {
     [localSynthesis, cloudResultRaw] = await Promise.all([
       Promise.resolve().then(() => runSynthesis(angleInputs, tonePrompt)),
-      invokeStereoCutAuto(anglePayloads, tonePrompt, contentTone ?? '', scanId).catch(() => null),
+      invokeStereoCutAuto(anglePayloads, tonePrompt, contentTone ?? '', scanId, signal).catch(() => null),
     ]);
   } catch (synthesisErr) {
     // runSynthesis threw synchronously — degrade gracefully instead of
