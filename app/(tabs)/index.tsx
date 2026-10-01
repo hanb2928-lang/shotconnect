@@ -491,6 +491,18 @@ export default function CameraScreen() {
     setCameraSessionKey(Date.now());
   }, []);
 
+  const prepareCameraForProcessing = useCallback(async () => {
+    if (Platform.OS === 'web') return;
+    updateCameraReady(false);
+    try {
+      await cameraRef.current?.pausePreview?.();
+    } catch {
+      // camera session may already be closing
+    }
+    setIsActive(false);
+    await nativeHeapCooldownGuard();
+  }, [updateCameraReady]);
+
   const handleCapture = async () => {
     if (!cameraRef.current || processingRef.current || processing || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
     processingRef.current = true;
@@ -576,7 +588,11 @@ export default function CameraScreen() {
     if (validShots.length === 0) return;
 
     stereoOverlayRef.current = true;
-    acquirePipelineLock();
+    if (!acquirePipelineLock('stereo')) {
+      stereoOverlayRef.current = false;
+      return;
+    }
+    await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
     setStereoProgress(makeInitialProgress());
@@ -834,7 +850,11 @@ export default function CameraScreen() {
     if (validShots.length < 2) return;
 
     stereoOverlayRef.current = true;
-    acquirePipelineLock();
+    if (!acquirePipelineLock('fitting')) {
+      stereoOverlayRef.current = false;
+      return;
+    }
+    await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
     setStereoProgress(makeInitialProgress());
@@ -871,7 +891,7 @@ export default function CameraScreen() {
     sorted.length = 0;
     validShots.length = 0;
     shots.length = 0;
-  }, [router, cleanMode, studioSliders]);
+  }, [router, cleanMode, studioSliders, prepareCameraForProcessing]);
 
   const handleModeSelect = useCallback((mode: CaptureMode) => {
     setCaptureMode(mode);

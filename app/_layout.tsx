@@ -44,7 +44,7 @@ const LOADING_TEXT = '로딩 중...';
 const ERROR_TITLE = '문제가 발생했어요';
 const ERROR_DESC = '예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 const RETRY_TEXT = '다시 시도';
-const SHOTCONNECT_PREVIEW_VERSION = '20261001-shotconnect';
+const SHOTCONNECT_PREVIEW_VERSION = '20261001-shotconnect-v2';
 
 function purgeLegacyWebSession(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;

@@ -7,7 +7,6 @@ import {
   useState,
 } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, ViewStyle } from 'react-native';
-import { CameraView, type CameraType } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -38,15 +37,12 @@ export const InlineCameraViewfinder = forwardRef<
   const accent = accentColor ?? theme.colors.primary[400];
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const nativeCameraRef = useRef<CameraView>(null);
   const mountedRef = useRef(true);
   const streamGenRef = useRef(0);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
-
-  const nativeFacing: CameraType = facing === 'environment' ? 'back' : 'front';
 
   const [permission, requestPermission] = useCameraPermissionsSafe();
 
@@ -133,17 +129,19 @@ export const InlineCameraViewfinder = forwardRef<
 
   useEffect(() => {
     mountedRef.current = true;
-    if (isActive && Platform.OS === 'web') {
+    if (Platform.OS !== 'web') {
+      setCameraReady(Boolean(permission?.granted && isActive));
+      return () => setCameraReady(false);
+    }
+    if (isActive) {
       const id = setTimeout(() => startWebStream(), 200);
       return () => {
         clearTimeout(id);
         stopStream();
       };
     }
-    return () => {
-      if (Platform.OS === 'web') stopStream();
-    };
-  }, [isActive, startWebStream, stopStream]);
+    return () => stopStream();
+  }, [isActive, permission?.granted, startWebStream, stopStream]);
 
   useEffect(() => {
     return () => {
@@ -180,28 +178,7 @@ export const InlineCameraViewfinder = forwardRef<
     }
   }, [cameraReady, facing]);
 
-  const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
-    if (!nativeCameraRef.current || !cameraReady) return null;
-    try {
-      const photo = await nativeCameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.7,
-        shutterSound: false,
-      });
-      if (!mountedRef.current) return null;
-      if (photo?.base64) {
-        const result = await compressCaptureFrameToBlob(photo.base64, 'image/jpeg');
-        // Release the original photo base64 from memory ASAP — the compressed
-        // copy is smaller and sufficient for downstream use.
-        photo.base64 = '';
-        return result;
-      }
-      return null;
-    } catch (err) {
-      console.error('[InlineCameraViewfinder] captureNative failed:', err);
-      return null;
-    }
-  }, [cameraReady]);
+  const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => null, []);
 
   useImperativeHandle(
     ref,
@@ -339,18 +316,12 @@ export const InlineCameraViewfinder = forwardRef<
   return (
     <View style={styles.wrapper}>
       <View style={styles.viewfinder}>
-        {isActive && (
-          <CameraView
-            ref={nativeCameraRef}
-            style={StyleSheet.absoluteFillObject as ViewStyle}
-            facing={nativeFacing}
-            onCameraReady={() => setCameraReady(true)}
-            onMountError={() => { setCameraReady(false); setError('카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
-          />
-        )}
-        {!isActive && (
-          <View style={[StyleSheet.absoluteFillObject as ViewStyle, { backgroundColor: '#000' }]} />
-        )}
+        <View style={[StyleSheet.absoluteFillObject as ViewStyle, { backgroundColor: '#000' }]}>
+          <View style={styles.centerContent}>
+            <Camera size={22} color={theme.colors.dark.textDim} strokeWidth={1.5} />
+            <Text style={styles.loadingText}>메인 카메라로 촬영합니다</Text>
+          </View>
+        </View>
         <View style={styles.guideFrame} pointerEvents="none">
           <View style={[styles.corner, styles.cornerTL]} />
           <View style={[styles.corner, styles.cornerTR]} />
