@@ -104,6 +104,7 @@ function sanitizeCopyLayers(layers: { primary: string; secondary: string; tertia
     const trimmed = (val || "").trim();
     if (!trimmed) return fallback;
     for (const pattern of VIDEO_UNKNOWN_PATTERNS) {
+      pattern.lastIndex = 0;
       if (pattern.test(trimmed)) return fallback;
     }
     return trimmed;
@@ -119,6 +120,7 @@ function sanitizeVideoProductName(name: string | undefined): string {
   const trimmed = (name || "").trim();
   if (!trimmed) return VIDEO_FALLBACK_PRODUCT_NAME;
   for (const pattern of VIDEO_UNKNOWN_PATTERNS) {
+    pattern.lastIndex = 0;
     if (pattern.test(trimmed)) {
       return VIDEO_FALLBACK_PRODUCT_NAME;
     }
@@ -130,6 +132,7 @@ function sanitizeVideoText(text: string | undefined): string {
   if (!text || !text.trim()) return "";
   let result = text;
   for (const pattern of VIDEO_UNKNOWN_PATTERNS) {
+    pattern.lastIndex = 0;
     result = result.replace(pattern, VIDEO_FALLBACK_CAPTION);
   }
   return result;

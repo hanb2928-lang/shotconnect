@@ -426,8 +426,8 @@ export async function prepareImageForEdit(
       const img = await loadImageElement(normalizedDataUrl);
       const canvas = document.createElement('canvas');
       const scale = Math.min(1, maxDimension / Math.max(img.naturalWidth, img.naturalHeight));
-      canvas.width = Math.round(img.naturalWidth * scale);
-      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.width = Math.max(8, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(8, Math.round(img.naturalHeight * scale));
       const ctx = canvas.getContext('2d');
       if (!ctx) return normalizedDataUrl;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -521,8 +521,8 @@ export async function extractVideoFrameBase64(
     const rawW = video.videoWidth || 1080;
     const rawH = video.videoHeight || 1080;
     const scale = Math.min(1, maxDimension / Math.max(rawW, rawH));
-    const w = Math.round(rawW * scale);
-    const h = Math.round(rawH * scale);
+    const w = Math.max(8, Math.round(rawW * scale));
+    const h = Math.max(8, Math.round(rawH * scale));
 
     const canvas = document.createElement('canvas');
     canvas.width = w;

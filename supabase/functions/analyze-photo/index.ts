@@ -711,6 +711,7 @@ function normalizeProductName(raw: Record<string, unknown>): string {
     return FALLBACK_PRODUCT_NAME;
   }
   for (const pattern of UNKNOWN_PATTERNS) {
+    pattern.lastIndex = 0;
     if (pattern.test(name)) {
       return FALLBACK_PRODUCT_NAME;
     }
@@ -722,6 +723,7 @@ function sanitizeText(value: string): string {
   if (!value) return value;
   let result = value;
   for (const pattern of UNKNOWN_PATTERNS) {
+    pattern.lastIndex = 0;
     result = result.replace(pattern, FALLBACK_COMMERCE_PHRASE);
   }
   return result;
