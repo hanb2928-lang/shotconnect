@@ -67,7 +67,7 @@ export default function AssetsScreen() {
     } finally {
       if (mounted.current) setRefreshing(false);
     }
-  }, []);
+  }, [mounted]);
 
   useEffect(() => {
     load();

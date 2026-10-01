@@ -258,6 +258,11 @@ export default function CameraScreen() {
     }
     if (autoSaveStepTimer.current) clearInterval(autoSaveStepTimer.current);
     autoSaveStepTimer.current = setInterval(() => {
+      if (!isMountedRef.current) {
+        clearInterval(autoSaveStepTimer.current!);
+        autoSaveStepTimer.current = null;
+        return;
+      }
       setAutoSaveStep((s) => (s >= 3 ? 3 : s + 1));
     }, 800);
   }, [autoSavePulse]);

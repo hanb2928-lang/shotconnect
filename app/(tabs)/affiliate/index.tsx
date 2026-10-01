@@ -10,10 +10,9 @@ import {
   Linking,
   Platform,
   Image,
-  Alert,
 } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing, runOnJS } from 'react-native-reanimated';
-import { ShoppingBag, Send, Globe, Store, ExternalLink, Settings as SettingsIcon, TrendingUp, Link2, Copy, Check, Camera, Image as ImageIcon, Film, Sparkles, FileText, Hash, Type, Youtube, ChevronDown, ChevronUp, Loader, Plus, X, ScanSearch, Palette, Share2, ShieldCheck, TriangleAlert as AlertTriangle, ArrowRight, RefreshCw, Music2, Play, Clapperboard, Download, Video, PenLine, Maximize2, Lock, Zap, Smile, Sun, Moon, Flame, Coffee } from 'lucide-react-native';
+import { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
+import { ShoppingBag, Send, Globe, Store, ExternalLink, TrendingUp, Link2, Copy, Check, Camera, Image as ImageIcon, Film, Sparkles, FileText, Hash, Type, Youtube, ChevronDown, Loader, Plus, X, Palette, Share2, ShieldCheck, TriangleAlert as AlertTriangle, ArrowRight, RefreshCw, Music2, Download, Video, Maximize2, Lock, Zap, Smile, Sun, Moon, Flame, Coffee } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '@/lib/theme';
@@ -25,8 +24,7 @@ import { PillNavCard } from '@/components/PillNavCard';
 import { ErrorRetryBanner } from '@/components/ErrorRetryBanner';
 import { SkeletonList } from '@/components/Skeleton';
 import { CapturePreviewModal } from '@/components/CapturePreviewModal';
-import { UploadPreviewModal, type UploadPreviewData } from '@/components/UploadPreviewModal';
-import { ClipboardAffiliateBanner } from '@/components/ClipboardAffiliateBanner';
+import { type UploadPreviewData } from '@/components/UploadPreviewModal';
 import { ShortLinkCopyBar } from '@/components/ShortLinkCopyBar';
 import { buildDataUrl, cleanBase64, urlToDataUrl } from '@/lib/base64';
 import { compressImageToBase64 } from '@/lib/imageEdit';
@@ -37,22 +35,16 @@ import { friendlyError } from '@/lib/errors';
 import { getDisclosureForPlatforms } from '@/lib/disclosure';
 import { addSnippet } from '@/lib/marketingSnippets';
 import { fetchAiRecommendBundle, type AiRecommendBundle } from '@/lib/aiRecommend';
-import { TTS_VOICES, VOICE_CATEGORIES, type VoiceCategory } from '@/lib/ttsVoices';
-import { AidcaProgressTracker } from '@/components/AidcaProgressTracker';
+import { type VoiceCategory } from '@/lib/ttsVoices';
 import { InteractiveSlideshowViewer } from '@/components/InteractiveSlideshowViewer';
 import { StickyHeroPreview, type PreviewStep } from '@/components/StickyHeroPreview';
 import { InlineBeforeAfter } from '@/components/InlineBeforeAfter';
 import { FullScreenGalleryModal } from '@/components/FullScreenGalleryModal';
 import { StepGuideBanner, type GuideStepKey } from '@/components/StepGuideBanner';
-import { getDeepLink, getCaptionTemplate, buildPlatformCaption, type UploadPlatformKey, type DisclosurePlacement } from '@/lib/platformUpload';
-import { PlatformCaptionOptimizer } from '@/components/PlatformCaptionOptimizer';
+import { getDeepLink, buildPlatformCaption, type UploadPlatformKey, type DisclosurePlacement } from '@/lib/platformUpload';
 import { generatePsychAnalysis, generateNanoFusedAnalysis, getLearningStats, type PsychAnalysis, type PsychScene } from '@/lib/psychologyEngine';
-import { GlobalLocalizer } from '@/components/GlobalLocalizer';
-import { StockVideoPicker } from '@/components/StockVideoPicker';
-import { VideoEditPlanCard } from '@/components/VideoEditPlanCard';
 import type { StockVideoClip } from '@/lib/pexelsVideo';
 import type { EditPlan } from '@/lib/videoEditPlan';
-import { MessageSquare } from 'lucide-react-native';
 import type { UserSettings, RevenueRecord } from '@/types/database';
 import { GENERATE_IMAGE_URL, supabaseAnonKey } from '@/lib/supabase';
 import * as Clipboard from 'expo-clipboard';

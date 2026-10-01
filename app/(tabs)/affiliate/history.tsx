@@ -8,7 +8,6 @@ import {
   RefreshControl,
   TouchableOpacity,
   Image,
-  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { History, Trash2, Tag, ShoppingBag, WifiOff } from 'lucide-react-native';
@@ -89,7 +88,7 @@ export default function HistoryScreen() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [mounted]);
 
   useEffect(() => {
     fetchScans();

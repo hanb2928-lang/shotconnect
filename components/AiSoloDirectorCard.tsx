@@ -156,13 +156,13 @@ export function AiSoloDirectorCard({
               <Zap size={12} color={c.warning[400]} strokeWidth={2} />
               <Text style={[styles.scriptLabel, { color: c.dark.text }]}>초반 2초 훅</Text>
             </View>
-            <Text style={[styles.hookText, { color: c.dark.text }]}>{result.script.hook}</Text>
+            <Text style={[styles.hookText, { color: c.dark.text }]}>{result.script?.hook ?? ''}</Text>
           </View>
 
           {expanded && (
             <View style={styles.expandedSection}>
               <Text style={[styles.sectionTitle, { color: c.dark.text }]}>전체 대본</Text>
-              {result.script.segments.map((seg, i) => (
+              {(result.script?.segments ?? []).map((seg, i) => (
                 <View key={i} style={[styles.scriptSegment, { borderColor: c.dark.border }]}>
                   <Text style={[styles.segmentTime, { color: c.primary[300] }]}>
                     {seg.startSec}-{seg.endSec}초
@@ -176,10 +176,10 @@ export function AiSoloDirectorCard({
               <View style={[styles.typographyBox, { backgroundColor: c.dark.surfaceLight }]}>
                 <Type size={11} color={c.accent[400]} strokeWidth={2} />
                 <Text style={[styles.typographyText, { color: c.dark.textDim }]}>
-                  {result.captionPlan.hookKeywordTypography}
+                  {result.captionPlan?.hookKeywordTypography ?? ''}
                 </Text>
               </View>
-              {result.captionPlan.captions.slice(0, 5).map((cap, i) => (
+              {(result.captionPlan?.captions ?? []).slice(0, 5).map((cap, i) => (
                 <View key={i} style={[styles.captionRow, { borderColor: c.dark.border }]}>
                   <Text style={[styles.captionTime, { color: c.primary[300] }]}>
                     {cap.startSec.toFixed(1)}-{cap.endSec.toFixed(1)}s
@@ -203,13 +203,13 @@ export function AiSoloDirectorCard({
                 <View style={[styles.syncInfoChip, { backgroundColor: c.dark.surfaceLight }]}>
                   <Music2 size={10} color={c.accent[400]} strokeWidth={2} />
                   <Text style={[styles.syncInfoText, { color: c.dark.textDim }]}>
-                    BGM {result.editPlan.bgmTemplate.bpm}BPM
+                    BGM {result.editPlan?.bgmTemplate?.bpm ?? 0}BPM
                   </Text>
                 </View>
                 <View style={[styles.syncInfoChip, { backgroundColor: c.dark.surfaceLight }]}>
                   <AudioLines size={10} color={c.primary[300]} strokeWidth={2} />
                   <Text style={[styles.syncInfoText, { color: c.dark.textDim }]}>
-                    {result.directingPlan.beatSync.cutPoints.length}개 컷 포인트
+                    {result.directingPlan?.beatSync?.cutPoints?.length ?? 0}개 컷 포인트
                   </Text>
                 </View>
               </View>

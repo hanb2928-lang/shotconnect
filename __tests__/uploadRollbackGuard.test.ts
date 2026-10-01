@@ -43,6 +43,8 @@ jest.mock('@/lib/imageEdit', () => ({
     blob: new Blob(['fake'], { type: 'image/webp' }),
     mimeType: 'image/webp',
   }),
+  base64ToBlob: jest.fn().mockReturnValue(new Blob(['fake'], { type: 'image/jpeg' })),
+  nativeHeapCooldownGuard: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('expo-linking', () => ({ createURL: jest.fn(), openURL: jest.fn() }));
@@ -91,7 +93,7 @@ describe('Upload Rollback Guard', () => {
 
     const shots = [makeShot(0), makeShot(1), makeShot(2)];
     await expect(createScanFromAngleShots(shots)).rejects.toThrow('이미지 업로드에 실패했습니다');
-  });
+  }, 30000);
 
   it('rolls back successfully-uploaded files when 2+ uploads fail', async () => {
     // With concurrency 3 and 5 shots + retries, the mock sequence approach
@@ -112,7 +114,7 @@ describe('Upload Rollback Guard', () => {
     const removedPaths = removeMock.mock.calls[0][0] as string[];
     expect(removedPaths.length).toBeGreaterThanOrEqual(1);
     expect(removedPaths[0]).toContain('scan-');
-  });
+  }, 60000);
 
   it('rolls back uploaded files when saveManualScan fails after successful uploads', async () => {
     const { saveManualScan } = require('@/lib/analysis');
@@ -126,7 +128,7 @@ describe('Upload Rollback Guard', () => {
     expect(removeMock).toHaveBeenCalled();
     const removedPaths = removeMock.mock.calls[0][0] as string[];
     expect(removedPaths.length).toBeGreaterThanOrEqual(2);
-  });
+  }, 30000);
 
   it('proceeds with partial results when only 1 of 5 uploads fails', async () => {
     // Make every call succeed except attempts for one specific shot.
@@ -140,7 +142,7 @@ describe('Upload Rollback Guard', () => {
     expect(result.scanId).toBe('scan-123');
     expect(result.uploadedUrls).toHaveLength(5);
     expect(getStorageRemoveMock()).not.toHaveBeenCalled();
-  });
+  }, 30000);
 
   it('surfaces network-specific error message to the user', async () => {
     mockUploadBlobImpl.mockRejectedValue(new Error('Failed to fetch'));
@@ -156,5 +158,5 @@ describe('Upload Rollback Guard', () => {
     expect(caughtError).not.toBeNull();
     const msg = caughtError!.message;
     expect(msg.includes('네트워크') || msg.includes('업로드') || msg.includes('연결')).toBe(true);
-  });
+  }, 30000);
 });

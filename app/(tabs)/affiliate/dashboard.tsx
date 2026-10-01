@@ -41,7 +41,7 @@ export default function DashboardScreen() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [mounted]);
 
   useEffect(() => {
     load();
