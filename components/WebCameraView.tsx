@@ -73,6 +73,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<'permission' | 'notfound' | 'generic'>('generic');
   const [capturing, setCapturing] = useState(false);
+  const capturingRef = useRef(false);
   const [previewBase64, setPreviewBase64] = useState<string | null>(null);
   const [previewMime, setPreviewMime] = useState<string>('image/jpeg');
   const [isRecording, setIsRecording] = useState(false);
@@ -204,6 +205,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
         return;
       }
       isRecordingRef.current = false;
+      capturingRef.current = false;
       stopStream();
     };
   }, [stopStream]);
@@ -222,6 +224,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       recordingTimerRef.current = null;
     }
     isRecordingRef.current = false;
+    capturingRef.current = false;
     setIsRecording(false);
     setRecordingDuration(0);
     recorderRef.current = null;
@@ -229,7 +232,8 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   }, [captureMode]);
 
   const captureFrame = useCallback(async (): Promise<string | null> => {
-    if (!videoRef.current || !cameraReady) return null;
+    if (!videoRef.current || !cameraReady || capturingRef.current) return null;
+    capturingRef.current = true;
     setCapturing(true);
     try {
       const video = videoRef.current;
@@ -258,6 +262,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       setError('촬영에 실패했습니다. 다시 시도해주세요.');
       return null;
     } finally {
+      capturingRef.current = false;
       setCapturing(false);
     }
   }, [cameraReady, facing]);
@@ -300,13 +305,15 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
 
   const stopRecording = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
     if (!isRecording || !recorderRef.current || !recordingPromiseRef.current) return null;
-    stopVideoRecording(recorderRef.current);
+    const recorder = recorderRef.current;
+    const recordingPromise = recordingPromiseRef.current;
+    stopVideoRecording(recorder);
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
     try {
-      const result = await recordingPromiseRef.current;
+      const result = await recordingPromise;
       if (!mountedRef.current) return null;
       // Yield before heavy base64 encoding so pending bridge messages
       // and UI updates can flush — prevents ANR on native.
@@ -362,7 +369,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   }, [cameraReady, autoSaving, isRecording, startRecording, stopRecording, onCapture]);
 
   const handleCapture = useCallback(async () => {
-    if (!cameraReady || capturing || autoSaving) return;
+    if (!cameraReady || capturingRef.current || autoSaving) return;
     if (captureMode === 'single') {
       onMultiAnglePress();
       return;
@@ -375,7 +382,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     if (!result || !mountedRef.current) return;
     const [mime, b64] = result.split('|');
     onCapture(b64, mime);
-  }, [cameraReady, capturing, autoSaving, captureMode, captureFrame, onCapture, onMultiAnglePress, handleVideoCapture]);
+  }, [cameraReady, autoSaving, captureMode, captureFrame, onCapture, onMultiAnglePress, handleVideoCapture]);
 
   const handleConfirm = useCallback(() => {
     if (previewBase64 && mountedRef.current) {

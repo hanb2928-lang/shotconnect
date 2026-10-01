@@ -966,11 +966,7 @@ export default function CameraScreen() {
   if (screenPhase === 'mode_select') {
     return (
       <ScrollView style={styles.modeSelectContainer} contentContainerStyle={styles.modeSelectContent} showsVerticalScrollIndicator={false}>
-        <View style={[styles.modeSelectHeader, { paddingTop: safeTop + theme.spacing.lg }]}>
-          <View style={{ width: 80 }} />
-          <View style={{ flex: 1 }} />
-          <View style={{ width: 80 }} />
-        </View>
+        <View style={{ paddingTop: safeTop + theme.spacing.lg }} />
 
         <TriggerBanner />
 
@@ -1082,7 +1078,7 @@ export default function CameraScreen() {
         <View style={styles.cleanModeWrap}>
           <View style={{ flex: 1 }}>
             <Text style={styles.cleanModeLabel}>✨ 클린 모드 (자막·문구 제외)</Text>
-            <Text style={styles.cleanModeSub}>체크 시 훅, 자막, 마케팅 문구를 생성하지 않고 순수 영상/이미지 원본만 추출합니다</Text>
+            <Text style={styles.cleanModeSub}>체크 시 자막·훅 없이 순수 영상/이미지만 추출합니다</Text>
           </View>
           <TouchableOpacity
             onPress={() => setCleanMode((v) => !v)}
@@ -1654,13 +1650,6 @@ const styles = StyleSheet.create({
   },
   modeSelectContent: {
     paddingBottom: theme.spacing.xxl,
-  },
-  modeSelectHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.sm,
   },
   modeCardsWrap: {
     paddingHorizontal: theme.spacing.lg,
