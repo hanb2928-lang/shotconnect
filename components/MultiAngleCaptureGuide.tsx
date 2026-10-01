@@ -89,7 +89,7 @@ export function MultiAngleCaptureGuide({
   const [processing, setProcessing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const pickLockRef = useRef(false);
-  const captureBtnLockRef = useRef(false);
+  const isCapturingRef = useRef(false);
   const shotsRef = useRef<Record<string, AngleShot>>({});
   const viewfinderRefs = useRef<Record<string, InlineViewfinderHandle | null>>({});
   const mountedRef = useRef(true);
@@ -174,7 +174,8 @@ export function MultiAngleCaptureGuide({
 
   const handleCaptureFromCamera = useCallback(
     async (angleId: string) => {
-      if (pickLockRef.current) return;
+      if (pickLockRef.current || isCapturingRef.current) return;
+      isCapturingRef.current = true;
       pickLockRef.current = true;
       setProcessing(true);
       setCaptureError(null);
@@ -195,10 +196,14 @@ export function MultiAngleCaptureGuide({
       } catch (err) {
         if (mountedRef.current) setCaptureError('카메라 캡처 중 오류가 발생했습니다. 다시 촬영해 주세요.');
         console.error('[MultiAngleGuide] camera capture failed:', err);
+      } finally {
+        await nativeHeapCooldownGuard();
+        if (mountedRef.current) setProcessing(false);
+        setTimeout(() => {
+          pickLockRef.current = false;
+          isCapturingRef.current = false;
+        }, 500);
       }
-      await nativeHeapCooldownGuard();
-      if (mountedRef.current) setProcessing(false);
-      setTimeout(() => { pickLockRef.current = false; }, 300);
     },
     [onCaptureImage, handleAddShot],
   );
@@ -321,13 +326,9 @@ export function MultiAngleCaptureGuide({
                       <TouchableOpacity
                         style={[styles.actionBtn, { backgroundColor: effectiveAccentBg }, !onCaptureImage && styles.actionBtnHidden]}
                         onPress={() => {
-                          if (pickLockRef.current || processing || captureBtnLockRef.current) return;
-                          captureBtnLockRef.current = true;
+                          if (pickLockRef.current || processing || isCapturingRef.current) return;
                           setCurrentAngle(idx);
                           handleCaptureFromCamera(guide.id);
-                          setTimeout(() => {
-                            if (mountedRef.current) captureBtnLockRef.current = false;
-                          }, 600);
                         }}
                         disabled={processing}
                         activeOpacity={0.6}

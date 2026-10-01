@@ -147,10 +147,6 @@ export const InlineCameraViewfinder = forwardRef<
   useEffect(() => {
     return () => {
       mountedRef.current = false;
-      if (captureLockTimerRef.current) {
-        clearTimeout(captureLockTimerRef.current);
-        captureLockTimerRef.current = null;
-      }
       if (Platform.OS === 'web') stopStream();
     };
   }, [stopStream]);
@@ -198,27 +194,20 @@ export const InlineCameraViewfinder = forwardRef<
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
   };
 
-  const captureLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!processing && captureLockRef.current) {
-      captureLockRef.current = false;
-      if (captureLockTimerRef.current) {
-        clearTimeout(captureLockTimerRef.current);
-        captureLockTimerRef.current = null;
-      }
-    }
-  }, [processing]);
-
   const handleCapturePress = useCallback(() => {
     if (captureLockRef.current || processing) return;
     captureLockRef.current = true;
     onCapture?.();
-    captureLockTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) captureLockRef.current = false;
-      captureLockTimerRef.current = null;
-    }, 3000);
   }, [onCapture, processing]);
+
+  useEffect(() => {
+    if (!processing && captureLockRef.current) {
+      const id = setTimeout(() => {
+        if (mountedRef.current) captureLockRef.current = false;
+      }, 500);
+      return () => clearTimeout(id);
+    }
+  }, [processing]);
 
   if (Platform.OS === 'web') {
     return (
