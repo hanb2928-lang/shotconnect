@@ -194,6 +194,7 @@ export default function CameraScreen() {
   const stereoOverlayRef = useRef(false);
   const processingRef = useRef(false);
   const captureActiveRef = useRef(false);
+  const captureBtnLockRef = useRef(false);
   const stereoAbortRef = useRef<AbortController | null>(null);
   const autoAnalysisAbortRef = useRef<AbortController | null>(null);
   const [postCaptureVisible, setPostCaptureVisible] = useState(false);
@@ -369,6 +370,7 @@ export default function CameraScreen() {
         setPostCaptureBase64(null);
         postCaptureBase64Ref.current = null;
         captureActiveRef.current = false;
+        captureBtnLockRef.current = false;
         genIdRef.current += 1;
         if (stereoAbortRef.current) { stereoAbortRef.current.abort(); stereoAbortRef.current = null; }
         if (autoAnalysisAbortRef.current) { autoAnalysisAbortRef.current.abort(); autoAnalysisAbortRef.current = null; }
@@ -624,10 +626,12 @@ export default function CameraScreen() {
 
   const handleMultiAngleComplete = async (shots: AngleShot[]) => {
     if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
+    stereoOverlayRef.current = true;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     const validShots = sorted.filter((s) => s.base64);
     setMultiAngleVisible(false);
     captureActiveRef.current = false;
+    captureBtnLockRef.current = false;
     if (validShots.length === 0) return;
 
     stereoOverlayRef.current = true;
@@ -896,10 +900,12 @@ export default function CameraScreen() {
   // ─── Virtual fitting: complete multi-angle guide (async, same pattern as 입체컷 오토) ───
   const handleFittingGuideComplete = useCallback(async (shots: AngleShot[]) => {
     if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
+    stereoOverlayRef.current = true;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     const validShots = sorted.filter((s) => s.base64);
     setFittingGuideVisible(false);
     captureActiveRef.current = false;
+    captureBtnLockRef.current = false;
     if (validShots.length < 2) return;
 
     stereoOverlayRef.current = true;
@@ -946,6 +952,16 @@ export default function CameraScreen() {
     validShots.length = 0;
     shots.length = 0;
   }, [router, cleanMode, studioSliders, prepareCameraForProcessing]);
+
+  const handleShutterPress = useCallback((target: 'multiAngle' | 'fitting') => {
+    if (captureBtnLockRef.current || processingRef.current || autoSavingRef.current || stereoOverlayRef.current) return;
+    captureBtnLockRef.current = true;
+    if (target === 'multiAngle') {
+      setMultiAngleVisible(true);
+    } else {
+      setFittingGuideVisible(true);
+    }
+  }, []);
 
   const handleModeSelect = useCallback((mode: CaptureMode) => {
     setCaptureMode(mode);
@@ -1171,7 +1187,7 @@ export default function CameraScreen() {
             <View style={styles.shutterRow}>
               <TouchableOpacity
                 style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, stereoOverlayVisible && styles.shutterBtnCapturing]}
-                onPress={() => setFittingGuideVisible(true)}
+                onPress={() => handleShutterPress('fitting')}
                 disabled={stereoOverlayVisible || !cameraReady}
                 activeOpacity={0.85}
               >
@@ -1185,7 +1201,7 @@ export default function CameraScreen() {
 
           <MultiAngleCaptureGuide
             visible={fittingGuideVisible}
-            onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; }}
+            onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
             onComplete={handleFittingGuideComplete}
             onPickImage={handleMultiAnglePick}
             onCaptureImage={handleMultiAngleCapture}
@@ -1230,7 +1246,7 @@ export default function CameraScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.backToModeBtn}
-            onPress={() => setFittingGuideVisible(true)}
+            onPress={() => handleShutterPress('fitting')}
             activeOpacity={0.7}
           >
             <Text style={styles.backToModeText}>갤러리에서 선택</Text>
@@ -1285,7 +1301,7 @@ export default function CameraScreen() {
           <View style={styles.shutterRow}>
             <TouchableOpacity
               style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, stereoOverlayVisible && styles.shutterBtnCapturing]}
-              onPress={() => setFittingGuideVisible(true)}
+              onPress={() => handleShutterPress('fitting')}
               disabled={stereoOverlayVisible || !cameraReady || !bridgeReady}
               activeOpacity={0.85}
             >
@@ -1299,7 +1315,7 @@ export default function CameraScreen() {
 
         <MultiAngleCaptureGuide
           visible={fittingGuideVisible}
-          onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; }}
+          onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
           onComplete={handleFittingGuideComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1362,7 +1378,7 @@ export default function CameraScreen() {
             autoSaving={autoSaving}
             autoSaveToast={autoSaveToast}
             autoSaveStep={autoSaveStep}
-            onMultiAnglePress={() => setMultiAngleVisible(true)}
+            onMultiAnglePress={() => handleShutterPress('multiAngle')}
             onCameraReady={updateCameraReady}
             simplified
           />
@@ -1377,7 +1393,7 @@ export default function CameraScreen() {
           <View style={styles.shutterRow}>
             <TouchableOpacity
               style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, (processing || autoSaving) && styles.shutterBtnCapturing]}
-              onPress={() => setMultiAngleVisible(true)}
+              onPress={() => handleShutterPress('multiAngle')}
               disabled={processing || autoSaving || !cameraReady}
               activeOpacity={0.85}
             >
@@ -1391,7 +1407,7 @@ export default function CameraScreen() {
 
         <MultiAngleCaptureGuide
           visible={multiAngleVisible}
-          onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; }}
+          onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
           onComplete={handleMultiAngleComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1491,7 +1507,7 @@ export default function CameraScreen() {
         <View style={styles.shutterRow}>
           <TouchableOpacity
             style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, (processing || autoSaving) && styles.shutterBtnCapturing]}
-            onPress={() => setMultiAngleVisible(true)}
+            onPress={() => handleShutterPress('multiAngle')}
             disabled={processing || autoSaving || !cameraReady || !bridgeReady}
           >
             <Camera size={28} color="#fff" strokeWidth={2.5} />
@@ -1505,7 +1521,7 @@ export default function CameraScreen() {
       {/* Multi-Angle Capture Guide */}
       <MultiAngleCaptureGuide
         visible={multiAngleVisible}
-        onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; }}
+        onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
         onComplete={handleMultiAngleComplete}
         onPickImage={handleMultiAnglePick}
         onCaptureImage={handleMultiAngleCapture}
