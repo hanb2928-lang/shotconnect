@@ -246,7 +246,9 @@ export async function runStereoPipeline(
   contentTone?: 'studio' | 'raw',
   studioSliders?: { facetSparkle: number; fabricDetail: number; blendStrength: number; smartFit?: boolean },
   existingUploadUrls?: string[],
+  signal?: AbortSignal,
 ): Promise<StereoPipelineResult> {
+  const aborted = (): boolean => signal?.aborted === true;
   const steps = makeInitialSteps();
   const report = (currentStep: number, overallProgress: number, error: string | null = null, result: StereoPipelineResult | null = null) => {
     onProgress({ steps: [...steps], currentStep, overallProgress, result, error });
@@ -330,6 +332,11 @@ export async function runStereoPipeline(
   // cloud call to cut total latency to max(local, cloud) instead of local + cloud.
   steps[0].detail = '로컬 3D 분석 + 클라우드 GPU 볼륨 복원 동시 처리 중...';
   report(0, 0.15);
+  if (aborted()) return createAbortedResult(scanId);
+  // Yield to the render thread before the CPU-heavy synchronous synthesis
+  // call so the navigation animation can complete without frame drops.
+  await new Promise((r) => setTimeout(r, 0));
+  if (aborted()) return createAbortedResult(scanId);
   const tonePrompt = contentTone === 'studio'
     ? `스튜디오 프리미엄 고급스러운 디테일 영화적 조명${studioSliders ? ` — 광채 강화 ${studioSliders.facetSparkle}% · 텍스처 디테일 ${studioSliders.fabricDetail}% · 블렌딩 ${studioSliders.blendStrength}%${studioSliders.smartFit === false ? ' · 스마트 핏 비활성' : ''}` : ''}`
     : contentTone === 'raw'
@@ -389,6 +396,8 @@ export async function runStereoPipeline(
     steps[1].detail = '클린 모드 — 훅/자막 생성 건너뜀 (순수 비주얼 추출)';
     report(1, 0.5);
   } else {
+    if (aborted()) return createAbortedResult(scanId);
+    await new Promise((r) => setTimeout(r, 0));
     steps[1].status = 'active';
     steps[1].detail = '초반 3초 패러독스 훅 + 비트 싱크 설계 중...';
     report(1, 0.3);
@@ -413,8 +422,12 @@ export async function runStereoPipeline(
 
   if (!cleanMode && directingPlan) {
     await new Promise((r) => setTimeout(r, 600));
+    if (aborted()) return createAbortedResult(scanId);
     steps[1].detail = `훅: ${directingPlan.hookTransition.description} | SFX ${directingPlan.sfxPlans.length}건 | 킬링포인트 자막 ${directingPlan.killPointCaptions.length}건`;
   }
+
+  if (aborted()) return createAbortedResult(scanId);
+  await new Promise((r) => setTimeout(r, 0));
 
   steps[2].status = 'active';
   steps[2].detail = cleanMode ? '클린 모드 렌더링 준비 (텍스트 메타데이터 제외)...' : '9:16 H.264 렌더링 코덱 적용 & 메타데이터 생성 중...';
@@ -430,8 +443,7 @@ export async function runStereoPipeline(
   });
 
   await new Promise((r) => setTimeout(r, 600));
-
-  steps[2].status = 'done';
+  if (aborted()) return createAbortedResult(scanId);
   if (cleanMode) {
     steps[2].detail = '클린 모드 렌더링 준비 완료 (텍스트 메타데이터 없음)';
   } else {
@@ -491,6 +503,7 @@ export async function runStereoPipeline(
   };
 
   try {
+    if (aborted()) return createAbortedResult(scanId);
     await supabase.from('scans').update({
       product_name: productName,
       summary: synthesisSummary,
@@ -510,6 +523,18 @@ export async function runStereoPipeline(
   }
 
   return result;
+}
+
+function createAbortedResult(scanId: string): StereoPipelineResult {
+  return {
+    scanId,
+    cloudResult: null,
+    synthesisSummary: '',
+    directingSummary: '',
+    directingPlan: null,
+    publishPlans: [],
+    publishTargets: [],
+  };
 }
 
 export async function openPublishDeepLink(platformKey: string): Promise<void> {

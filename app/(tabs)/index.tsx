@@ -56,6 +56,7 @@ async function runFittingPipeline(
   customPrompt?: string,
   cleanMode = false,
   studioSliders?: StudioSliderValues,
+  signal?: AbortSignal,
 ): Promise<void> {
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
   if (sorted.length === 0) return;
@@ -63,9 +64,17 @@ async function runFittingPipeline(
   const bgShot = sorted.find((s) => !s.id.startsWith('product')) ?? sorted[sorted.length - 1];
   if (!productShot?.base64 || !productShot?.mimeType || !bgShot?.base64 || !bgShot?.mimeType) return;
 
+  const productBase64 = productShot.base64;
+  const productMime = productShot.mimeType || 'image/jpeg';
+  const bgBase64 = bgShot.base64;
+  const bgMime = bgShot.mimeType || 'image/jpeg';
+  for (const s of sorted) { s.base64 = undefined; }
+
   try {
-    const productDataUrl = buildDataUrl(productShot.base64, productShot.mimeType || 'image/jpeg');
-    const modelDataUrl = buildDataUrl(bgShot.base64, bgShot.mimeType || 'image/jpeg');
+    if (signal?.aborted) return;
+    const productDataUrl = buildDataUrl(productBase64, productMime);
+    const modelDataUrl = buildDataUrl(bgBase64, bgMime);
+    if (signal?.aborted) return;
     const { data, error } = await supabase.functions.invoke('virtual-fitting', {
       body: {
         productImage: productDataUrl,
@@ -77,10 +86,12 @@ async function runFittingPipeline(
         smartFit: studioSliders?.smartFit,
       },
     });
+    if (signal?.aborted) return;
     if (error || !data?.image) return;
 
     const imageData = data.image as string;
     const imageUrl = await uploadImage(imageData, 'image/png');
+    if (signal?.aborted) return;
     const updatePayload: Record<string, unknown> = { edited_image_url: imageUrl };
     if (cleanMode) {
       updatePayload.template_data = {
@@ -170,6 +181,7 @@ export default function CameraScreen() {
   const autoSavingRef = useRef(false);
   const stereoOverlayRef = useRef(false);
   const processingRef = useRef(false);
+  const captureActiveRef = useRef(false);
   const stereoAbortRef = useRef<AbortController | null>(null);
   const autoAnalysisAbortRef = useRef<AbortController | null>(null);
   const [postCaptureVisible, setPostCaptureVisible] = useState(false);
@@ -328,7 +340,6 @@ export default function CameraScreen() {
           setIsActive(false);
         }
         setProcessing(false);
-        processingRef.current = false;
         setAutoSaving(false);
         autoSavingRef.current = false;
         setStereoOverlayVisible(false);
@@ -338,6 +349,7 @@ export default function CameraScreen() {
         postCaptureVideoUriRef.current = null;
         setPostCaptureBase64(null);
         postCaptureBase64Ref.current = null;
+        captureActiveRef.current = false;
         genIdRef.current += 1;
         if (stereoAbortRef.current) { stereoAbortRef.current.abort(); stereoAbortRef.current = null; }
         if (autoAnalysisAbortRef.current) { autoAnalysisAbortRef.current.abort(); autoAnalysisAbortRef.current = null; }
@@ -377,7 +389,7 @@ export default function CameraScreen() {
   }, [scheduleCameraReactivation, deactivateCamera]);
 
   const runAutoAnalysis = useCallback(async (base64: string, mimeType: string, additionalB64s: string[] = []) => {
-    if (autoSavingRef.current || isPipelineLocked()) return;
+    if (autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
     if (!isOnline()) {
       setError('네트워크 연결을 확인해주세요. 인터넷이 연결되지 않아 AI 분석을 시작할 수 없습니다.');
       return;
@@ -431,7 +443,7 @@ export default function CameraScreen() {
   }, [router, startAutoSaveAnimation, stopAutoSaveAnimation]);
 
   const handlePostCaptureProceed = useCallback(async (customPrompt: string, _platform: string, _editPlan: ShortFormEditPlan) => {
-    if (autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
+    if (autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked() || captureActiveRef.current) return;
     setPostCaptureVisible(false);
 
     const base64 = postCaptureBase64Ref.current;
@@ -505,6 +517,7 @@ export default function CameraScreen() {
 
   const handleCapture = async () => {
     if (!cameraRef.current || processingRef.current || processing || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
+    captureActiveRef.current = true;
     processingRef.current = true;
     setProcessing(true);
     try {
@@ -581,10 +594,11 @@ export default function CameraScreen() {
   };
 
   const handleMultiAngleComplete = async (shots: AngleShot[]) => {
-    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked()) return;
+    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     const validShots = sorted.filter((s) => s.base64);
     setMultiAngleVisible(false);
+    captureActiveRef.current = false;
     if (validShots.length === 0) return;
 
     stereoOverlayRef.current = true;
@@ -621,8 +635,8 @@ export default function CameraScreen() {
     }
 
     nativeHeapCooldownGuard().finally(() => {
-      if (controller.signal.aborted) { releasePipelineLock(); return; }
-      runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls).catch(() => {}).finally(() => {
+      if (controller.signal.aborted || !isMountedRef.current) { releasePipelineLock(); return; }
+      runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
         if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
         releasePipelineLock();
       });
@@ -843,10 +857,11 @@ export default function CameraScreen() {
 
   // ─── Virtual fitting: complete multi-angle guide (async, same pattern as 입체컷 오토) ───
   const handleFittingGuideComplete = useCallback(async (shots: AngleShot[]) => {
-    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked()) return;
+    if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
     const validShots = sorted.filter((s) => s.base64);
     setFittingGuideVisible(false);
+    captureActiveRef.current = false;
     if (validShots.length < 2) return;
 
     stereoOverlayRef.current = true;
@@ -882,8 +897,8 @@ export default function CameraScreen() {
     }
 
     nativeHeapCooldownGuard().finally(() => {
-      if (controller.signal.aborted) { releasePipelineLock(); return; }
-      runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders).catch(() => {}).finally(() => {
+      if (controller.signal.aborted || !isMountedRef.current) { releasePipelineLock(); return; }
+      runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders, controller.signal).catch(() => {}).finally(() => {
         if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
         releasePipelineLock();
       });
@@ -1135,7 +1150,7 @@ export default function CameraScreen() {
 
           <MultiAngleCaptureGuide
             visible={fittingGuideVisible}
-            onClose={() => setFittingGuideVisible(false)}
+            onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; }}
             onComplete={handleFittingGuideComplete}
             onPickImage={handleMultiAnglePick}
             onCaptureImage={handleMultiAngleCapture}
@@ -1249,7 +1264,7 @@ export default function CameraScreen() {
 
         <MultiAngleCaptureGuide
           visible={fittingGuideVisible}
-          onClose={() => setFittingGuideVisible(false)}
+          onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; }}
           onComplete={handleFittingGuideComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1341,7 +1356,7 @@ export default function CameraScreen() {
 
         <MultiAngleCaptureGuide
           visible={multiAngleVisible}
-          onClose={() => setMultiAngleVisible(false)}
+          onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; }}
           onComplete={handleMultiAngleComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1455,7 +1470,7 @@ export default function CameraScreen() {
       {/* Multi-Angle Capture Guide */}
       <MultiAngleCaptureGuide
         visible={multiAngleVisible}
-        onClose={() => setMultiAngleVisible(false)}
+        onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; }}
         onComplete={handleMultiAngleComplete}
         onPickImage={handleMultiAnglePick}
         onCaptureImage={handleMultiAngleCapture}
