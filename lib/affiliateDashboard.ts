@@ -18,6 +18,9 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
     fetchShortLinkClicks(),
   ]);
 
+  if (revenueRes.error) throw new Error(revenueRes.error.message);
+  if (bookmarkRes.error) throw new Error(bookmarkRes.error.message);
+
   const revenueRows = (revenueRes.data ?? []) as {
     platform: string;
     amount: number;

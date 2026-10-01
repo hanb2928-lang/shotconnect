@@ -1301,11 +1301,21 @@ export default function ResultScreen() {
               return;
             }
             try {
-              const { data: pollData } = await supabase.functions.invoke('generate-video', {
+              const { data: pollData, error: pollError } = await supabase.functions.invoke('generate-video', {
                 body: { mode: 'poll', taskId, scanId: scan.id },
               });
 
-              if (!pollData || typeof pollData !== 'object') return;
+              if (pollError) {
+                consecutiveErrors++;
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                  if (mountedRef.current) {
+                    setVideoGenError('영상 생성 서버와 통신할 수 없습니다. 다시 시도해주세요.');
+                    setIsGeneratingVideo(false);
+                    setVideoGenProgress(null);
+                  }
+                  return;
+                }
+              } else if (!pollData || typeof pollData !== 'object') return;
 
               const status = pollData.status as string;
               const elapsed = Math.round((Date.now() - startTime) / 1000);

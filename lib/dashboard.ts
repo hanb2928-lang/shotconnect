@@ -85,6 +85,11 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
       supabase.from('revenue_records').select('*').order('period_month', { ascending: false }),
     ]);
 
+    if (scansRes.error || assetsRes.error || clicksRes.error || linksRes.error || revenueRes.error) {
+      const firstError = scansRes.error || assetsRes.error || clicksRes.error || linksRes.error || revenueRes.error;
+      throw new Error(firstError?.message || '성과 데이터 일부 로딩 실패');
+    }
+
     const scans = (scansRes.data ?? []) as Array<Scan & { created_at: string }>;
   const assets = (assetsRes.data ?? []) as Array<SavedAsset>;
   const clickEvents = (clicksRes.data ?? []) as Array<{ platform: string; clicked_at: string; scan_id: string | null }>;

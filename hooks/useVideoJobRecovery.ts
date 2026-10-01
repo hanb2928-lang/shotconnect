@@ -24,12 +24,17 @@ const INITIAL: VideoJobRecoveryInfo = {
 export function useVideoJobRecovery() {
   const [info, setInfo] = useState<VideoJobRecoveryInfo>(INITIAL);
   const checkingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  const safeSetInfo = useCallback((updater: VideoJobRecoveryInfo | ((prev: VideoJobRecoveryInfo) => VideoJobRecoveryInfo)) => {
+    if (mountedRef.current) setInfo(updater);
+  }, []);
 
   const checkJob = useCallback(async (jobId: string) => {
     if (checkingRef.current) return;
     checkingRef.current = true;
 
-    setInfo({ state: 'checking', jobId, step: null, videoUrl: null, errorMsg: null });
+    safeSetInfo({ state: 'checking', jobId, step: null, videoUrl: null, errorMsg: null });
 
     try {
       const queryPromise = supabase
@@ -47,7 +52,7 @@ export function useVideoJobRecovery() {
 
       if (error || !data) {
         clearActiveVideoJob();
-        setInfo({ ...INITIAL, state: 'not_found' });
+        safeSetInfo({ ...INITIAL, state: 'not_found' });
         return;
       }
 
@@ -55,7 +60,7 @@ export function useVideoJobRecovery() {
 
       if (row.status === 'SUCCESS') {
         clearActiveVideoJob();
-        setInfo({
+        safeSetInfo({
           state: 'completed',
           jobId,
           step: row.step ?? null,
@@ -64,7 +69,7 @@ export function useVideoJobRecovery() {
         });
       } else if (row.status === 'FAILED') {
         clearActiveVideoJob();
-        setInfo({
+        safeSetInfo({
           state: 'failed',
           jobId,
           step: row.step ?? null,
@@ -72,7 +77,7 @@ export function useVideoJobRecovery() {
           errorMsg: row.error_message ?? '비디오 생성에 실패했습니다.',
         });
       } else {
-        setInfo({
+        safeSetInfo({
           state: 'in_progress',
           jobId,
           step: row.step ?? null,
@@ -81,7 +86,7 @@ export function useVideoJobRecovery() {
         });
       }
     } catch {
-      setInfo({ ...INITIAL, state: 'not_found' });
+      safeSetInfo({ ...INITIAL, state: 'not_found' });
     } finally {
       checkingRef.current = false;
     }
@@ -98,6 +103,7 @@ export function useVideoJobRecovery() {
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     // Check on mount in case app was backgrounded and reopened
     runRecovery().catch(() => {});
 
@@ -125,6 +131,7 @@ export function useVideoJobRecovery() {
     }
 
     return () => {
+      mountedRef.current = false;
       cleanupFns.forEach((fn) => fn());
     };
   }, [runRecovery]);

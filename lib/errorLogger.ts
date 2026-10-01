@@ -61,7 +61,11 @@ async function flushQueue(): Promise<void> {
       flushTimer = setTimeout(() => resolve({ error: { message: 'flush timeout' } }), FLUSH_TIMEOUT_MS);
     });
     try {
-      await Promise.race([insertPromise, timeoutPromise]);
+      const result = await Promise.race([
+        insertPromise.then((r) => ({ error: r.error })),
+        timeoutPromise,
+      ]);
+      if (result?.error) throw new Error(result.error.message);
     } finally {
       if (flushTimer) clearTimeout(flushTimer);
     }

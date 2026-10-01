@@ -204,7 +204,7 @@ async function persistVisionResult(scanId: string, vision: ProductVisionResult):
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
+    await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${encodeURIComponent(scanId)}`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey,

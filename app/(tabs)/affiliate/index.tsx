@@ -422,7 +422,7 @@ export default function AffiliateScreen() {
         await Clipboard.setStringAsync(url);
       }
       setCopiedPlatform(platform);
-      setTimeout(() => setCopiedPlatform(null), 2000);
+      setTimeout(() => { if (mounted.current) setCopiedPlatform(null); }, 2000);
     } catch {
       // clipboard failed
     }
@@ -487,7 +487,7 @@ export default function AffiliateScreen() {
   const handleSaveAffiliate = async () => {
     if (!affiliateUrl.trim()) {
       setUrlToast('올바른 상품 링크를 입력해주세요');
-      setTimeout(() => setUrlToast(null), 3000);
+      setTimeout(() => { if (mounted.current) setUrlToast(null); }, 3000);
       return;
     }
     const validation = validateAffiliateUrl(affiliateUrl);

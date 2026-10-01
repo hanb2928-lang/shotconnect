@@ -126,7 +126,7 @@ export async function updateScheduleStatus(
 }
 
 export async function deleteSchedule(scheduleId: string): Promise<boolean> {
-  await supabase
+  const { error: tasksError } = await supabase
     .from('warmup_tasks')
     .delete()
     .eq('schedule_id', scheduleId);
@@ -135,7 +135,7 @@ export async function deleteSchedule(scheduleId: string): Promise<boolean> {
     .from('warmup_schedules')
     .delete()
     .eq('id', scheduleId);
-  return !error;
+  return !error && !tasksError;
 }
 
 function buildScheduleWithTasks(

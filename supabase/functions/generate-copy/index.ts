@@ -71,7 +71,7 @@ async function checkCopyCache(cacheKey: string): Promise<{ copies: CopyItem[]; g
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/ai_content_cache?select=result,model_used,hit_count&cache_key=eq.${cacheKey}`,
+      `${supabaseUrl}/rest/v1/ai_content_cache?select=result,model_used,hit_count&cache_key=eq.${encodeURIComponent(cacheKey)}`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -86,7 +86,7 @@ async function checkCopyCache(cacheKey: string): Promise<{ copies: CopyItem[]; g
     if (!rows[0]?.result) return null;
 
     // Increment hit count (fire-and-forget)
-    fetch(`${supabaseUrl}/rest/v1/ai_content_cache?cache_key=eq.${cacheKey}`, {
+    fetch(`${supabaseUrl}/rest/v1/ai_content_cache?cache_key=eq.${encodeURIComponent(cacheKey)}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',

@@ -152,6 +152,8 @@ async function simulateWithOpenAI(
     `장점: ${(data.productAdvantages || []).join(", ") || "없음"}\n` +
     `현재 후킹 문구: ${data.hook || "없음"}`;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -168,7 +170,9 @@ async function simulateWithOpenAI(
       temperature: 0.85,
       response_format: { type: "json_object" },
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     throw new Error(`OpenAI API error: ${response.status}`);

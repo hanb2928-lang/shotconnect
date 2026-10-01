@@ -873,7 +873,7 @@ async function checkVideoJobStatus(scanId: string, taskId: string): Promise<{ st
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${scanId}&task_id=eq.${taskId}&select=status,error_message,video_url,created_at,runway_task_id`,
+      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&select=status,error_message,video_url,created_at,runway_task_id`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -913,7 +913,7 @@ async function checkWebhookResult(scanId: string): Promise<string | null> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/scans?select=video_url&id=eq.${scanId}`,
+      `${supabaseUrl}/rest/v1/scans?select=video_url&id=eq.${encodeURIComponent(scanId)}`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -969,7 +969,7 @@ async function updateRunwayTaskId(scanId: string, internalJobId: string, runwayT
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${scanId}&task_id=eq.${internalJobId}`, {
+    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(internalJobId)}`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey,
@@ -992,7 +992,7 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${scanId}&runway_task_id=eq.${runwayTaskId}&select=status,error_message,video_url,task_id,created_at`,
+      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&runway_task_id=eq.${encodeURIComponent(runwayTaskId)}&select=status,error_message,video_url,task_id,created_at`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -1033,7 +1033,7 @@ async function markVideoJobComplete(scanId: string, taskId: string, videoUrl: st
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     // Atomic transition: only PATCH if the job is NOT already in a terminal state.
     // This prevents webhook and server-poll from racing to overwrite each other.
-    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${scanId}&task_id=eq.${taskId}&status=not.in.(SUCCESS,FAILED)`, {
+    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=not.in.(SUCCESS,FAILED)`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey,
@@ -1057,7 +1057,7 @@ async function markVideoJobFailed(scanId: string, taskId: string, errMsg: string
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     // Atomic transition: only PATCH if the job is NOT already in a terminal state.
     // Prevents a late failure from overwriting a successful completion.
-    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${scanId}&task_id=eq.${taskId}&status=not.in.(SUCCESS,FAILED)`, {
+    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=not.in.(SUCCESS,FAILED)`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey,
@@ -1087,7 +1087,7 @@ async function updateVideoJobStep(scanId: string, taskId: string, step: string):
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${scanId}&task_id=eq.${taskId}&status=not.in.(SUCCESS,FAILED)`, {
+    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=not.in.(SUCCESS,FAILED)`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey,
@@ -1110,7 +1110,7 @@ async function fetchScanImageUrl(scanId: string): Promise<string | null> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/scans?select=edited_image_url,image_url&id=eq.${scanId}`,
+      `${supabaseUrl}/rest/v1/scans?select=edited_image_url,image_url&id=eq.${encodeURIComponent(scanId)}`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -2009,7 +2009,7 @@ async function updateScanWithVideo(scanId: string, videoUrl: string): Promise<vo
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     // Guard: don't overwrite an existing video_url — the first completion wins.
-    await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}&video_url=is.null`, {
+    await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${encodeURIComponent(scanId)}&video_url=is.null`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey,

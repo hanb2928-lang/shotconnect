@@ -86,7 +86,7 @@ export default function AssetsScreen() {
         await Clipboard.setStringAsync(snippet.content);
       }
       setCopiedId(snippet.id);
-      setTimeout(() => setCopiedId(null), 2000);
+      setTimeout(() => { if (mounted.current) setCopiedId(null); }, 2000);
     } catch {
       // clipboard failed
     }

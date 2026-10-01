@@ -278,7 +278,7 @@ async function checkTtsCache(cacheKey: string): Promise<string | null> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/ai_content_cache?select=result&cache_key=eq.${cacheKey}`,
+      `${supabaseUrl}/rest/v1/ai_content_cache?select=result&cache_key=eq.${encodeURIComponent(cacheKey)}`,
       {
         headers: {
           apikey: serviceRoleKey,
