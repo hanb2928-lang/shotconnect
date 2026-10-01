@@ -108,7 +108,7 @@ export async function deductCredits(
 
 export async function addCredits(
   amount: number,
-  type: 'purchase' | 'bonus' | 'admin' = 'purchase',
+  type: 'purchase' | 'bonus' | 'admin' | 'refund' = 'purchase',
   description: string = '',
   packageId?: string,
 ): Promise<number> {
@@ -124,6 +124,18 @@ export async function addCredits(
   }
   const { balance } = await getCreditBalance();
   return balance;
+}
+
+export async function refundCredits(
+  feature: CreditFeature,
+  customAmount?: number,
+): Promise<void> {
+  const amount = customAmount ?? CREDIT_COSTS[feature];
+  try {
+    await addCredits(amount, 'refund', `${feature} 실패 환불`);
+  } catch {
+    // best-effort — don't mask the original error
+  }
 }
 
 export async function checkCredits(feature: CreditFeature): Promise<boolean> {

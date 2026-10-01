@@ -6,7 +6,7 @@ import { generateAffiliateLinks } from '@/lib/affiliate';
 import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base64';
 import { enqueueAndWait } from '@/lib/jobQueue';
-import { deductCredits } from '@/lib/credits';
+import { deductCredits, refundCredits } from '@/lib/credits';
 import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY } from '@/lib/imageEdit';
 import { compressForEdgeFunction, compressBase64ArrayForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
@@ -94,8 +94,6 @@ export async function analyzeImage(
   mimeType: string,
   mode: 'single' | 'multi' = 'multi',
 ): Promise<AnalysisResult> {
-  await deductCredits('photo_analysis');
-
   const compressed = await compressForEdgeFunction(imageDataUrl);
   const b64 = cleanBase64(compressed.dataUrl);
   const cacheInput = { task: 'analyze-photo', mode, imageHash: hashObject({ b64 }).slice(0, 16) };
@@ -104,6 +102,8 @@ export async function analyzeImage(
     'analyze-photo',
     cacheInput,
     async () => {
+      await deductCredits('photo_analysis');
+      try {
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
     method: 'POST',
     headers: {
@@ -123,6 +123,10 @@ export async function analyzeImage(
     if (respData?.error) throw new Error(respData.error);
 
     return normalizeAnalysis(respData);
+      } catch (err) {
+        await refundCredits('photo_analysis');
+        throw err;
+      }
   },
     'gpt-4o',
   );
@@ -133,8 +137,6 @@ export async function analyzeMultiShot(
   base64Images: string[],
   fileName: string,
 ): Promise<AnalysisResult> {
-  await deductCredits('multi_shot_analysis');
-
   const dataUrls = await compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg');
   const cacheInput = {
     task: 'multi-shot',
@@ -145,6 +147,8 @@ export async function analyzeMultiShot(
     'multi-shot',
     cacheInput,
     async () => {
+      await deductCredits('multi_shot_analysis');
+      try {
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
         method: 'POST',
         headers: {
@@ -164,6 +168,10 @@ export async function analyzeMultiShot(
       if (respData?.error) throw new Error(respData.error);
 
       return normalizeAnalysis(respData);
+      } catch (err) {
+        await refundCredits('multi_shot_analysis');
+        throw err;
+      }
     },
     'gpt-4o',
   );
@@ -444,8 +452,6 @@ export async function analyzeImageWithProductContext(
   mode: 'single' | 'multi' = 'multi',
   productContext?: { productName?: string; description?: string; price?: string; brand?: string; platform?: string },
 ): Promise<AnalysisResult> {
-  await deductCredits('photo_analysis');
-
   const compressed = await compressForEdgeFunction(imageDataUrl);
   const b64 = cleanBase64(compressed.dataUrl);
   const cacheInput = {
@@ -459,6 +465,8 @@ export async function analyzeImageWithProductContext(
     'analyze-photo-context',
     cacheInput,
     async () => {
+      await deductCredits('photo_analysis');
+      try {
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
         method: 'POST',
         headers: {
@@ -478,6 +486,10 @@ export async function analyzeImageWithProductContext(
       if (respData?.error) throw new Error(respData.error);
 
       return normalizeAnalysis(respData);
+      } catch (err) {
+        await refundCredits('photo_analysis');
+        throw err;
+      }
     },
     'gpt-4o',
   );
@@ -532,8 +544,6 @@ export async function analyzeImageQueued(
   mode: 'single' | 'multi' = 'multi',
   preferredStyle?: string,
 ): Promise<AnalysisResult> {
-  await deductCredits('photo_analysis');
-
   const compressed = await compressForEdgeFunction(imageDataUrl);
   const b64 = cleanBase64(compressed.dataUrl);
   const cacheInput = {
@@ -547,6 +557,8 @@ export async function analyzeImageQueued(
     'analyze-photo-queued',
     cacheInput,
     async () => {
+      await deductCredits('photo_analysis');
+      try {
       const result = await enqueueAndWait<Record<string, unknown>>(
         'analyze-photo',
         { imageDataUrl: compressed.dataUrl, fileName, mimeType: compressed.mimeType, mode, ...(preferredStyle ? { preferredStyle } : {}) },
@@ -557,6 +569,10 @@ export async function analyzeImageQueued(
         throw new Error(result.error ?? 'AI 분석 작업이 실패했습니다.');
       }
       return normalizeAnalysis(result.result);
+      } catch (err) {
+        await refundCredits('photo_analysis');
+        throw err;
+      }
     },
     'gpt-4o',
   );
@@ -567,8 +583,6 @@ export async function analyzeMultiShotQueued(
   base64Images: string[],
   fileName: string,
 ): Promise<AnalysisResult> {
-  await deductCredits('multi_shot_analysis');
-
   const dataUrls = await compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg');
   const cacheInput = {
     task: 'multi-shot-queued',
@@ -579,6 +593,8 @@ export async function analyzeMultiShotQueued(
     'multi-shot-queued',
     cacheInput,
     async () => {
+      await deductCredits('multi_shot_analysis');
+      try {
       const result = await enqueueAndWait<Record<string, unknown>>(
         'analyze-photo',
         { images: dataUrls, fileName, mode: 'multi-shot' },
@@ -589,6 +605,10 @@ export async function analyzeMultiShotQueued(
         throw new Error(result.error ?? 'AI 다각도 분석 작업이 실패했습니다.');
       }
       return normalizeAnalysis(result.result);
+      } catch (err) {
+        await refundCredits('multi_shot_analysis');
+        throw err;
+      }
     },
     'gpt-4o',
   );

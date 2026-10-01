@@ -87,7 +87,10 @@ async function runFittingPipeline(
       },
     });
     if (signal?.aborted) return;
-    if (error || !data?.image) return;
+    if (error || !data?.image) {
+      console.warn('[runFittingPipeline] virtual-fitting returned no image', error ? String(error) : 'no image field');
+      return;
+    }
 
     const imageData = data.image as string;
     const imageUrl = await uploadImage(imageData, 'image/png');
