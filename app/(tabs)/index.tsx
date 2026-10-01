@@ -48,7 +48,6 @@ import { StudioPremiumAccordion, type StudioSliderValues } from '@/components/St
 import { PostCaptureWorkflow } from '@/components/PostCaptureWorkflow';
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
 import { runStereoPipeline, createScanFromAngleShots, makeInitialProgress, type StereoPipelineProgress } from '@/lib/stereoPipeline';
-import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -57,14 +56,13 @@ async function runFittingPipeline(
   cleanMode = false,
   studioSliders?: StudioSliderValues,
 ): Promise<void> {
-  acquirePipelineLock();
-  try {
-    const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
-    if (sorted.length === 0) return;
-    const productShot = sorted.find((s) => s.id.startsWith('product')) ?? sorted[0];
-    const bgShot = sorted.find((s) => !s.id.startsWith('product')) ?? sorted[sorted.length - 1];
-    if (!productShot?.base64 || !productShot?.mimeType || !bgShot?.base64 || !bgShot?.mimeType) return;
+  const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
+  if (sorted.length === 0) return;
+  const productShot = sorted.find((s) => s.id.startsWith('product')) ?? sorted[0];
+  const bgShot = sorted.find((s) => !s.id.startsWith('product')) ?? sorted[sorted.length - 1];
+  if (!productShot?.base64 || !productShot?.mimeType || !bgShot?.base64 || !bgShot?.mimeType) return;
 
+  try {
     const productDataUrl = buildDataUrl(productShot.base64, productShot.mimeType || 'image/jpeg');
     const modelDataUrl = buildDataUrl(bgShot.base64, bgShot.mimeType || 'image/jpeg');
     const { data, error } = await supabase.functions.invoke('virtual-fitting', {
@@ -102,8 +100,6 @@ async function runFittingPipeline(
     await supabase.from('scans').update(updatePayload).eq('id', scanId);
   } catch {
     // Background pipeline — errors are silently ignored; user already has the scan
-  } finally {
-    releasePipelineLock();
   }
 }
 
@@ -170,8 +166,6 @@ export default function CameraScreen() {
   const bufferReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraRemountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genIdRef = useRef(0);
-  const pipelineAbortRef = useRef<AbortController | null>(null);
-  const routerMutexRef = useRef(false);
   const [postCaptureVisible, setPostCaptureVisible] = useState(false);
   const [postCaptureVideoUri, setPostCaptureVideoUri] = useState<string | null>(null);
   const [postCaptureBase64, setPostCaptureBase64] = useState<string | null>(null);
@@ -322,10 +316,6 @@ export default function CameraScreen() {
       }
       return () => {
         isMountedRef.current = false;
-        if (pipelineAbortRef.current) {
-          pipelineAbortRef.current.abort();
-          pipelineAbortRef.current = null;
-        }
         if (Platform.OS !== 'web') {
           deactivateCamera();
         } else {
@@ -550,28 +540,22 @@ export default function CameraScreen() {
     setStereoProgress(makeInitialProgress());
     setStereoOverlayVisible(true);
 
-    const abortCtrl = new AbortController();
-    pipelineAbortRef.current = abortCtrl;
-
     let scanId: string;
-    let uploadedUrls: string[] = [];
+    let uploadedUrls: string[];
     try {
-      const scanResult = await createScanFromAngleShots(sorted);
-      scanId = scanResult.scanId;
-      uploadedUrls = scanResult.uploadedUrls;
+      const result = await createScanFromAngleShots(sorted);
+      scanId = result.scanId;
+      uploadedUrls = result.uploadedUrls;
     } catch (err) {
-      if (!isMountedRef.current || abortCtrl.signal.aborted) return;
+      if (!isMountedRef.current) return;
       setStereoOverlayVisible(false);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
 
-    if (isMountedRef.current && !abortCtrl.signal.aborted && !routerMutexRef.current) {
-      routerMutexRef.current = true;
+    if (isMountedRef.current) {
       setStereoOverlayVisible(false);
       router.replace({ pathname: '/result/[id]', params: { id: scanId } });
-      // Release mutex after navigation settles to prevent view-ref race
-      setTimeout(() => { if (isMountedRef.current) routerMutexRef.current = false; }, 300);
     }
 
     // Background: run synthesis/directing/publish pipeline without blocking UI.
@@ -580,7 +564,6 @@ export default function CameraScreen() {
     // synthesis pipeline immediately causes a native heap double-burst that can
     // trigger the OS Low-Memory Killer (SIGKILL) on low-end Android devices.
     nativeHeapCooldownGuard().finally(() => {
-      if (abortCtrl.signal.aborted) return;
       runStereoPipeline(sorted, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls).catch(() => {});
     });
     sorted.length = 0;
@@ -677,7 +660,7 @@ export default function CameraScreen() {
       // surface flushes its next frame, preventing black-frame captures on
       // high-refresh-rate displays where the surface texture drops while
       // the JS thread is blocked by large buffer processing.
-      const compressResult = await withTimeout(
+      const { base64, mimeType, compressedUri } = await withTimeout(
         new Promise<{ base64: string; mimeType: string; compressedUri: string | null }>((resolve, reject) => {
           InteractionManager.runAfterInteractions(async () => {
             let lastErr: unknown;
@@ -699,7 +682,7 @@ export default function CameraScreen() {
         '이미지 압축',
       );
       if (!isMountedRef.current) return null;
-      return { base64: compressResult.base64, mimeType: compressResult.mimeType, ...(compressResult.compressedUri ? { uri: compressResult.compressedUri } : {}) };
+      return { base64, mimeType, ...(compressedUri ? { uri: compressedUri } : {}) };
     } catch (err) {
       logError(err, { component: 'CameraScreen', action: 'handleMultiAngleCapture' });
       return null;
@@ -808,34 +791,26 @@ export default function CameraScreen() {
     setStereoOverlayVisible(true);
     setError(null);
 
-    const abortCtrl = new AbortController();
-    pipelineAbortRef.current = abortCtrl;
-
     let scanId: string;
-    let uploadedUrls: string[] = [];
     try {
-      const scanResult = await createScanFromAngleShots(sorted);
-      scanId = scanResult.scanId;
-      uploadedUrls = scanResult.uploadedUrls;
+      const result = await createScanFromAngleShots(sorted);
+      scanId = result.scanId;
     } catch (err) {
-      if (!isMountedRef.current || abortCtrl.signal.aborted) return;
+      if (!isMountedRef.current) return;
       setStereoOverlayVisible(false);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
 
-    if (isMountedRef.current && !abortCtrl.signal.aborted && !routerMutexRef.current) {
-      routerMutexRef.current = true;
+    if (isMountedRef.current) {
       setStereoOverlayVisible(false);
       router.replace({ pathname: '/result/[id]', params: { id: scanId } });
-      setTimeout(() => { if (isMountedRef.current) routerMutexRef.current = false; }, 300);
     }
 
     // Background: run virtual fitting pipeline without blocking UI.
     // Native heap cooldown guard prevents LMK SIGKILL on low-end devices
     // where unreclaimed bitmap buffers collide with pipeline allocations.
     nativeHeapCooldownGuard().finally(() => {
-      if (abortCtrl.signal.aborted) return;
       runFittingPipeline(sorted, scanId, undefined, cleanMode, studioSliders).catch(() => {});
     });
     sorted.length = 0;
