@@ -21,17 +21,15 @@ import {
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   index: Camera,
-  marketing: Wand2,
   assets: Folder,
 };
 
 const TAB_KEYS: Record<string, string> = {
   index: 'tab.camera',
-  marketing: 'tab.create',
   assets: 'tab.library',
 };
 
-const DISABLED_TABS = new Set<string>(['marketing']);
+const DISABLED_TABS = new Set<string>();
 
 const HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 };
 
