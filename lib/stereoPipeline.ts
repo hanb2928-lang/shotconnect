@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { uploadImage, uploadImageBlob, saveManualScan } from './analysis';
-import { compressCaptureFrameToBlob } from './imageEdit';
+import { base64ToBlob } from './imageEdit';
 import { supabase } from './supabase';
 import { runSynthesis, getSynthesisSummary, type AngleInput } from './aiSynthesisEngine';
 import { buildShortFormEditPlan, type ShortFormPlatform } from './shortFormEditEngine';
@@ -13,7 +13,7 @@ import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
 
 const UPLOAD_MAX_RETRIES = 2;
 const UPLOAD_RETRY_DELAY_MS = 1500;
-const UPLOAD_CONCURRENCY = 2;
+const UPLOAD_CONCURRENCY = Platform.OS === 'web' ? 2 : 1;
 
 function extractStoragePath(publicUrl: string): string | null {
   const marker = '/storage/v1/object/public/scans/';
@@ -46,8 +46,8 @@ async function uploadWithRetry(base64: string, mimeType: string): Promise<string
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     try {
-      const { blob, mimeType: compressedMime } = await compressCaptureFrameToBlob(base64, mimeType);
-      return await uploadImageBlob(blob, compressedMime);
+      const blob = base64ToBlob(base64, mimeType);
+      return await uploadImageBlob(blob, mimeType, true);
     } catch (err) {
       lastErr = err;
       if (attempt < UPLOAD_MAX_RETRIES) {
@@ -82,8 +82,6 @@ async function uploadAngleShotsConcurrently(
       const shot = shots[idx];
       try {
         const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg');
-        // Release this shot's base64 immediately after upload to free native heap
-        shot.base64 = undefined;
         results.push({ url, shot });
         const p = extractStoragePath(url);
         if (p) uploadedPaths.push(p);

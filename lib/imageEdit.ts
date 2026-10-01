@@ -118,11 +118,25 @@ export const UPLOAD_MAX_DIMENSION = 1080;
 export const UPLOAD_QUALITY = 0.68;
 const CAPTURE_MAX_DIMENSION = 1080;
 const CAPTURE_QUALITY = 0.78;
+const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
+
+function assertNativeImageSize(size: number | undefined): void {
+  if (Platform.OS !== 'web' && (size === undefined || size > MAX_NATIVE_IMAGE_BYTES)) {
+    throw new Error('이미지가 너무 커서 안전하게 처리할 수 없습니다. 더 낮은 해상도로 다시 촬영해주세요.');
+  }
+}
+
+function assertNativeBase64Size(base64: string): void {
+  if (Platform.OS !== 'web' && base64.length > MAX_NATIVE_IMAGE_BYTES * 1.4) {
+    throw new Error('이미지 데이터가 너무 커서 안전하게 처리할 수 없습니다. 다시 촬영해주세요.');
+  }
+}
 
 export async function compressCaptureFrameToBlob(
   base64: string,
   mimeType: string,
 ): Promise<{ blob: Blob | Uint8Array; base64: string; mimeType: string }> {
+  assertNativeBase64Size(base64);
   const dataUrl = `data:${mimeType};base64,${base64}`;
   try {
     const compressed = await prepareImageForApi(dataUrl, CAPTURE_MAX_DIMENSION, CAPTURE_QUALITY);
@@ -140,6 +154,7 @@ export async function compressBase64ForUpload(
   base64: string,
   mimeType: string,
 ): Promise<{ base64: string; mimeType: string }> {
+  assertNativeBase64Size(base64);
   const dataUrl = `data:${mimeType};base64,${base64}`;
 
   if (Platform.OS === 'web') {
@@ -181,22 +196,20 @@ export async function compressImageToBase64(
     );
     const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
     if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    assertNativeImageSize(fileInfo.size);
     const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
       encoding: FileSystem.EncodingType.Base64,
     });
     FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
     return { base64, mimeType: 'image/jpeg' };
   } catch {
-    // Fallback: read the original file as base64 without compression.
-    // Better to send a larger image than to crash the app.
     const fileInfo = await FileSystem.getInfoAsync(uri);
-    if (fileInfo.exists) {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      return { base64, mimeType: 'image/jpeg' };
-    }
-    throw new Error('이미지를 불러올 수 없습니다.');
+    if (!fileInfo.exists) throw new Error('이미지를 불러올 수 없습니다.');
+    assertNativeImageSize(fileInfo.size);
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { base64, mimeType: 'image/jpeg' };
   }
 }
 
@@ -342,6 +355,9 @@ export async function prepareImageForApi(
   moodFilter: MoodFilterType = 'none',
 ): Promise<string> {
   const normalizedDataUrl = normalizeImageDataUrl(dataUrl);
+  if (Platform.OS !== 'web') {
+    assertNativeBase64Size(cleanBase64(normalizedDataUrl));
+  }
   if (Platform.OS === 'web') {
     try {
       const img = await loadImageElement(normalizedDataUrl);
@@ -386,16 +402,14 @@ export async function prepareImageForApi(
 
     const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
     if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    assertNativeImageSize(fileInfo.size);
     const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
       encoding: FileSystem.EncodingType.Base64,
     });
     FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
     return `data:image/jpeg;base64,${base64}`;
   } catch {
-    // ImageManipulator can fail on Android with data URLs (native decoder
-    // may not handle base64 data URLs). Return the original so the caller
-    // can still proceed — the edge function will resize server-side.
-    return normalizedDataUrl;
+    throw new Error('이미지 압축에 실패했습니다. 더 낮은 해상도로 다시 촬영해주세요.');
   }
 }
 
@@ -404,6 +418,9 @@ export async function prepareImageForEdit(
   maxDimension = 1024,
 ): Promise<string> {
   const normalizedDataUrl = normalizeImageDataUrl(dataUrl);
+  if (Platform.OS !== 'web') {
+    assertNativeBase64Size(cleanBase64(normalizedDataUrl));
+  }
   if (Platform.OS === 'web') {
     try {
       const img = await loadImageElement(normalizedDataUrl);
@@ -546,6 +563,7 @@ export async function readUriAsBase64(uri: string): Promise<{ base64: string; mi
   }
   const fileInfo = await FileSystem.getInfoAsync(uri);
   if (!fileInfo.exists) throw new Error('파일을 찾을 수 없습니다');
+  assertNativeImageSize(fileInfo.size);
   const base64 = await FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
@@ -575,10 +593,12 @@ export async function compressImageToBase64WithUri(
     );
     const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
     if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    assertNativeImageSize(fileInfo.size);
     const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
       encoding: FileSystem.EncodingType.Base64,
     });
-    return { base64, mimeType: 'image/jpeg', compressedUri: manipulated.uri };
+    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+    return { base64, mimeType: 'image/jpeg', compressedUri: null };
   } catch {
     const result = await compressImageToBase64(uri, maxDimension, quality);
     return { ...result, compressedUri: null };

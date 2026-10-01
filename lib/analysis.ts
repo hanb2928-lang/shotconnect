@@ -38,13 +38,14 @@ export async function uploadImage(
 export async function uploadImageBlob(
   blob: Blob | Uint8Array,
   mimeType: string,
+  alreadyCompressed = false,
 ): Promise<string> {
   // If the blob is already small enough, upload as-is to avoid double-compression
   const MAX_RAW_BLOB_BYTES = 800_000; // ~800KB threshold
   let uploadBlob: Blob | Uint8Array = blob;
   let uploadMime = mimeType;
 
-  if (blob instanceof Blob && blob.size > MAX_RAW_BLOB_BYTES && mimeType.startsWith('image/')) {
+  if (!alreadyCompressed && blob instanceof Blob && blob.size > MAX_RAW_BLOB_BYTES && mimeType.startsWith('image/')) {
     try {
       const dataUrl = await blobToDataUrl(blob);
       const compressed = await prepareImageForApi(dataUrl, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);

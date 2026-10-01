@@ -6,7 +6,7 @@ const EDGE_FN_MAX_DIMENSION = 1080;
 const EDGE_FN_QUALITY = 0.72;
 // Native has limited memory and native thread pool for image manipulation;
 // 5 concurrent ImageManipulator calls can OOM on low-end Android devices.
-const PARALLEL_BATCH_SIZE = Platform.OS === 'web' ? 5 : 2;
+const PARALLEL_BATCH_SIZE = Platform.OS === 'web' ? 5 : 1;
 
 export interface CompressedImage {
   base64: string;
@@ -27,7 +27,8 @@ export async function compressForEdgeFunction(
       mimeType,
       dataUrl: compressed,
     };
-  } catch {
+  } catch (error) {
+    if (Platform.OS !== 'web') throw error;
     const mimeType = getMimeTypeFromDataUrl(dataUrl);
     return {
       base64: cleanBase64(dataUrl),
