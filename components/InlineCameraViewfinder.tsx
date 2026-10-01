@@ -131,8 +131,17 @@ export const InlineCameraViewfinder = forwardRef<
   useEffect(() => {
     mountedRef.current = true;
     if (Platform.OS !== 'web') {
-      setCameraReady(Boolean(permission?.granted && isActive));
-      return () => setCameraReady(false);
+      if (!permission?.granted || !isActive) {
+        setCameraReady(false);
+        return () => setCameraReady(false);
+      }
+      const id = setTimeout(() => {
+        if (mountedRef.current) setCameraReady(true);
+      }, 300);
+      return () => {
+        clearTimeout(id);
+        setCameraReady(false);
+      };
     }
     if (isActive) {
       const id = setTimeout(() => startWebStream(), 200);
