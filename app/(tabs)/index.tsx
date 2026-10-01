@@ -503,6 +503,7 @@ export default function CameraScreen() {
       if (autoAnalysisAbortRef.current === controller) autoAnalysisAbortRef.current = null;
       autoSavingRef.current = false;
       releasePipelineLock('postCapture');
+      nativeHeapCooldownGuard().catch(() => {});
     }
   }, [router]);
 
