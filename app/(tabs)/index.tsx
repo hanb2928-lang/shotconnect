@@ -172,6 +172,9 @@ export default function CameraScreen() {
     cameraReadyRef.current = ready;
     setCameraReady(ready);
   }, []);
+  const handleNativeCameraReady = useCallback(() => {
+    updateCameraReady(true);
+  }, [updateCameraReady]);
   const [isActive, setIsActive] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1150,7 +1153,7 @@ export default function CameraScreen() {
               autoSaveToast={null}
               autoSaveStep={1}
               onMultiAnglePress={() => setFittingGuideVisible(true)}
-              onCameraReady={() => updateCameraReady(true)}
+              onCameraReady={updateCameraReady}
               simplified
             />
           </View>
@@ -1258,7 +1261,7 @@ export default function CameraScreen() {
               ref={cameraRef}
               style={styles.cameraPreview}
               facing={facing}
-              onCameraReady={() => updateCameraReady(true)}
+              onCameraReady={handleNativeCameraReady}
               onMountError={() => { cameraReadyRef.current = false; setCameraReady(false); handleHardResetCamera(); }}
               mode="video"
             />
@@ -1356,7 +1359,7 @@ export default function CameraScreen() {
             autoSaveToast={autoSaveToast}
             autoSaveStep={autoSaveStep}
             onMultiAnglePress={() => setMultiAngleVisible(true)}
-            onCameraReady={() => updateCameraReady(true)}
+            onCameraReady={updateCameraReady}
             simplified
           />
         </View>
@@ -1464,7 +1467,7 @@ export default function CameraScreen() {
             ref={cameraRef}
             style={styles.cameraPreview}
             facing={facing}
-            onCameraReady={() => updateCameraReady(true)}
+            onCameraReady={handleNativeCameraReady}
             onMountError={() => { cameraReadyRef.current = false; setCameraReady(false); handleHardResetCamera(); }}
             mode="video"
           />
