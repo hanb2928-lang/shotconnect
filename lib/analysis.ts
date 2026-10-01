@@ -15,9 +15,14 @@ import { cleanBase64 } from '@/lib/base64';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  const abortError = () => {
+    const err = new Error('Aborted');
+    err.name = 'AbortError';
+    return err;
+  };
+  if (signal.aborted) return Promise.reject(abortError());
   return new Promise((resolve, reject) => {
-    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+    const onAbort = () => reject(abortError());
     signal.addEventListener('abort', onAbort, { once: true });
     promise.then(
       (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },

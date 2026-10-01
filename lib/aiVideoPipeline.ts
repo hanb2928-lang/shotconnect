@@ -425,12 +425,17 @@ function waitForVideoCompletion(
     };
 
     // External abort: user navigated away or cancelled the operation
+    const abortError = () => {
+      const err = new Error('Aborted');
+      err.name = 'AbortError';
+      return err;
+    };
     const abortListener = () => {
-      finish(() => reject(new DOMException('Aborted', 'AbortError')));
+      finish(() => reject(abortError()));
     };
     if (signal) {
       if (signal.aborted) {
-        finish(() => reject(new DOMException('Aborted', 'AbortError')));
+        finish(() => reject(abortError()));
         return;
       }
       signal.addEventListener('abort', abortListener, { once: true });
