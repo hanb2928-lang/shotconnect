@@ -42,7 +42,7 @@ const HIGHLIGHT_KEYWORDS: KeywordTrigger[] = [
   { keyword: 'amazing', effect: 'zoomIn', intensity: 1.2 },
   { keyword: 'crazy', effect: 'captionBounce', intensity: 1.5 },
   { keyword: 'wow', effect: 'captionBounce', intensity: 1.4 },
-  { keyword: ' obsessed', effect: 'pixelShake', intensity: 1.1 },
+  { keyword: 'obsessed', effect: 'pixelShake', intensity: 1.1 },
   { keyword: 'やばい', effect: 'zoomIn', intensity: 1.3 },
   { keyword: 'えぐい', effect: 'pixelShake', intensity: 1.2 },
   { keyword: 'すごい', effect: 'captionBounce', intensity: 1.2 },

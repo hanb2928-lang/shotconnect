@@ -670,9 +670,11 @@ export class BgmPlayer {
       this.bundledAudioEl.play().catch(() => {});
       return;
     }
+    if (this.schedulerTimer) { clearInterval(this.schedulerTimer); this.schedulerTimer = null; }
     this.nextNoteTime = this.audioCtx.currentTime + 0.05;
     const config = MOOD_SYNTH_CONFIGS[this.currentCategory];
     const bpm = MOOD_CONFIGS[this.currentCategory].bpm;
+    if (!bpm || bpm <= 0) return;
     const stepDurSec = 60 / bpm / 4;
     const totalSteps = config.chords.length * 16;
     const scheduleNotes = () => {

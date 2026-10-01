@@ -119,10 +119,13 @@ const CAPTURE_TIMEOUT_MS = 15000;
 const PICK_TIMEOUT_MS = 20000;
 const ANALYSIS_TIMEOUT_MS = 45000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string, controller?: AbortController): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} (시간 초과)`)), ms);
+    timer = setTimeout(() => {
+      if (controller) controller.abort();
+      reject(new Error(`${label} (시간 초과)`));
+    }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -809,6 +812,10 @@ export default function CameraScreen() {
   };
 
   const handleWebCapture = useCallback(async (payload: string, mimeType: string) => {
+    if (processingRef.current || autoSavingRef.current || stereoOverlayRef.current) return;
+    processingRef.current = true;
+    setProcessing(true);
+    try {
     const isVideo = mimeType.startsWith('video/');
     if (isVideo) {
       setPostCaptureBase64(null);
@@ -844,6 +851,10 @@ export default function CameraScreen() {
     }
     if (!isMountedRef.current) return;
     setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
+    } finally {
+      processingRef.current = false;
+      setProcessing(false);
+    }
   }, []);
 
   // ─── Fitting multi-angle capture (reuses stereo-cut handlers) ───

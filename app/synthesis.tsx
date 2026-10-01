@@ -120,15 +120,23 @@ export default function SynthesisScreen() {
     e.target.value = '';
   }, []);
 
+  const objectUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    objectUrlsRef.current = [
+      ...productImages.map((img) => img.uri),
+      ...(modelImage ? [modelImage.uri] : []),
+    ];
+  }, [productImages, modelImage]);
+
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     return () => {
-      productImages.forEach((img) => {
-        if (img.uri.startsWith('blob:')) URL.revokeObjectURL(img.uri);
+      objectUrlsRef.current.forEach((uri) => {
+        if (uri.startsWith('blob:')) URL.revokeObjectURL(uri);
       });
-      if (modelImage?.uri.startsWith('blob:')) URL.revokeObjectURL(modelImage.uri);
     };
-  }, [productImages, modelImage]);
+  }, []);
 
   const [jobId, setJobId] = useState<string | null>(null);
 

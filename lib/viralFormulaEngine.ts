@@ -169,11 +169,12 @@ const ALGORITHM_TARGETS = [
 ];
 
 export function buildViralFormula(totalDurationSec: number = 15): ViralFormula {
+  const safeEnd = Math.max(12, totalDurationSec);
   const phaseDurations = [
     { start: 0, end: Math.min(2, totalDurationSec) },
     { start: 2, end: Math.min(7, totalDurationSec) },
-    { start: 7, end: Math.min(12, totalDurationSec) },
-    { start: 12, end: totalDurationSec },
+    { start: 7, end: Math.min(safeEnd, totalDurationSec) },
+    { start: safeEnd, end: totalDurationSec },
   ];
 
   const phases: FormulaPhase[] = PHASE_DEFS.map((def, i) => {

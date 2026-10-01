@@ -157,7 +157,7 @@ export function splitTextForEmotionCurve(
   // so they need fewer characters per unit time.
   const speedAdjustedRatios = curve.segments.map((seg) => {
     const duration = seg.endSec - seg.startSec;
-    const adjustedDuration = duration / seg.speed;
+    const adjustedDuration = duration / (seg.speed || 1);
     return adjustedDuration;
   });
   const totalAdjusted = speedAdjustedRatios.reduce((sum, r) => sum + r, 0) || 1;

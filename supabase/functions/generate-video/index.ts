@@ -152,6 +152,14 @@ Deno.serve(async (req: Request) => {
 
     let body: GenerateVideoRequest;
     if (queryMode === "webhook") {
+      const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
+      const providedSecret = url.searchParams.get("secret") ?? "";
+      if (webhookSecret && providedSecret !== webhookSecret) {
+        return new Response(
+          JSON.stringify({ error: "웹훅 서명 검증에 실패했습니다." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
       body = {
         mode: "webhook",
         taskId: url.searchParams.get("taskId") ?? undefined,
@@ -408,7 +416,10 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
   const fps = body.fps ?? (hdUpscale ? 30 : 24);
 
   try {
-    const webhookUrl = `${supabaseUrl}/functions/v1/generate-video`;
+    const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
+    const webhookUrl = webhookSecret
+      ? `${supabaseUrl}/functions/v1/generate-video?mode=webhook&secret=${encodeURIComponent(webhookSecret)}`
+      : `${supabaseUrl}/functions/v1/generate-video?mode=webhook`;
 
     let promptImage: string | null = null;
     promptImage = await fetchScanImageUrl(scanId);

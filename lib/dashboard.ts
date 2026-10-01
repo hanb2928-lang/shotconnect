@@ -293,7 +293,7 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
         const topStyle = styleEntries.find(([, sv]) => sv.count > 0 && (sv.totalClicks / sv.count) === maxStyleCtr && sv.totalClicks > 0);
         if (topStyle) {
           const topLabel = STYLE_LABELS[topStyle[0]] || topStyle[0];
-          const diff = maxStyleCtr > 0 ? ((maxStyleCtr - avgCtr / 100) / (maxStyleCtr)) * 100 : 0;
+          const diff = maxStyleCtr > 0 ? ((maxStyleCtr - avgCtr / 100) / maxStyleCtr) * 100 : 0;
           recommendation = `${topLabel} 스타일이 클릭률 ${diff.toFixed(0)}% 더 높습니다. ${topLabel} 스타일을 시도해보세요.`;
         }
       } else {

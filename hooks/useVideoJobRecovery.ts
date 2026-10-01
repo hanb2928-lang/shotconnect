@@ -38,9 +38,10 @@ export function useVideoJobRecovery() {
         .eq('id', jobId)
         .maybeSingle();
 
-      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
-        setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 5000),
-      );
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
+        const t = setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 5000);
+        (t as unknown as { _unref?: () => void })._unref?.();
+      });
 
       const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 

@@ -13,8 +13,8 @@ function detectTier(): DeviceTier {
     const cores = nav?.hardwareConcurrency;
 
     if (mem && mem <= 2) { cachedTier = 'low'; return cachedTier; }
-    if (cores && cores <= 4) { cachedTier = 'low'; return cachedTier; }
-    if (mem && mem <= 4) { cachedTier = 'mid'; return cachedTier; }
+    if (cores && cores <= 2) { cachedTier = 'low'; return cachedTier; }
+    if (mem && mem <= 4 && cores && cores <= 4) { cachedTier = 'mid'; return cachedTier; }
     cachedTier = 'high';
     return cachedTier;
   }

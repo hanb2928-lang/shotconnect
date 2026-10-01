@@ -96,7 +96,7 @@ const KEYWORD_PATTERNS: { category: KeywordCategory; patterns: string[]; color: 
   },
 ];
 
-const NUMBER_REGEX = /\b\d+초\b|\b\d+분\b|\b\d+개\b|\b\d+만\b|\b\d+%\b|\b\d+원\b/g;
+const NUMBER_REGEX = /(?:^|[^\d])(\d+)(초|분|개|만|%|원)/g;
 
 const MASTER_TEMPLATE: SubtitleTemplate = {
   id: 'top1_master',
@@ -148,12 +148,15 @@ export function findKeywordsInText(text: string): HighlightKeyword[] {
   let match: RegExpExecArray | null;
   NUMBER_REGEX.lastIndex = 0;
   while ((match = NUMBER_REGEX.exec(text)) !== null) {
-    const idx = match.index;
-    const endIndex = idx + match[0].length;
+    const fullMatch = match[0];
+    const numberUnit = match[1] + match[2];
+    const prefixLen = fullMatch.length - numberUnit.length;
+    const idx = match.index + prefixLen;
+    const endIndex = idx + numberUnit.length;
     const overlaps = usedRanges.some((r) => idx < r.end && endIndex > r.start);
     if (!overlaps) {
       keywords.push({
-        text: match[0],
+        text: numberUnit,
         category: 'number',
         startIndex: idx,
         endIndex,

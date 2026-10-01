@@ -748,8 +748,8 @@ function selectWeightedPattern(
     return { pattern: p, score: p.effectivenessScore + learnedWeight * 0.01 + recencyBoost };
   });
 
-  const maxScore = Math.max(...scored.map((s) => s.score));
-  const weighted = scored.map((s) => ({ ...s, normalized: s.score / maxScore }));
+  const maxScore = Math.max(...scored.map((s) => s.score), 0);
+  const weighted = scored.map((s) => ({ ...s, normalized: maxScore > 0 ? s.score / maxScore : 1 }));
   const total = weighted.reduce((sum, s) => sum + s.normalized, 0);
   let r = Math.random() * total;
   for (const s of weighted) {
@@ -879,10 +879,9 @@ export async function generateNanoFusedAnalysis(
     text: fillTemplate(p.template, productMeta),
   }));
 
-  const estimatedBoost = Math.min(
-    95,
-    Math.round(selectedSnipers.reduce((sum, s) => sum + s.conversionBoostPercent, 0) / selectedSnipers.length * 1.5),
-  );
+  const estimatedBoost = selectedSnipers.length > 0
+    ? Math.min(95, Math.round(selectedSnipers.reduce((sum, s) => sum + s.conversionBoostPercent, 0) / selectedSnipers.length * 1.5))
+    : 0;
 
   const appliedPatternIds = selectedPatterns.map((p) => p.id);
   const appliedSniperIds = selectedSnipers.map((s) => s.id);
