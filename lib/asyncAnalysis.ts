@@ -8,6 +8,7 @@ import { buildDataUrl, base64ToUint8Array } from '@/lib/base64';
 import { hashImage, hashMultiAngle } from '@/lib/contentHash';
 import { TTS_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
+import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
 
 const SUPABASE_TIMEOUT_MS = 30000;
 
@@ -58,7 +59,9 @@ export async function startAsyncAnalysis(
   mode: 'single' | 'multi' = 'multi',
   additionalBase64Images: string[] = [],
   preferredStyle?: string,
+  signal?: AbortSignal,
 ): Promise<AsyncAnalysisResult> {
+  const aborted = (): boolean => signal?.aborted === true;
   const fileName = `scan-${Date.now()}`;
   const imageHash = additionalBase64Images.length > 0
     ? hashMultiAngle([base64, ...additionalBase64Images], preferredStyle)
@@ -73,10 +76,12 @@ export async function startAsyncAnalysis(
       .maybeSingle()),
     '캐시 조회',
   );
+  if (aborted()) throw new Error('분석이 취소되었습니다.');
   const cached = cacheResult.data as { analysis_result: unknown } | null;
 
   if (cached?.analysis_result) {
     // Cache hit — upload image for the scan record, then create scan with full data
+    if (aborted()) throw new Error('분석이 취소되었습니다.');
     const imageUrl = await uploadImage(base64, mimeType);
     const cacheUploadedPath = extractStoragePath(imageUrl);
     const analysis = cached.analysis_result as unknown as AnalysisResult;
@@ -98,6 +103,7 @@ export async function startAsyncAnalysis(
   const uploadedPaths: string[] = [];
   let imageUrl: string;
   try {
+    if (aborted()) throw new Error('분석이 취소되었습니다.');
     imageUrl = await uploadImage(base64, mimeType);
     const p = extractStoragePath(imageUrl);
     if (p) uploadedPaths.push(p);
@@ -107,13 +113,20 @@ export async function startAsyncAnalysis(
 
   const additionalUrls: string[] = [];
   let uploadFailures = 0;
-  for (const b64 of additionalBase64Images) {
+  for (let i = 0; i < additionalBase64Images.length; i++) {
+    if (aborted()) {
+      await rollbackUploads(uploadedPaths);
+      throw new Error('분석이 취소되었습니다.');
+    }
     try {
-      const url = await uploadImage(b64, 'image/jpeg');
+      const url = await uploadImage(additionalBase64Images[i], 'image/jpeg');
       additionalUrls.push(url);
       const ap = extractStoragePath(url);
       if (ap) uploadedPaths.push(ap);
       uploadFailures = 0;
+      if (i < additionalBase64Images.length - 1) {
+        await nativeHeapCooldownGuard();
+      }
     } catch {
       uploadFailures++;
       if (uploadFailures >= 2) {
@@ -143,6 +156,10 @@ export async function startAsyncAnalysis(
           ...(preferredStyle ? { preferredStyle } : {}),
         };
 
+  if (aborted()) {
+    await rollbackUploads(uploadedPaths);
+    throw new Error('분석이 취소되었습니다.');
+  }
   let jobId: string;
   try {
     jobId = await enqueueJob('analyze-photo', payload, {
@@ -153,6 +170,10 @@ export async function startAsyncAnalysis(
     throw err;
   }
 
+  if (aborted()) {
+    await rollbackUploads(uploadedPaths);
+    throw new Error('분석이 취소되었습니다.');
+  }
   let scanId: string;
   try {
     scanId = await createPendingScan(imageUrl, jobId, additionalUrls, mode, imageHash);

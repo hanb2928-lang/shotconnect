@@ -88,6 +88,7 @@ export function MultiAngleCaptureGuide({
   const [processing, setProcessing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const pickLockRef = useRef(false);
+  const captureBtnLockRef = useRef(false);
   const shotsRef = useRef<Record<string, AngleShot>>({});
   const viewfinderRefs = useRef<Record<string, InlineViewfinderHandle | null>>({});
   const mountedRef = useRef(true);
@@ -317,9 +318,13 @@ export function MultiAngleCaptureGuide({
                       <TouchableOpacity
                         style={[styles.actionBtn, { backgroundColor: effectiveAccentBg }, !onCaptureImage && styles.actionBtnHidden]}
                         onPress={() => {
-                          if (pickLockRef.current || processing) return;
+                          if (pickLockRef.current || processing || captureBtnLockRef.current) return;
+                          captureBtnLockRef.current = true;
                           setCurrentAngle(idx);
                           handleCaptureFromCamera(guide.id);
+                          setTimeout(() => {
+                            if (mountedRef.current) captureBtnLockRef.current = false;
+                          }, 600);
                         }}
                         disabled={processing}
                         activeOpacity={0.6}

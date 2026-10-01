@@ -416,9 +416,10 @@ export default function CameraScreen() {
       await nativeHeapCooldownGuard();
       if (genIdRef.current !== genId || !isMountedRef.current) return;
       const { scanId } = await withTimeout(
-        startAsyncAnalysis(base64, mimeType, additionalB64s.length > 0 ? 'multi' : 'single', additionalB64s, contentTone),
+        startAsyncAnalysis(base64, mimeType, additionalB64s.length > 0 ? 'multi' : 'single', additionalB64s, contentTone, controller.signal),
         ANALYSIS_TIMEOUT_MS,
         'AI 자동 분석',
+        controller,
       );
       if (genIdRef.current !== genId || !isMountedRef.current) return;
       setAutoSaveToast('숏폼 영상이 보관함에 자동 저장되었습니다!');
@@ -457,11 +458,13 @@ export default function CameraScreen() {
 
     autoSavingRef.current = true;
     if (!acquirePipelineLock('postCapture')) { autoSavingRef.current = false; return; }
+    const controller = new AbortController();
+    autoAnalysisAbortRef.current = controller;
     try {
       // Native heap cooldown before heavy upload/frame extraction: prevents
       // native heap double-burst → LMK SIGKILL after photo capture.
       await nativeHeapCooldownGuard();
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || controller.signal.aborted) return;
       if (!base64) {
         if (!videoUri) return;
         const frame = await withTimeout(
@@ -469,18 +472,24 @@ export default function CameraScreen() {
           PICK_TIMEOUT_MS,
           '동영상 프레임 추출',
         );
+        if (!isMountedRef.current || controller.signal.aborted) return;
         const imageUrl = await uploadImage(frame.base64, frame.mimeType);
+        if (!isMountedRef.current || controller.signal.aborted) return;
         const scanId = await saveManualScan(imageUrl);
+        if (!isMountedRef.current || controller.signal.aborted) return;
         router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
         return;
       }
       const imageUrl = await uploadImage(base64, mimeType);
+      if (!isMountedRef.current || controller.signal.aborted) return;
       const scanId = await saveManualScan(imageUrl);
+      if (!isMountedRef.current || controller.signal.aborted) return;
       router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
     } catch (err) {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || controller.signal.aborted) return;
       setError(friendlyError(err, '편집 화면을 여는 중 오류가 발생했습니다. 다시 시도해주세요.'));
     } finally {
+      if (autoAnalysisAbortRef.current === controller) autoAnalysisAbortRef.current = null;
       autoSavingRef.current = false;
       releasePipelineLock('postCapture');
     }
@@ -620,7 +629,7 @@ export default function CameraScreen() {
     let scanId: string;
     let uploadedUrls: string[];
     try {
-      const result = await createScanFromAngleShots(sorted);
+      const result = await createScanFromAngleShots(sorted, controller.signal);
       scanId = result.scanId;
       uploadedUrls = result.uploadedUrls;
     } catch (err) {
@@ -892,7 +901,7 @@ export default function CameraScreen() {
 
     let scanId: string;
     try {
-      const result = await createScanFromAngleShots(sorted);
+      const result = await createScanFromAngleShots(sorted, controller.signal);
       scanId = result.scanId;
     } catch (err) {
       if (!isMountedRef.current) return;

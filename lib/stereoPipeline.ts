@@ -9,6 +9,7 @@ import { buildMultiPlatformPublishPlans, type PublishPlan } from './publishManag
 import { getDeepLink } from './platformUpload';
 import * as Linking from 'expo-linking';
 import { isOnline } from '@/hooks/useNetworkStatus';
+import { nativeHeapCooldownGuard } from './imageEdit';
 import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
 
 const UPLOAD_MAX_RETRIES = 2;
@@ -44,9 +45,9 @@ function waitForOnline(): Promise<boolean> {
 
 async function uploadWithRetry(base64: string, mimeType: string): Promise<string> {
   let lastErr: unknown = null;
+  const blob = base64ToBlob(base64, mimeType);
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     try {
-      const blob = base64ToBlob(base64, mimeType);
       return await uploadImageBlob(blob, mimeType, true);
     } catch (err) {
       lastErr = err;
@@ -199,12 +200,18 @@ async function invokeStereoCutAuto(
 
 export async function createScanFromAngleShots(
   shots: AngleShot[],
+  signal?: AbortSignal,
 ): Promise<{ scanId: string; uploadedUrls: string[] }> {
+  const aborted = (): boolean => signal?.aborted === true;
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
 
   const { results, failures, uploadedPaths } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY);
+  if (aborted()) {
+    await rollbackUploads(uploadedPaths);
+    throw new Error('업로드가 취소되었습니다.');
+  }
 
   if (results.length === 0) {
     await rollbackUploads(uploadedPaths);
@@ -329,6 +336,11 @@ export async function runStereoPipeline(
   // We only null out the copies in `sorted`, not the caller's originals.
   for (const s of sorted) { (s as { base64?: string }).base64 = undefined; }
 
+  // Yield to allow GC to reclaim the released base64 strings before the
+  // CPU-heavy synthesis call. On low-end Android, failing to yield here
+  // can cause the native heap to overlap with the next allocation and OOM.
+  await nativeHeapCooldownGuard();
+
   // Run local synthesis and cloud stereo analysis in parallel — local synthesis
   // is CPU-only and doesn't depend on the upload, so it can overlap with the
   // cloud call to cut total latency to max(local, cloud) instead of local + cloud.
@@ -369,6 +381,10 @@ export async function runStereoPipeline(
   // the rest of the pipeline risks native heap overflow on low-end devices.
   anglePayloads.length = 0;
   angleInputs.length = 0;
+
+  // Yield to let GC reclaim the multi-MB base64 payloads before subsequent
+  // pipeline steps allocate memory for edit plans and publish metadata.
+  await nativeHeapCooldownGuard();
 
   const synthesisSummary = cloudResult
     ? `${cloudResult.synthesis.spatialDepthHint} · 볼륨 신뢰도 ${Math.round(cloudResult.synthesis.volumeEstimate.confidence * 100)}% · ${cloudResult.synthesis.contextMatch.label} 맥락`

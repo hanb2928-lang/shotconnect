@@ -39,6 +39,7 @@ export const InlineCameraViewfinder = forwardRef<
   const streamRef = useRef<MediaStream | null>(null);
   const mountedRef = useRef(true);
   const streamGenRef = useRef(0);
+  const captureLockRef = useRef(false);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -193,6 +194,15 @@ export const InlineCameraViewfinder = forwardRef<
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
   };
 
+  const handleCapturePress = useCallback(() => {
+    if (captureLockRef.current) return;
+    captureLockRef.current = true;
+    onCapture?.();
+    setTimeout(() => {
+      if (mountedRef.current) captureLockRef.current = false;
+    }, 600);
+  }, [onCapture]);
+
   if (Platform.OS === 'web') {
     return (
       <View style={styles.wrapper}>
@@ -266,7 +276,7 @@ export const InlineCameraViewfinder = forwardRef<
 
           <TouchableOpacity
             style={[styles.captureSmallBtn, !cameraReady && styles.captureSmallBtnDisabled]}
-            onPress={onCapture}
+            onPress={handleCapturePress}
             disabled={!cameraReady || processing}
             activeOpacity={0.85}
           >
@@ -352,7 +362,7 @@ export const InlineCameraViewfinder = forwardRef<
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.captureSmallBtn, !cameraReady && styles.captureSmallBtnDisabled]}
-          onPress={onCapture}
+          onPress={handleCapturePress}
           disabled={!cameraReady || processing}
           activeOpacity={0.85}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
