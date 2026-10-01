@@ -326,9 +326,9 @@ export async function runStereoPipeline(
   steps[0].detail = '로컬 3D 분석 + 클라우드 GPU 볼륨 복원 동시 처리 중...';
   report(0, 0.15);
   const tonePrompt = contentTone === 'studio'
-    ? `스튜디오 프리미엄 화장품 주얼리 패션 전자기기 럭셔리${studioSliders ? ` — 광채 강화 ${studioSliders.facetSparkle}% · 텍스처 디테일 ${studioSliders.fabricDetail}% · 블렌딩 ${studioSliders.blendStrength}%${studioSliders.smartFit === false ? ' · 스마트 핏 비활성' : ''}` : ''}`
+    ? `스튜디오 프리미엄 고급스러운 디테일 영화적 조명${studioSliders ? ` — 광채 강화 ${studioSliders.facetSparkle}% · 텍스처 디테일 ${studioSliders.fabricDetail}% · 블렌딩 ${studioSliders.blendStrength}%${studioSliders.smartFit === false ? ' · 스마트 핏 비활성' : ''}` : ''}`
     : contentTone === 'raw'
-    ? '날것의 심리자극 생활용품 식품 가성비 꿀팁 꿀템'
+    ? '날것의 심리자극 리얼 후기 즉각적 시선 끌기'
     : '';
   let localSynthesis: ReturnType<typeof runSynthesis>;
   let cloudResultRaw: CloudPipelineResult | null;

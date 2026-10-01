@@ -265,7 +265,7 @@ export default function SynthesisScreen() {
         },
         {
           key: 'caustics',
-          label: '주얼리 광채 강화',
+          label: '광채 강화',
           description: '보석·금속의 빛 반사와 굴절 효과 극대화',
           enabled: enableCaustics,
           onToggle: () => setEnableCaustics((v) => !v),

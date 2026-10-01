@@ -161,7 +161,7 @@ function Auto3DPanel({ onValuesChange, productCategory }: { onValuesChange?: (va
           {'  '}광채 및 질감 제어
         </Text>
         <GoldSlider
-          label="주얼리 컷 팩싯 강화"
+          label="광채 및 팩싯 강화"
           value={facetSparkle}
           onValueChange={handleFacetSparkle}
         />
@@ -303,7 +303,7 @@ function AIBlendPanel({ onValuesChange, productCategory }: { onValuesChange?: (v
           {'  '}소재 혼합 보정
         </Text>
         <GoldSlider
-          label="의류·주얼리 경계면 블렌딩 강도"
+          label="경계면 블렌딩 강도"
           value={blendStrength}
           onValueChange={handleBlendStrength}
         />
@@ -321,7 +321,7 @@ export function StudioPremiumPanel({ mode, onValuesChange, productCategory }: St
         <View style={styles.panelBadge}>
           <Diamond size={11} color={theme.colors.gold[400]} strokeWidth={2.5} />
         </View>
-        <Text style={styles.panelTitle}>스튜디오 프리미엄 · 패션·주얼리 특화</Text>
+        <Text style={styles.panelTitle}>스튜디오 프리미엄 · 디테일 강화</Text>
       </View>
       {mode === 'auto-3d' ? <Auto3DPanel onValuesChange={onValuesChange} productCategory={productCategory} /> : <AIBlendPanel onValuesChange={onValuesChange} productCategory={productCategory} />}
     </View>

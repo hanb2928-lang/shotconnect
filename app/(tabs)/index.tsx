@@ -933,7 +933,7 @@ export default function CameraScreen() {
                 </Text>
               </View>
               <Text style={[styles.toneHintText, contentTone === 'studio' && styles.toneHintTextActive]}>
-                화장품 · 주얼리 · 패션 · 전자기기 · 홈데코 · 럭셔리 식품
+                고급스러운 스튜디오 감도 · 디테일 강조 · 영화적 조명
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -959,7 +959,7 @@ export default function CameraScreen() {
                 </Text>
               </View>
               <Text style={[styles.toneHintText, contentTone === 'raw' && styles.toneHintTextActive]}>
-                생활용품 · 식품 · 가성비 전자기기 · 패션 액세서리 · 다이어트
+                리얼 후기 느낌 · 자극적 훅 · 즉각적 시선 끌기
               </Text>
             </TouchableOpacity>
           </View>

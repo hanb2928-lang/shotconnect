@@ -41,8 +41,8 @@ const GUIDE_CONFIG: Record<GuideStepKey, {
     num: '4',
     icon: Send,
     color: theme.colors.primary[400],
-    title: '4단계: 제휴쇼핑 및 발행',
-    desc: '제휴 링크와 홍보 문구를 터치 한 번으로 복사하고 SNS에 붙여넣어 수익을 만들어보세요!',
+    title: '4단계: 발행 및 공유',
+    desc: '완성된 숏폼을 SNS에 바로 공유하고 저장하세요!',
   },
   complete: {
     num: '✓',

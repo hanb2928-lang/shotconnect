@@ -14,13 +14,13 @@ interface Props {
 const MOOD_CONFIG: Record<ProductMood, { label: string; desc: string; icon: React.ReactNode; color: string }> = {
   studio_premium: {
     label: '스튜디오 프리미엄',
-    desc: '화장품·주얼리·패션·전자기기·홈데코·럭셔리 식품',
+    desc: '고급스러운 스튜디오 감도 · 디테일 강조 · 영화적 조명',
     icon: <Gem size={16} color="#fff" strokeWidth={2} />,
     color: theme.colors.primary[500],
   },
   raw_psychology: {
     label: '날것의 심리자극',
-    desc: '생활용품·식품·가성비 전자기기·패션 액세서리·다이어트',
+    desc: '리얼 후기 느낌 · 자극적 훅 · 즉각적 시선 끌기',
     icon: <Flame size={16} color="#fff" strokeWidth={2} />,
     color: theme.colors.warning[500],
   },
@@ -36,7 +36,7 @@ function ProductMoodPresetCardInner({ autoDetectedMood, mood, onMoodChange }: Pr
         <View style={styles.stepBadge}>
           <Text style={styles.stepBadgeText}>2</Text>
         </View>
-        <Text style={styles.title}>상품 무드 프리셋</Text>
+        <Text style={styles.title}>콘텐츠 무드 프리셋</Text>
         {isAuto && (
           <View style={styles.autoBadge}>
             <Sparkles size={11} color={theme.colors.primary[200]} strokeWidth={2.5} />
