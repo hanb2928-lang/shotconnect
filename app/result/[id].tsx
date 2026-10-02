@@ -522,6 +522,7 @@ export default function ResultScreen() {
   const [muxProgress, setMuxProgress] = useState<number>(0);
   const [muxError, setMuxError] = useState<string | null>(null);
   const muxDoneRef = useRef<string | null>(null);
+  const muxedBlobUrlRef = useRef<string | null>(null);
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
@@ -1260,6 +1261,10 @@ export default function ResultScreen() {
         clearInterval(draftProgressTimerRef.current);
         draftProgressTimerRef.current = null;
       }
+      if (muxedBlobUrlRef.current) {
+        URL.revokeObjectURL(muxedBlobUrlRef.current);
+        muxedBlobUrlRef.current = null;
+      }
     };
   }, []);
 
@@ -1632,6 +1637,10 @@ export default function ResultScreen() {
           }
         }
         if (!cancelled) {
+          if (muxedBlobUrlRef.current && muxedBlobUrlRef.current !== finalUrl) {
+            URL.revokeObjectURL(muxedBlobUrlRef.current);
+          }
+          muxedBlobUrlRef.current = finalUrl.startsWith('blob:') ? finalUrl : null;
           setMuxedVideoUrl(finalUrl);
         } else if (finalUrl === result.url) {
           result.revoke();

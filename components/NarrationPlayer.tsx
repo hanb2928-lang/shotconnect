@@ -151,6 +151,11 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
         throw new Error('오디오 URL 형식이 올바르지 않습니다');
       }
       const ctx = unlockAudioContext();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
+      }
       const audio = new Audio();
       if (!audio) throw new Error('Failed to create Audio element');
       audio.src = ttsUrl;

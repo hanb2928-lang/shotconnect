@@ -113,7 +113,15 @@ export default function SynthesisScreen() {
         angle: angleLabels[productImages.length + i] || `사진 ${productImages.length + i + 1}`,
       });
     }
-    if (newImages.length > 0) setProductImages((prev) => [...prev, ...newImages]);
+    if (newImages.length > 0) {
+      setProductImages((prev) => {
+        const replaced = prev.filter((img) => {
+          if (img.uri.startsWith('blob:')) { URL.revokeObjectURL(img.uri); return false; }
+          return true;
+        });
+        return [...replaced, ...newImages];
+      });
+    }
     e.target.value = '';
   }, [productImages.length]);
 
@@ -121,18 +129,22 @@ export default function SynthesisScreen() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
+    if (modelImage?.uri.startsWith('blob:')) URL.revokeObjectURL(modelImage.uri);
     const url = URL.createObjectURL(file);
     setModelImage({ id: `model-${Date.now()}`, uri: url });
     e.target.value = '';
-  }, []);
+  }, [modelImage]);
 
   const objectUrlsRef = useRef<string[]>([]);
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    objectUrlsRef.current = [
+    const currentUrls = [
       ...productImages.map((img) => img.uri),
       ...(modelImage ? [modelImage.uri] : []),
     ];
+    const stale = objectUrlsRef.current.filter((u) => !currentUrls.includes(u));
+    stale.forEach((u) => { if (u.startsWith('blob:')) URL.revokeObjectURL(u); });
+    objectUrlsRef.current = currentUrls;
   }, [productImages, modelImage]);
 
   useEffect(() => {

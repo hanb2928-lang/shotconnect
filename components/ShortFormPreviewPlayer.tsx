@@ -504,6 +504,12 @@ useEffect(() => {
         clearTimeout(bufferingTimeoutRef.current);
         bufferingTimeoutRef.current = null;
       }
+      if (Platform.OS === 'web' && webVideoRef.current) {
+        webVideoRef.current.pause();
+        webVideoRef.current.removeAttribute('src');
+        webVideoRef.current.load();
+        webVideoRef.current = null;
+      }
     };
   }, [stop]);
 
