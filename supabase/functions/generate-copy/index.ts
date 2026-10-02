@@ -431,6 +431,33 @@ function safeSlice(s: string, max: number): string {
   return cut;
 }
 
+// Remove orphaned surrogate halves and stray control characters from
+// AI-generated text to prevent mojibake when stored in the database or
+// rendered to canvas/WebView. Preserves valid 4-byte emoji pairs.
+function sanitizeTextOutput(s: string): string {
+  if (!s) return s;
+  let result = '';
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        result += s[i] + s[i + 1];
+        i++;
+      } else {
+        result += '\uFFFD';
+      }
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      result += '\uFFFD';
+    } else if (code === 0xFEFF || (code < 0x20 && code !== 0x09 && code !== 0x0A && code !== 0x0D) || (code >= 0x7F && code <= 0x9F)) {
+      continue;
+    } else {
+      result += s[i];
+    }
+  }
+  return result;
+}
+
 function typeLabel(copyType: CopyType): string {
   if (copyType === "deal") return "파격할인형 (할인/한정/가치 강조)";
   if (copyType === "info") return "정보형 (꿀팁/비교/리뷰 형식)";
@@ -586,10 +613,10 @@ async function generateWithOpenAI(
   const rawCopies = Array.isArray(parsed.copies) ? parsed.copies : [];
 
   return rawCopies.slice(0, count).map((c: any) => ({
-    hook: safeSlice(String(c.hook || ""), 80),
-    caption: safeSlice(String(c.caption || ""), 500),
+    hook: sanitizeTextOutput(safeSlice(String(c.hook || ""), 80)),
+    caption: sanitizeTextOutput(safeSlice(String(c.caption || ""), 500)),
     hashtags: Array.isArray(c.hashtags)
-      ? c.hashtags.map((h: any) => String(h).replace(/^#/, "")).slice(0, 15)
+      ? c.hashtags.map((h: any) => sanitizeTextOutput(String(h).replace(/^#/, ""))).slice(0, 15)
       : [],
   }));
 }

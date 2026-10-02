@@ -13,6 +13,7 @@ import { aiCachedCall } from '@/lib/aiCache';
 import { hashObject } from '@/lib/contentHash';
 import { cleanBase64 } from '@/lib/base64';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
+import { sanitizeEncodedText } from '@/lib/textSanitizer';
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   const abortError = () => {
@@ -272,12 +273,12 @@ function normalizeProductName(name: string | undefined): string {
 }
 
 function normalizeAnalysis(data: Record<string, unknown>): AnalysisResult {
-  const productName = normalizeProductName(data.productName as string);
-  const rawOneLiner = sanitizeText((data.oneLiner as string) || '');
-  const rawSummary = sanitizeText((data.summary as string) || '');
-  const rawTitle = sanitizeText((data.title as string) || 'Product Captured');
-  const rawHook = sanitizeText((data.hook as string) || '');
-  const rawCaption = sanitizeText((data.caption as string) || '');
+  const productName = sanitizeEncodedText(normalizeProductName(data.productName as string));
+  const rawOneLiner = sanitizeEncodedText(sanitizeText((data.oneLiner as string) || ''));
+  const rawSummary = sanitizeEncodedText(sanitizeText((data.summary as string) || ''));
+  const rawTitle = sanitizeEncodedText(sanitizeText((data.title as string) || 'Product Captured'));
+  const rawHook = sanitizeEncodedText(sanitizeText((data.hook as string) || ''));
+  const rawCaption = sanitizeEncodedText(sanitizeText((data.caption as string) || ''));
   return {
     title: rawTitle,
     summary: rawSummary,
@@ -445,7 +446,13 @@ export async function deleteScan(id: string): Promise<void> {
 
 function trimText(text: string, max: number): string {
   if (text.length <= max) return text;
-  return text.slice(0, max).trimEnd() + '…';
+  let trimmed = text.slice(0, max);
+  // If the cut landed between a surrogate pair, back up one unit
+  const lastCode = trimmed.charCodeAt(trimmed.length - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return sanitizeEncodedText(trimmed.trimEnd() + '\u2026');
 }
 
 export async function updateScanWithAnalysis(

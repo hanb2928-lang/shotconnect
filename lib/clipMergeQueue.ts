@@ -26,6 +26,8 @@ export interface ClipMergeResult {
   id: string;
   mux: MuxResult | null;
   error?: string;
+  retryable?: boolean;
+  attempts?: number;
 }
 
 export interface MergeQueueProgress {
@@ -39,6 +41,28 @@ export interface MergeQueueProgress {
 export type MergeQueueProgressCallback = (p: MergeQueueProgress) => void;
 
 type QueueState = 'idle' | 'running' | 'paused';
+
+const MAX_RETRY_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 1500;
+
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    // Network timeouts, transient fetch failures, and media load issues
+    // are worth retrying. Permanent failures (no MediaRecorder, no audio
+    // track) are not.
+    if (msg.includes('timeout') || msg.includes('timed out')) return true;
+    if (msg.includes('network') || msg.includes('fetch')) return true;
+    if (msg.includes('media load')) return true;
+    if (msg.includes('abort')) return true;
+  }
+  // null mux result (unsupported environment) is not retryable
+  return false;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 let queueState: QueueState = 'idle';
 const pendingClips: ClipMergeInput[] = [];
@@ -92,20 +116,63 @@ export async function mergeClipsSequentially(
       });
     };
 
-    try {
-      const mux = await muxVideoWithAudio(clip.videoUrl, clip.audioUrl, clipProgress);
+    let clipResult: ClipMergeResult | null = null;
+    let lastError: unknown = null;
 
-      if (mux) {
-        results.push({ id: clip.id, mux });
-        progressCallback?.({
-          currentIndex: i,
-          totalClips: clips.length,
-          clipId: clip.id,
-          phase: 'done',
-          progress: 1,
-        });
-      } else {
-        results.push({ id: clip.id, mux: null, error: '병합 실패' });
+    for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+      if (queueState !== 'running') break;
+
+      try {
+        const mux = await muxVideoWithAudio(clip.videoUrl, clip.audioUrl, clipProgress);
+
+        if (mux) {
+          clipResult = { id: clip.id, mux, attempts: attempt + 1 };
+          progressCallback?.({
+            currentIndex: i,
+            totalClips: clips.length,
+            clipId: clip.id,
+            phase: 'done',
+            progress: 1,
+          });
+          break;
+        } else {
+          lastError = new Error('병합 실패');
+          // null mux = environment doesn't support it — not retryable
+          clipResult = {
+            id: clip.id,
+            mux: null,
+            error: '이 기기에서는 병합을 지원하지 않습니다.',
+            retryable: false,
+            attempts: attempt + 1,
+          };
+          break;
+        }
+      } catch (err) {
+        lastError = err;
+        const retryable = isRetryableError(err);
+
+        if (attempt < MAX_RETRY_ATTEMPTS && retryable) {
+          // Retry after backoff — the queue continues with the same clip
+          progressCallback?.({
+            currentIndex: i,
+            totalClips: clips.length,
+            clipId: clip.id,
+            phase: 'preparing',
+            progress: 0,
+          });
+          await delay(RETRY_DELAY_MS * (attempt + 1));
+          continue;
+        }
+
+        // Exhausted retries or non-retryable — record the failure and
+        // move on to the next clip. The queue does NOT stop.
+        clipResult = {
+          id: clip.id,
+          mux: null,
+          error: err instanceof Error ? err.message : '알 수 없는 오류',
+          retryable,
+          attempts: attempt + 1,
+        };
         progressCallback?.({
           currentIndex: i,
           totalClips: clips.length,
@@ -113,19 +180,19 @@ export async function mergeClipsSequentially(
           phase: 'error',
           progress: 0,
         });
+        break;
       }
-    } catch (err) {
+    }
+
+    if (clipResult) {
+      results.push(clipResult);
+    } else {
       results.push({
         id: clip.id,
         mux: null,
-        error: err instanceof Error ? err.message : '알 수 없는 오류',
-      });
-      progressCallback?.({
-        currentIndex: i,
-        totalClips: clips.length,
-        clipId: clip.id,
-        phase: 'error',
-        progress: 0,
+        error: lastError instanceof Error ? lastError.message : '알 수 없는 오류',
+        retryable: false,
+        attempts: MAX_RETRY_ATTEMPTS + 1,
       });
     }
 
