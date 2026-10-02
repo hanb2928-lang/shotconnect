@@ -64,11 +64,17 @@ function purgeLegacyWebSession(): void {
 function refreshStalePreview(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
   try {
-    if (window.sessionStorage.getItem('shotconnect-preview-version') === SHOTCONNECT_PREVIEW_VERSION) return;
+    const stored = window.sessionStorage.getItem('shotconnect-preview-version');
+    if (stored === SHOTCONNECT_PREVIEW_VERSION) return;
+    // Write the new version first, then reload. If the write throws
+    // (restricted sessionStorage in a sandboxed iframe), abort — a
+    // reload would loop forever since the version can never persist.
     window.sessionStorage.setItem('shotconnect-preview-version', SHOTCONNECT_PREVIEW_VERSION);
+    // Verify the write actually persisted before reloading.
+    if (window.sessionStorage.getItem('shotconnect-preview-version') !== SHOTCONNECT_PREVIEW_VERSION) return;
     window.location.reload();
   } catch {
-    // Restricted session storage should not prevent the app from starting.
+    // Restricted session storage — skip reload to avoid infinite loop.
   }
 }
 

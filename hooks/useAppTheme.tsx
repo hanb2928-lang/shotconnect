@@ -1,4 +1,5 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
 import { getItem, setItem } from '@/lib/storage';
 import {
   theme as baseTheme,
@@ -57,9 +58,36 @@ function resolveDensity(d: DisplayDensity) {
 const VALID_PRESETS: ThemePreset[] = ['cinematic-dark', 'studio-light', 'trendy-viral'];
 
 export function AppThemeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>('light');
-  const [density, setDensityState] = useState<DisplayDensity>('standard');
-  const [preset, setPresetState] = useState<ThemePreset>('studio-light');
+  // Read cached theme synchronously to avoid a flash of the wrong theme.
+  // On web, localStorage is synchronous; on native, AsyncStorage is async
+  // so we accept a brief flash there (native doesn't have the flicker issue).
+  const [mode, setModeState] = useState<ThemeMode>(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const cached = window.localStorage.getItem('theme_mode');
+        if (cached === 'dark' || cached === 'light') return cached;
+      } catch {}
+    }
+    return 'light';
+  });
+  const [density, setDensityState] = useState<DisplayDensity>(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const cached = window.localStorage.getItem('display_density');
+        if (cached === 'compact' || cached === 'standard' || cached === 'wide') return cached as DisplayDensity;
+      } catch {}
+    }
+    return 'standard';
+  });
+  const [preset, setPresetState] = useState<ThemePreset>(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const cached = window.localStorage.getItem('theme_preset');
+        if (cached && VALID_PRESETS.includes(cached as ThemePreset)) return cached as ThemePreset;
+      } catch {}
+    }
+    return 'studio-light';
+  });
 
   useEffect(() => {
     let mounted = true;
