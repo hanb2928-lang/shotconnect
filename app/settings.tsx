@@ -502,7 +502,7 @@ export default function SettingsScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
     <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24, paddingTop: 16 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -1465,12 +1465,13 @@ export default function SettingsScreen() {
                 auto_disclosure: autoDisclosure,
                 clean_footage_enabled: cleanFootage,
               });
+              if (!mounted.current) return;
               setSavedDefaults(true);
-              setTimeout(() => setSavedDefaults(false), 2500);
+              setTimeout(() => { if (mounted.current) setSavedDefaults(false); }, 2500);
             } catch (err) {
               Alert.alert('저장 실패', err instanceof Error ? err.message : '알 수 없는 오류');
             }
-            setSavingDefaults(false);
+            if (mounted.current) setSavingDefaults(false);
           }}
           disabled={savingDefaults}
           activeOpacity={0.8}
@@ -1509,10 +1510,11 @@ export default function SettingsScreen() {
                 setSavingMascot(true);
                 persistUserSettings({ mascot_enabled: next }).then(() => {
                   invalidateSettingsCache();
+                  if (!mounted.current) return;
                   setSavingMascot(false);
                   setSavedMascot(true);
-                  setTimeout(() => setSavedMascot(false), 2000);
-                }).catch(() => setSavingMascot(false));
+                  setTimeout(() => { if (mounted.current) setSavedMascot(false); }, 2000);
+                }).catch(() => { if (mounted.current) setSavingMascot(false); });
               }}
               activeOpacity={0.7}
               hitSlop={12}
@@ -1756,12 +1758,13 @@ export default function SettingsScreen() {
                 theme_preset: themePreset,
                 display_density: displayDensity,
               });
+              if (!mounted.current) return;
               setSavedPrefs(true);
-              setTimeout(() => setSavedPrefs(false), 2500);
+              setTimeout(() => { if (mounted.current) setSavedPrefs(false); }, 2500);
             } catch (err) {
               Alert.alert('저장 실패', err instanceof Error ? err.message : '알 수 없는 오류');
             }
-            setSavingPrefs(false);
+            if (mounted.current) setSavingPrefs(false);
           }}
           disabled={savingPrefs}
           activeOpacity={0.8}
@@ -1942,12 +1945,13 @@ export default function SettingsScreen() {
                   default_caption_tone: defaultCaptionTone,
                   fixed_hook_phrase: fixedHookPhrase.trim() || null,
                 });
+                if (!mounted.current) return;
                 setSavedBrandSection(true);
-                setTimeout(() => setSavedBrandSection(false), 2500);
+                setTimeout(() => { if (mounted.current) setSavedBrandSection(false); }, 2500);
               } catch (err) {
                 Alert.alert(t('common.error'), err instanceof Error ? err.message : String(err));
               }
-              setSavingBrandSection(false);
+              if (mounted.current) setSavingBrandSection(false);
             }}
             disabled={savingBrandSection}
             activeOpacity={0.8}
@@ -2054,12 +2058,13 @@ export default function SettingsScreen() {
                   auto_publish_shorts: autoPublishShorts,
                   auto_publish_sandbox_mode: sandboxMode,
                 });
+                if (!mounted.current) return;
                 setSavedAutoPublish(true);
-                setTimeout(() => setSavedAutoPublish(false), 2500);
+                setTimeout(() => { if (mounted.current) setSavedAutoPublish(false); }, 2500);
               } catch (err) {
                 Alert.alert(t('common.error'), err instanceof Error ? err.message : String(err));
               }
-              setSavingAutoPublish(false);
+              if (mounted.current) setSavingAutoPublish(false);
             }}
             disabled={savingAutoPublish}
             activeOpacity={0.8}
@@ -2118,11 +2123,11 @@ export default function SettingsScreen() {
               await updateUserSettings({ openai_api_key: openaiKey || null, pexels_api_key: pexelsKey || null, tts_api_key: ttsKey || null, runway_api_key: runwayKey || null });
               if (!mounted.current) return;
               setSavedKey(true);
-              setTimeout(() => setSavedKey(false), 2500);
+              setTimeout(() => { if (mounted.current) setSavedKey(false); }, 2500);
             } catch (err) {
               Alert.alert('저장 실패', err instanceof Error ? err.message : '알 수 없는 오류');
             }
-            setSavingKey(false);
+            if (mounted.current) setSavingKey(false);
           }}
           disabled={savingKey}
           activeOpacity={0.8}
@@ -2273,7 +2278,7 @@ export default function SettingsScreen() {
       >
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={{ width: '100%' }}
           >
           <View style={styles.modalContainer}>
@@ -4148,7 +4153,7 @@ function PushTestButton() {
     } else {
       setResultMsg(result.message ?? '알림 전송에 실패했습니다.');
     }
-    setTimeout(() => setResultMsg(null), 4000);
+    setTimeout(() => { if (mounted.current) setResultMsg(null); }, 4000);
   };
 
   return (

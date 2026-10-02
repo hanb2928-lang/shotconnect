@@ -67,7 +67,7 @@ export function CreditPurchaseModal({ visible, onClose, onPurchased }: CreditPur
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={[styles.modalContainer, { marginBottom: insets.bottom > 0 ? insets.bottom : 0 }]}>
           <View style={styles.header}>
