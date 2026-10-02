@@ -26,6 +26,7 @@ export function useQueuedJob() {
   const onlineCleanupRef = useRef<(() => void) | null>(null);
   const submitIdRef = useRef(0);
   const mountedRef = useRef(true);
+  const userPausedRef = useRef(false);
 
   const clearAll = useCallback(() => {
     if (subRef.current) {
@@ -52,6 +53,7 @@ export function useQueuedJob() {
     options: { priority?: number; scanId?: string; timeoutMs?: number } = {},
   ): Promise<string> => {
     const mySubmitId = ++submitIdRef.current;
+    userPausedRef.current = false;
     clearAll();
 
     setState({ jobId: null, status: 'queued', error: null, result: null });
@@ -162,7 +164,7 @@ export function useQueuedJob() {
 
     // Resume polling when the network comes back online after a pause
     const handleOnline = () => {
-      if (mySubmitId !== submitIdRef.current) return;
+      if (mySubmitId !== submitIdRef.current || userPausedRef.current) return;
       if (pollingPaused) {
         pollErrorTimestamps.length = 0;
         pollingPaused = false;
@@ -188,7 +190,7 @@ export function useQueuedJob() {
         bgPaused = true;
       } else if (nextState === 'active' && bgPaused) {
         bgPaused = false;
-        if (!pollingPaused) startPolling();
+        if (!pollingPaused && !userPausedRef.current) startPolling();
       }
     };
     const appSub = AppState.addEventListener('change', handleAppState);
@@ -214,6 +216,20 @@ export function useQueuedJob() {
     setState({ jobId: null, status: 'idle', error: null, result: null });
   }, [clearAll]);
 
+  const pause = useCallback(() => {
+    userPausedRef.current = true;
+    clearAll();
+    setState((prev) => ({
+      ...prev,
+      status: prev.status === 'done' || prev.status === 'error' ? prev.status : 'idle',
+      error: null,
+    }));
+  }, [clearAll]);
+
+  const resume = useCallback(() => {
+    userPausedRef.current = false;
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -223,5 +239,5 @@ export function useQueuedJob() {
     };
   }, [clearAll]);
 
-  return { ...state, submit, reset };
+  return { ...state, submit, reset, pause, resume };
 }
