@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, ViewStyle } from 'react-native';
+import { CameraView } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -36,6 +37,7 @@ export const InlineCameraViewfinder = forwardRef<
 ) {
   const accent = accentColor ?? theme.colors.primary[400];
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const nativeCameraRef = useRef<CameraView | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mountedRef = useRef(true);
   const streamGenRef = useRef(0);
@@ -131,17 +133,11 @@ export const InlineCameraViewfinder = forwardRef<
   useEffect(() => {
     mountedRef.current = true;
     if (Platform.OS !== 'web') {
+      setCameraReady(false);
       if (!permission?.granted || !isActive) {
-        setCameraReady(false);
         return () => setCameraReady(false);
       }
-      const id = setTimeout(() => {
-        if (mountedRef.current) setCameraReady(true);
-      }, 300);
-      return () => {
-        clearTimeout(id);
-        setCameraReady(false);
-      };
+      return () => setCameraReady(false);
     }
     if (isActive) {
       const id = setTimeout(() => startWebStream(), 200);
@@ -188,7 +184,21 @@ export const InlineCameraViewfinder = forwardRef<
     }
   }, [cameraReady, facing]);
 
-  const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => null, []);
+  const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
+    if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady) return null;
+    try {
+      const result = await nativeCameraRef.current.takePictureAsync({
+        base64: true,
+        quality: 0.8,
+        skipProcessing: true,
+      });
+      if (!result?.base64) return null;
+      return { base64: result.base64, mimeType: 'image/jpeg' };
+    } catch (err) {
+      console.error('[InlineCameraViewfinder] native capture failed:', err);
+      return null;
+    }
+  }, [cameraReady]);
 
   useImperativeHandle(
     ref,
@@ -341,12 +351,22 @@ export const InlineCameraViewfinder = forwardRef<
   return (
     <View style={styles.wrapper}>
       <View style={styles.viewfinder}>
-        <View style={[StyleSheet.absoluteFillObject as ViewStyle, { backgroundColor: '#000' }]}>
-          <View style={styles.centerContent}>
-            <Camera size={22} color={theme.colors.dark.textDim} strokeWidth={1.5} />
-            <Text style={styles.loadingText}>메인 카메라로 촬영합니다</Text>
+        {isActive && (
+          <CameraView
+            ref={nativeCameraRef}
+            style={StyleSheet.absoluteFillObject}
+            facing={facing === 'environment' ? 'back' : 'front'}
+            onCameraReady={() => setCameraReady(true)}
+          />
+        )}
+        {!cameraReady && (
+          <View style={[StyleSheet.absoluteFillObject as ViewStyle, { backgroundColor: '#000' }]}>
+            <View style={styles.centerContent}>
+              <Camera size={22} color={theme.colors.dark.textDim} strokeWidth={1.5} />
+              <Text style={styles.loadingText}>카메라 시작 중...</Text>
+            </View>
           </View>
-        </View>
+        )}
         <View style={styles.guideFrame} pointerEvents="none">
           <View style={[styles.corner, styles.cornerTL]} />
           <View style={[styles.corner, styles.cornerTR]} />
@@ -356,7 +376,7 @@ export const InlineCameraViewfinder = forwardRef<
         <View style={styles.crosshairH} pointerEvents="none" />
         <View style={styles.crosshairV} pointerEvents="none" />
 
-        {!cameraReady && (
+        {!cameraReady && isActive && (
           <View style={styles.loadingOverlay}>
             <Loader size={22} color={theme.colors.dark.textDim} strokeWidth={2} />
             <Text style={styles.loadingText}>카메라 시작 중...</Text>
