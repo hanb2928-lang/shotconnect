@@ -32,6 +32,11 @@ installGlobalErrorHandlers();
 
 SplashScreen.preventAutoHideAsync();
 
+// Kick off storage init at module scope so it runs in parallel with
+// font loading and React's first render, rather than waiting for the
+// first useEffect to fire.
+const earlyStoragePromise = initStorage();
+
 // Disable font scaling globally to prevent layout overflow when users
 // increase system font size (Accessibility > Large Text). This ensures
 // all Text and TextInput elements keep their designed font sizes.
@@ -147,23 +152,27 @@ export default function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   // Init effect: runs exactly once. The finally block is the sole
-  // trigger for setReady('app'). A hard 8s outer timeout prevents
+  // trigger for setReady('app'). A hard 4s outer timeout prevents
   // a hung native module from blocking the app forever.
+  // Storage init was already kicked off at module scope — here we
+  // await it in parallel with the web-only session purge and preview
+  // refresh, which are independent and can overlap.
   useEffect(() => {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
-    purgeLegacyWebSession();
-    refreshStalePreview();
 
     const initPromise = (async () => {
-      try {
-        await Promise.race([
-          initStorage(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('storage timeout')), 2000)),
-        ]);
-      } catch {
-        // storage init failed — app can still run with in-memory state
-      }
+      const storageTask = Promise.race([
+        earlyStoragePromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+      ]);
+
+      const webTask = (async () => {
+        purgeLegacyWebSession();
+        refreshStalePreview();
+      })();
+
+      await Promise.all([storageTask, webTask]);
     })();
 
     const hardTimeout = new Promise<void>((resolve) => setTimeout(resolve, 4000));
