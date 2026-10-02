@@ -21,6 +21,7 @@ import {
   type ArchiveSort,
 } from '@/lib/archive';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
+import { CachedImage } from '@/components/CachedImage';
 
 export function ArchiveSection() {
   const router = useRouter();
@@ -179,7 +180,7 @@ export function ArchiveSection() {
             activeOpacity={0.8}
           >
             <View style={styles.thumbnailWrap}>
-              <Image source={{ uri: item.imageUrl }} style={styles.thumbnail} />
+              <CachedImage uri={item.imageUrl} style={styles.thumbnail} />
               <View style={styles.playOverlay}>
                 <Film size={16} color="#fff" strokeWidth={2} />
               </View>

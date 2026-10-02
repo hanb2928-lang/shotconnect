@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, Platform } 
 import { Pencil, Plus, X, Camera } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import * as ImagePicker from 'expo-image-picker';
+import { CachedImage } from '@/components/CachedImage';
 import { pickImageWeb } from '@/lib/webImagePicker';
 
 interface MicroEditSlotProps {
@@ -108,7 +109,7 @@ export function MicroEditSlot({ onReviewLineChange, onFootageSelect }: MicroEdit
         </Text>
         {footageUri ? (
           <View style={styles.footagePreview}>
-            <Image source={{ uri: footageUri }} style={styles.footageImage} resizeMode="cover" />
+            <CachedImage uri={footageUri} style={styles.footageImage} resizeMode="cover" />
             <TouchableOpacity style={styles.footageRemove} onPress={handleRemoveFootage} activeOpacity={0.7}>
               <X size={12} color="#fff" strokeWidth={2.5} />
             </TouchableOpacity>

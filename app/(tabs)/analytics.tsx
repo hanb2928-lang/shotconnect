@@ -12,6 +12,7 @@ import {
   Image,
   TextInput,
 } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import {
   ChartBar as BarChart3,
   Film,
@@ -651,7 +652,7 @@ export default function AnalyticsScreen() {
                     <View style={styles.contentRank}>
                       <Text style={styles.contentRankText}>{i + 1}</Text>
                     </View>
-                    <Image source={{ uri: item.image_url }} style={styles.contentThumb} />
+                    <CachedImage uri={item.image_url} style={styles.contentThumb} />
                     <View style={styles.contentInfo}>
                       <Text style={styles.contentTitle} numberOfLines={1}>{item.product_name}</Text>
                       <View style={styles.contentMetaRow}>
@@ -695,7 +696,7 @@ export default function AnalyticsScreen() {
                     onPress={() => router.push({ pathname: '/result/[id]', params: { id: item.scan_id } })}
                     activeOpacity={0.7}
                   >
-                    <Image source={{ uri: item.image_url }} style={styles.recentThumb} />
+                    <CachedImage uri={item.image_url} style={styles.recentThumb} />
                     <View style={styles.recentInfo}>
                       <Text style={styles.recentTitle} numberOfLines={1}>{item.product_name}</Text>
                       <Text style={styles.recentDate}>{formatClickTime(item.created_at)}</Text>

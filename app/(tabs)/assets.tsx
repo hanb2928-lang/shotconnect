@@ -17,6 +17,7 @@ import {
   ScrollView,
 } from 'react-native';
 import type { FlatList as FlatListType } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import { FolderOpen, Trash2, Download, Film, Image as ImageIcon, X, Calendar, Youtube, Instagram, FileText, Smartphone, Share2, CircleCheck as CheckCircle2, Clock, CircleDashed, Link2, Crop, Rocket, TrendingUp, Repeat2, ListFilter as Filter, ArrowDownUp, Music2, Sparkles, ArrowRight, Pin, Copy, Check, Zap, Lightbulb, Users, Volume2, Type, Flame, ChevronDown, ChevronUp, Hash, QrCode, Store, Settings, ChartBar as BarChart3 } from 'lucide-react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as MediaLibrary from 'expo-media-library';
@@ -563,14 +564,14 @@ export default function AssetsScreen() {
                 <View style={styles.thumbWrap}>
                   {item.asset_type === 'video' ? (
                     <>
-                      <Image source={{ uri: item.thumbnail_url || item.file_url }} style={styles.thumbImage} resizeMode="cover" />
+                      <CachedImage uri={item.thumbnail_url || item.file_url} style={styles.thumbImage} resizeMode="cover" />
                       <View style={styles.videoBadge}>
                         <Film size={10} color="#fff" strokeWidth={2} />
                         <Text style={styles.videoBadgeText}>영상</Text>
                       </View>
                     </>
                   ) : (
-                    <Image source={{ uri: item.file_url }} style={styles.thumbImage} resizeMode="cover" />
+                    <CachedImage uri={item.file_url} style={styles.thumbImage} resizeMode="cover" />
                   )}
                   <View style={[styles.statusBadge, { backgroundColor: statusMeta.bg }]}>
                     <StatusIcon size={9} color={statusMeta.color} strokeWidth={2} />
@@ -639,7 +640,7 @@ export default function AssetsScreen() {
                     // @ts-ignore video element on web
                     <video src={previewAsset.file_url} style={styles.previewVideo} controls autoPlay loop playsInline />
                   ) : (
-                    <Image source={{ uri: previewAsset.asset_type === 'video' ? (previewAsset.thumbnail_url || previewAsset.file_url) : previewAsset.file_url }} style={styles.previewImage} resizeMode="contain" />
+                    <CachedImage uri={previewAsset.asset_type === 'video' ? (previewAsset.thumbnail_url || previewAsset.file_url) : previewAsset.file_url} style={styles.previewImage} resizeMode="contain" />
                   )}
                 </View>
                 {previewAsset.file_size ? <Text style={styles.modalSize}>파일 크기: {formatSize(previewAsset.file_size)}</Text> : null}
@@ -761,7 +762,7 @@ export default function AssetsScreen() {
                   const isPinned = pinnedIds.has(asset.id);
                   return (
                     <View key={asset.id} style={styles.abBestCard}>
-                      <Image source={{ uri: asset.thumbnail_url || asset.file_url }} style={styles.abBestThumb} resizeMode="cover" />
+                      <CachedImage uri={asset.thumbnail_url || asset.file_url} style={styles.abBestThumb} resizeMode="cover" />
                       <View style={styles.abBestInfo}>
                         <Text style={styles.abBestName} numberOfLines={1}>{asset.title}</Text>
                         <View style={styles.abBestStatus}>
@@ -788,7 +789,7 @@ export default function AssetsScreen() {
                   <Text style={styles.abPersonaLabel}>{tone.label}</Text>
                   <View style={[styles.abPersonaPreview, { backgroundColor: tone.color + '12' }]}>
                     {uploadedAssets[0] ? (
-                      <Image source={{ uri: uploadedAssets[0].thumbnail_url || uploadedAssets[0].file_url }} style={styles.abPersonaThumb} resizeMode="cover" />
+                      <CachedImage uri={uploadedAssets[0].thumbnail_url || uploadedAssets[0].file_url} style={styles.abPersonaThumb} resizeMode="cover" />
                     ) : (
                       <Film size={24} color={theme.colors.dark.textFaint} strokeWidth={1.5} />
                     )}

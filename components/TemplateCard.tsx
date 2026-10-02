@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Pencil, Check } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 import type { StickerStyle } from '@/components/StickerLink';
 import type { TemplateData, PlatformKey, PlatformVariant, CustomReview } from '@/types/database';
 
@@ -149,7 +150,7 @@ export const TemplateCard = forwardRef<View, TemplateCardProps>(
         style={styles.cardBase}
         collapsable={false}
       >
-        <Image source={{ uri: imageUrl }} style={styles.image} resizeMode={imgAspect ? 'cover' : 'contain'} />
+        <CachedImage uri={imageUrl} style={styles.image} resizeMode={imgAspect ? 'cover' : 'contain'} />
         <View style={[styles.overlay, { backgroundColor: overlayColor }]} />
 
         <View style={[styles.content, { justifyContent: contentJustify, paddingTop: textPosition === 'top' ? theme.spacing.lg : 0 }]}>

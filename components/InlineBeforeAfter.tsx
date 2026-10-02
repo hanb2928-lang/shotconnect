@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, LayoutAnimation } from 'react-native';
 import { ChevronDown, Maximize2, Wand2, Check } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 
 export interface InlineBeforeAfterProps {
   beforeImage?: string | null;
@@ -64,8 +65,8 @@ export function InlineBeforeAfter({
           <View style={styles.compareItem}>
             <View style={styles.compareImageWrap}>
               {beforeImage ? (
-                <Image
-                  source={{ uri: beforeImage }}
+                <CachedImage
+                  uri={beforeImage}
                   style={styles.compareImage}
                   resizeMode="cover"
                 />
@@ -93,8 +94,8 @@ export function InlineBeforeAfter({
           <View style={styles.compareItem}>
             <View style={styles.compareImageWrap}>
               {afterImage ? (
-                <Image
-                  source={{ uri: afterImage }}
+                <CachedImage
+                  uri={afterImage}
                   style={styles.compareImage}
                   resizeMode="cover"
                 />

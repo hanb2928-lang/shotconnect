@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { X, Check, Share2, CreditCard as Edit3, Eye, ShieldCheck, Link2, Camera, Film, FileText, Hash, Sparkles } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export interface UploadPreviewData {
@@ -116,7 +117,7 @@ export function UploadPreviewModal({ visible, data, onConfirm, onClose }: Upload
                   <Text style={styles.videoPlaceholderText}>동영상 미리보기</Text>
                 </View>
               ) : (
-                <Image source={{ uri: data.mediaUri }} style={styles.mediaImage} resizeMode="cover" />
+                <CachedImage uri={data.mediaUri} style={styles.mediaImage} resizeMode="cover" />
               )}
               {data.templateLabel ? (
                 <View style={styles.templateTag}>

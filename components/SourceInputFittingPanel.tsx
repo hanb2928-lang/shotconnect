@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ViewStyle } from 'react-native';
 import { Plus, Check, Upload, UserSquare2, Link2, AlertCircle } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 
 export interface SourceImage {
   id: string;
@@ -100,7 +101,7 @@ function SourceInputFittingPanelInner({
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageRow}>
           {productImages.map((img, i) => (
             <View key={img.id} style={styles.imageSlot}>
-              <Image source={{ uri: img.uri }} style={styles.image} resizeMode="cover" />
+              <CachedImage uri={img.uri} style={styles.image} resizeMode="cover" />
               <View style={styles.imageLabelWrap}>
                 <Text style={styles.imageLabel}>{img.angle || ANGLE_LABELS[i] || `사진 ${i + 1}`}</Text>
               </View>
@@ -126,7 +127,7 @@ function SourceInputFittingPanelInner({
         <View style={styles.modelRow}>
           {modelImage ? (
             <View style={styles.modelPreview}>
-              <Image source={{ uri: modelImage.uri }} style={styles.modelImage} resizeMode="cover" />
+              <CachedImage uri={modelImage.uri} style={styles.modelImage} resizeMode="cover" />
               <TouchableOpacity
                 style={styles.modelRemoveBtn}
                 onPress={() => onModelImageSet(null)}

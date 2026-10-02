@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { Camera, Wand2, Film, Maximize2 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 
 export type PreviewStep = 'idle' | 'photo' | 'edited' | 'comic';
 
@@ -54,8 +55,8 @@ export function StickyHeroPreview({
     <View style={styles.container}>
       <View style={styles.contentRow}>
         <View style={styles.thumbnailWrap}>
-          <Image
-            source={{ uri: displayImage }}
+          <CachedImage
+            uri={displayImage}
             style={styles.thumbnail}
             resizeMode="cover"
           />

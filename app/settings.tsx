@@ -17,6 +17,7 @@ import {
   Image,
 } from 'react-native';
 import { Camera, Sparkles, Info, ExternalLink, Link2, Check, Zap, ChevronDown, ChevronRight, Wallet, Plus, Trash2, Film, LayoutTemplate, BookOpen, Stamp, Upload, Key, Eye, EyeOff, Crown, Rocket, Building2, Coins, CircleDot, Baby, Activity, Sun, Palette, Smartphone, Layers, Wifi, Circle as XCircle, TriangleAlert as AlertTriangle, Play, Target, X, ShoppingBag, Flame, Globe, Megaphone, CalendarClock, ShieldCheck, ChartBar as BarChart3, ArrowRight, DollarSign, TrendingUp, Music2, Video } from 'lucide-react-native';
+import { CachedImage } from '@/components/CachedImage';
 import { SectionCard } from '@/components/SectionCard';
 import { theme as staticTheme } from '@/lib/theme';
 import { useAppTheme } from '@/hooks/useAppTheme';
@@ -1167,7 +1168,7 @@ export default function SettingsScreen() {
                 // @ts-ignore img element on web
                 <img src={logoUrl} style={styles.logoPreviewImg as any} />
               ) : (
-                <Image source={{ uri: logoUrl }} style={styles.logoPreviewImg} resizeMode="contain" />
+                <CachedImage uri={logoUrl} style={styles.logoPreviewImg} resizeMode="contain" />
               )}
               <View style={styles.logoInfo}>
                 <Text style={styles.logoRegisteredText}>로고가 등록되어 있어요</Text>

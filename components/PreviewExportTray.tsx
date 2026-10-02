@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ViewStyle } from 'react-native';
 import { Download, Share2, Play, Layers, Check } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 import type { OutputMode } from './PlatformModeSelectCard';
 
 interface Props {
@@ -35,7 +36,7 @@ function PreviewExportTrayInner({
       <View style={styles.viewerWrap}>
         {outputMode === 'image' ? (
           resultImageUrl ? (
-            <Image source={{ uri: resultImageUrl }} style={styles.resultImage} resizeMode="contain" />
+            <CachedImage uri={resultImageUrl} style={styles.resultImage} resizeMode="contain" />
           ) : (
             <View style={styles.placeholder}>
               <Layers size={32} color={theme.colors.dark.textFaint} strokeWidth={2} />
@@ -44,7 +45,7 @@ function PreviewExportTrayInner({
           )
         ) : resultVideoUrl ? (
           <View style={styles.videoPreview}>
-            <Image source={{ uri: resultVideoUrl }} style={styles.resultImage} resizeMode="cover" />
+            <CachedImage uri={resultVideoUrl} style={styles.resultImage} resizeMode="cover" />
             <View style={styles.playOverlay}>
               <Play size={32} color="#fff" strokeWidth={2.5} fill="#fff" />
             </View>

@@ -145,6 +145,7 @@ import { DirectShareBridge } from '@/components/DirectShareBridge';
 import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { muxVideoWithAudio, probeUrlAccessible } from '@/lib/videoAudioMuxer';
+import { CachedImage } from '@/components/CachedImage';
 
 type TargetPlatformKey = 'shorts' | 'tiktok' | 'reels' | 'naverclip' | 'instagramFeed' | 'naverBlog' | 'pinterest' | 'smartstore';
 
@@ -4605,7 +4606,7 @@ export default function ResultScreen() {
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={{ uri: getThumbnailUrl(imgUrl, 200) }} style={styles.angleThumbImage} resizeMode="cover" />
+                      <CachedImage uri={getThumbnailUrl(imgUrl, 200)} style={styles.angleThumbImage} resizeMode="cover" />
                       <View style={styles.angleThumbLabelWrap}>
                         <Text style={styles.angleThumbLabel}>{label}</Text>
                       </View>

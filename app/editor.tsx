@@ -51,6 +51,7 @@ import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { Scan, CustomAffiliateLink } from '@/types/database';
+import { CachedImage } from '@/components/CachedImage';
 
 type EditMode = 'none' | 'text' | 'sticker';
 
@@ -715,7 +716,7 @@ export default function EditorScreen() {
                 }}
                 activeOpacity={0.8}
               >
-                <Image source={{ uri }} style={styles.thumbnailImg} resizeMode="cover" />
+                <CachedImage uri={uri} style={styles.thumbnailImg} resizeMode="cover" />
                 <View style={styles.thumbnailLabelWrap}>
                   <Text style={styles.thumbnailLabel}>{ANGLE_LABELS[i] || `사진 ${i + 1}`}</Text>
                 </View>

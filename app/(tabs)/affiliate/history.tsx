@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { History, Trash2, Tag, ShoppingBag, WifiOff } from 'lucide-react-native';
+import { CachedImage } from '@/components/CachedImage';
 import { theme } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import type { Scan } from '@/types/database';
@@ -183,7 +184,7 @@ export default function HistoryScreen() {
               activeOpacity={0.8}
               onPress={() => router.push({ pathname: '/result/[id]', params: { id: item.id } })}
             >
-              <Image source={{ uri: item.image_url }} style={styles.cardImage} />
+              <CachedImage uri={item.image_url} style={styles.cardImage} />
               <View style={styles.cardBody}>
                 <Text style={styles.cardTitle} numberOfLines={1}>
                   {item.product_name || item.title || '제품 스캔'}

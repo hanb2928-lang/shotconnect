@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIn
 import { ShoppingBag, ExternalLink, Link2 } from 'lucide-react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 import { getLinkInBioBySlug, getProductsForLinkInBio, type LinkInBioPage, type LinkInBioProduct } from '@/lib/linkInBio';
 
 export default function LinkInBioPage() {
@@ -119,8 +120,8 @@ export default function LinkInBioPage() {
             activeOpacity={0.8}
           >
             <View style={styles.cardImageWrap}>
-              <Image
-                source={{ uri: product.image_url }}
+              <CachedImage
+                uri={product.image_url}
                 style={styles.cardImage}
                 resizeMode="cover"
                 onLoad={() => handleImageLoad(product.scan_id)}

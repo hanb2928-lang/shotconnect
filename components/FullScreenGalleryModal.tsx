@@ -18,6 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { X, ChevronLeft, ChevronRight, Download } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { CachedImage } from '@/components/CachedImage';
 import { getThumbnailUrl } from '@/lib/imageUtils';
 import type { PsychScene } from '@/lib/psychologyEngine';
 
@@ -151,7 +152,7 @@ export function FullScreenGalleryModal({
               <View style={styles.baItem}>
                 <Text style={styles.baLabel}>원본</Text>
                 {beforeImage ? (
-                  <Image source={{ uri: getThumbnailUrl(beforeImage, 600) }} style={[styles.baImage, { height: screenHeight * 0.5 }]} resizeMode="contain" />
+                  <CachedImage uri={getThumbnailUrl(beforeImage, 600)} style={[styles.baImage, { height: screenHeight * 0.5 }]} resizeMode="contain" />
                 ) : (
                   <View style={[styles.baPlaceholder, { height: screenHeight * 0.5 }]}>
                     <Text style={styles.baPlaceholderText}>원본 없음</Text>
@@ -161,7 +162,7 @@ export function FullScreenGalleryModal({
               <View style={styles.baItem}>
                 <Text style={styles.baLabel}>AI 보정</Text>
                 {afterImage ? (
-                  <Image source={{ uri: getThumbnailUrl(afterImage, 600) }} style={[styles.baImage, { height: screenHeight * 0.5 }]} resizeMode="contain" />
+                  <CachedImage uri={getThumbnailUrl(afterImage, 600)} style={[styles.baImage, { height: screenHeight * 0.5 }]} resizeMode="contain" />
                 ) : (
                   <View style={[styles.baPlaceholder, { height: screenHeight * 0.5 }]}>
                     <Text style={styles.baPlaceholderText}>보정 전</Text>
@@ -199,7 +200,7 @@ export function FullScreenGalleryModal({
                   <View key={idx} style={[styles.cutSlide, { width: screenWidth - 16 }]}>
                     <View style={[styles.cutImageWrap, { maxHeight: screenHeight * 0.55 }]}>
                       {img ? (
-                        <Image source={{ uri: img }} style={styles.cutImage} resizeMode="contain" />
+                        <CachedImage uri={img} style={styles.cutImage} resizeMode="contain" />
                       ) : (
                         <View style={styles.cutPlaceholder}>
                           <Text style={styles.cutPlaceholderText}>이미지 없음</Text>
