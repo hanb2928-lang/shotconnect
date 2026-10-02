@@ -32,6 +32,15 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 }
 
 const UPLOAD_TIMEOUT_MS = 15_000;
+const COMPRESS_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} (시간 초과)`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function withUploadTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -132,7 +141,7 @@ export async function analyzeImage(
   mimeType: string,
   mode: 'single' | 'multi' = 'multi',
 ): Promise<AnalysisResult> {
-  const compressed = await compressForEdgeFunction(imageDataUrl);
+  const compressed = await withTimeout(compressForEdgeFunction(imageDataUrl), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const b64 = cleanBase64(compressed.dataUrl);
   const cacheInput = { task: 'analyze-photo', mode, imageHash: hashObject({ b64 }).slice(0, 16) };
 
@@ -175,7 +184,7 @@ export async function analyzeMultiShot(
   base64Images: string[],
   fileName: string,
 ): Promise<AnalysisResult> {
-  const dataUrls = await compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg');
+  const dataUrls = await withTimeout(compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg'), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const cacheInput = {
     task: 'multi-shot',
     imageHashes: dataUrls.map((url) => hashObject({ b64: cleanBase64(url) }).slice(0, 16)),
@@ -490,7 +499,7 @@ export async function analyzeImageWithProductContext(
   mode: 'single' | 'multi' = 'multi',
   productContext?: { productName?: string; description?: string; price?: string; brand?: string; platform?: string },
 ): Promise<AnalysisResult> {
-  const compressed = await compressForEdgeFunction(imageDataUrl);
+  const compressed = await withTimeout(compressForEdgeFunction(imageDataUrl), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const b64 = cleanBase64(compressed.dataUrl);
   const cacheInput = {
     task: 'analyze-photo-context',
@@ -582,7 +591,7 @@ export async function analyzeImageQueued(
   mode: 'single' | 'multi' = 'multi',
   preferredStyle?: string,
 ): Promise<AnalysisResult> {
-  const compressed = await compressForEdgeFunction(imageDataUrl);
+  const compressed = await withTimeout(compressForEdgeFunction(imageDataUrl), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const b64 = cleanBase64(compressed.dataUrl);
   const cacheInput = {
     task: 'analyze-photo-queued',
@@ -621,7 +630,7 @@ export async function analyzeMultiShotQueued(
   base64Images: string[],
   fileName: string,
 ): Promise<AnalysisResult> {
-  const dataUrls = await compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg');
+  const dataUrls = await withTimeout(compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg'), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const cacheInput = {
     task: 'multi-shot-queued',
     imageHashes: dataUrls.map((url) => hashObject({ b64: cleanBase64(url) }).slice(0, 16)),
