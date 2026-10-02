@@ -870,6 +870,7 @@ export default function ResultScreen() {
       // kick off the HD upgrade in the background after the draft is ready.
       videoUnsubRef.current = subscribeVideoJob(scan.id, submitResult.taskId, (result) => {
         if (!mountedRef.current) return;
+        try {
         clearDraftProgress();
         if (result.status === 'SUCCESS' && result.videoUrl) {
           setDraftVideoUrl(result.videoUrl);
@@ -912,6 +913,7 @@ export default function ResultScreen() {
             if (!mountedRef.current) return;
             hdUnsubRef.current = subscribeHdUpgrade(scan.id, submitResult.taskId, (hdResult) => {
               if (!mountedRef.current) return;
+              try {
               if (hdResult.status === 'SUCCESS' && hdResult.videoUrl) {
                 setGeneratedVideoUrl(hdResult.videoUrl);
                 setDraftVideoUrl(null);
@@ -925,6 +927,14 @@ export default function ResultScreen() {
                 setIsGeneratingVideo(false);
                 setVideoGenProgress(null);
                 setVideoGenError(prev => prev ? `${prev}\n고화질 업그레이드 실패 (초안 유지)` : '고화질 업그레이드 실패 (초안 유지)');
+              }
+              } catch {
+                if (mountedRef.current) {
+                  setVideoStage('draft_ready');
+                  setHdUpgradeProgress(null);
+                  setIsGeneratingVideo(false);
+                  setVideoGenProgress(null);
+                }
               }
             });
           }).catch(() => {
@@ -941,6 +951,13 @@ export default function ResultScreen() {
           setVideoStage('failed');
           setIsGeneratingVideo(false);
           setVideoGenProgress(null);
+        }
+        } catch {
+          if (mountedRef.current) {
+            setVideoStage('failed');
+            setIsGeneratingVideo(false);
+            setVideoGenProgress(null);
+          }
         }
       });
     } catch (err) {

@@ -31,6 +31,20 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
   });
 }
 
+const UPLOAD_TIMEOUT_MS = 15_000;
+
+function withUploadTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      if (signal) { try { signal.dispatchEvent(new Event('abort')); } catch { /* ignore */ } }
+      reject(new Error('이미지 업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.'));
+    }, UPLOAD_TIMEOUT_MS);
+  });
+  const base = signal ? raceWithAbort(promise, signal) : promise;
+  return Promise.race([base, timeout]).finally(() => clearTimeout(timer));
+}
+
 export async function uploadImage(
   base64: string,
   mimeType: string,
@@ -48,9 +62,7 @@ export async function uploadImage(
     .from('scans')
     .upload(fileName, base64ToUint8Array(compressedBase64), { contentType: uploadMime, cacheControl: '360000' });
 
-  const { error } = signal
-    ? await raceWithAbort(uploadPromise, signal)
-    : await uploadPromise;
+  const { error } = await withUploadTimeout(uploadPromise, signal);
 
   if (error) throw new Error(`Upload failed: ${error.message}`);
 
@@ -89,9 +101,7 @@ export async function uploadImageBlob(
     .from('scans')
     .upload(fileName, uploadBlob, { contentType: uploadMime, cacheControl: '360000' });
 
-  const { error } = signal
-    ? await raceWithAbort(uploadPromise, signal)
-    : await uploadPromise;
+  const { error } = await withUploadTimeout(uploadPromise, signal);
 
   if (error) throw new Error(`Upload failed: ${error.message}`);
 

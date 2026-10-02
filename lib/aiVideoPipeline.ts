@@ -530,11 +530,14 @@ function waitForVideoCompletion(
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
           (payload) => {
             if (!payload.new) return;
-            // Realtime event received — channel is healthy, reset backoff
-            channelHealth = ChannelHealth.HEALTHY;
-            pollBackoffAttempt = 0;
-            reconnectAttempts = 0;
-            handleRow(payload.new as VideoJobRow);
+            try {
+              channelHealth = ChannelHealth.HEALTHY;
+              pollBackoffAttempt = 0;
+              reconnectAttempts = 0;
+              handleRow(payload.new as VideoJobRow);
+            } catch {
+              // Swallow exceptions in realtime callbacks to prevent native bridge crashes
+            }
           },
         )
         .subscribe((status: string) => {
@@ -834,20 +837,24 @@ export function subscribeVideoJob(
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
-          channelHealth = ChannelHealth.HEALTHY;
-          pollBackoffAttempt = 0;
-          reconnectAttempts = 0;
-          const row = payload.new as VideoJobRow;
-          if (row.status === 'SUCCESS' && row.video_url) {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            callback({ status: 'SUCCESS', videoUrl: row.video_url });
-          } else if (row.status === 'FAILED') {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            callback({ status: 'FAILED', error: row.error_message ?? '비디오 생성에 실패했습니다.' });
+          try {
+            channelHealth = ChannelHealth.HEALTHY;
+            pollBackoffAttempt = 0;
+            reconnectAttempts = 0;
+            const row = payload.new as VideoJobRow;
+            if (row.status === 'SUCCESS' && row.video_url) {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback({ status: 'SUCCESS', videoUrl: row.video_url });
+            } else if (row.status === 'FAILED') {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback({ status: 'FAILED', error: row.error_message ?? '비디오 생성에 실패했습니다.' });
+            }
+          } catch {
+            // Swallow exceptions in realtime callbacks to prevent native bridge crashes
           }
         },
       )
@@ -902,7 +909,9 @@ export async function upgradeVideoToHd(
   prompt: string,
   options: GenerateAiVideoOptions,
 ): Promise<{ hdTaskId: string; hdJobId: string }> {
-  const { data, error } = await supabase.functions.invoke('generate-video', {
+  const HD_SUBMIT_TIMEOUT_MS = 45_000;
+
+  const invokePromise = supabase.functions.invoke('generate-video', {
     body: {
       mode: 'submit',
       prompt,
@@ -940,6 +949,12 @@ export async function upgradeVideoToHd(
       enableFabricPhysics: options.enableFabricPhysics,
     },
   });
+
+  const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+    setTimeout(() => resolve({ data: null, error: new Error('고화질 업그레이드 요청 시간이 초과되었습니다. 다시 시도해주세요.') }), HD_SUBMIT_TIMEOUT_MS),
+  );
+
+  const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
 
   if (error) throw await buildVideoFunctionError(error);
   if (!data || typeof data.taskId !== 'string') {
@@ -1037,20 +1052,24 @@ export function subscribeHdUpgrade(
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
-          channelHealth = ChannelHealth.HEALTHY;
-          pollBackoffAttempt = 0;
-          reconnectAttempts = 0;
-          const row = payload.new as VideoJobRow;
-          if (row.hd_status === 'SUCCESS' && row.hd_video_url) {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            callback({ status: 'SUCCESS', videoUrl: row.hd_video_url });
-          } else if (row.hd_status === 'FAILED') {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
+          try {
+            channelHealth = ChannelHealth.HEALTHY;
+            pollBackoffAttempt = 0;
+            reconnectAttempts = 0;
+            const row = payload.new as VideoJobRow;
+            if (row.hd_status === 'SUCCESS' && row.hd_video_url) {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback({ status: 'SUCCESS', videoUrl: row.hd_video_url });
+            } else if (row.hd_status === 'FAILED') {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
+            }
+          } catch {
+            // Swallow exceptions in realtime callbacks to prevent native bridge crashes
           }
         },
       )
