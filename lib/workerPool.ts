@@ -9,7 +9,7 @@
 
 import { Platform } from 'react-native';
 
-export type WorkerTaskType = 'base64-encode' | 'base64-decode' | 'image-compress';
+export type WorkerTaskType = 'base64-encode' | 'base64-decode' | 'image-compress' | 'video-luminance';
 
 export interface WorkerTaskRequest {
   id: number;
@@ -81,6 +81,14 @@ self.onmessage = function(e) {
       return;
     }
 
+    if (type === 'video-luminance') {
+      var bitmap = msg.bitmap;
+      var result = computeLuminance(bitmap);
+      if (bitmap) bitmap.close();
+      self.postMessage({ id: id, ok: true, result: result });
+      return;
+    }
+
     self.postMessage({ id: id, ok: false, error: 'Unknown task type: ' + type });
   } catch (err) {
     self.postMessage({ id: id, ok: false, error: String(err) });
@@ -145,6 +153,33 @@ function decodeBase64(base64) {
   }
 
   return bytes;
+}
+
+function computeLuminance(bitmap) {
+  if (!bitmap || typeof OffscreenCanvas === 'undefined') return 0.3;
+  var sampleW = 64;
+  var sampleH = 48;
+  if (!offscreenCanvas) {
+    offscreenCanvas = new OffscreenCanvas(sampleW, sampleH);
+    offscreenCtx = offscreenCanvas.getContext('2d');
+  } else {
+    offscreenCanvas.width = sampleW;
+    offscreenCanvas.height = sampleH;
+  }
+  try {
+    offscreenCtx.drawImage(bitmap, 0, 0, sampleW, sampleH);
+    var imageData = offscreenCtx.getImageData(0, 0, sampleW, sampleH);
+    var data = imageData.data;
+    var totalLum = 0;
+    var pixelCount = 0;
+    for (var i = 0; i < data.length; i += 4) {
+      totalLum += (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+      pixelCount++;
+    }
+    return pixelCount > 0 ? totalLum / pixelCount : 0.3;
+  } catch (e) {
+    return 0.3;
+  }
 }
 
 function compressImage(dataUrl, maxDim, quality) {
@@ -355,6 +390,51 @@ export async function compressImageInWorker(
   return (await dispatch(
     { id, type: 'image-compress', dataUrl, maxDim, quality },
   )) as string;
+}
+
+/**
+ * Sample the average luminance of a video frame in a Web Worker.
+ * The caller creates an ImageBitmap from the video element and transfers it;
+ * the worker draws it to an OffscreenCanvas and computes the mean luma.
+ * Falls back to the synchronous main-thread sampler if workers aren't available.
+ */
+export async function sampleLuminanceInWorker(
+  video: HTMLVideoElement,
+  region: 'top' | 'center' | 'bottom',
+): Promise<number> {
+  if (!isWorkerPoolAvailable() || typeof createImageBitmap === 'undefined') {
+    const { sampleVideoLuminance } = await import('./captionStyling');
+    return sampleVideoLuminance(video, region);
+  }
+
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (vw === 0 || vh === 0) return 0.3;
+
+  let sy = 0;
+  let sh = vh;
+  if (region === 'top') {
+    sy = 0;
+    sh = Math.round(vh * 0.25);
+  } else if (region === 'center') {
+    sy = Math.round(vh * 0.3);
+    sh = Math.round(vh * 0.4);
+  } else {
+    sy = Math.round(vh * 0.75);
+    sh = Math.round(vh * 0.25);
+  }
+
+  try {
+    const bitmap = await createImageBitmap(video, 0, sy, vw, sh);
+    const id = ++taskIdCounter;
+    return (await dispatch(
+      { id, type: 'video-luminance', bitmap } as WorkerTaskRequest,
+      [bitmap],
+    )) as number;
+  } catch {
+    const { sampleVideoLuminance } = await import('./captionStyling');
+    return sampleVideoLuminance(video, region);
+  }
 }
 
 /**

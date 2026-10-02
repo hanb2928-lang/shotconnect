@@ -28,6 +28,7 @@ import {
   type LuminanceLevel,
   type CaptionStyle,
 } from '@/lib/captionStyling';
+import { sampleLuminanceInWorker } from '@/lib/workerPool';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { getActiveCopyOverlay } from '@/lib/promptBuilder';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
@@ -246,13 +247,19 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
       setLuminanceLevel('dark');
       return;
     }
-    const sampleLuminance = () => {
+    const sampleLuminance = async () => {
       const video = webVideoRef.current;
       if (!video || video.readyState < 2) return;
       const activeSeg = getActiveSegment(editPlan.segments, currentSecRef.current);
       const region = activeSeg?.position ?? 'center';
-      const lum = sampleVideoLuminance(video, region);
-      setLuminanceLevel(classifyLuminance(lum));
+      try {
+        const lum = await sampleLuminanceInWorker(video, region);
+        setLuminanceLevel(classifyLuminance(lum));
+      } catch {
+        // Worker unavailable or failed — fall back to sync sampling
+        const lum = sampleVideoLuminance(video, region);
+        setLuminanceLevel(classifyLuminance(lum));
+      }
     };
     sampleLuminance();
     luminanceIntervalRef.current = setInterval(sampleLuminance, LUMINANCE_SAMPLE_MS);
