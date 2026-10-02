@@ -8,7 +8,7 @@ import {
   Platform,
   UIManager,
   ScrollView,
-  Dimensions,
+  useWindowDimensions,
   Animated as RNAnimated,
 } from 'react-native';
 import { ChevronDown } from 'lucide-react-native';
@@ -48,11 +48,11 @@ type Props = {
   mediaFilter?: MediaType;
 };
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_GAP = theme.spacing.sm;
-const CARD_MIN_WIDTH = Math.max(150, (SCREEN_WIDTH - theme.spacing.lg * 2 - CARD_GAP * 2) / 3);
 
 export function FeatureTileGrid({ categories, scanMode, focusTileKey, onFocusConsumed, mediaFilter }: Props) {
+  const { width: screenWidth } = useWindowDimensions();
+  const CARD_MIN_WIDTH = Math.max(150, (screenWidth - theme.spacing.lg * 2 - CARD_GAP * 2) / 3);
   const [activeCategory, setActiveCategory] = useState(0);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const tabScrollRef = useRef<ScrollView>(null);
@@ -147,6 +147,7 @@ export function FeatureTileGrid({ categories, scanMode, focusTileKey, onFocusCon
                 key={tile.key}
                 style={[
                   styles.card,
+                  { minWidth: CARD_MIN_WIDTH },
                   isExpanded && styles.cardExpanded,
                   expandedKey && !isExpanded && styles.cardDimmed,
                 ]}
@@ -262,7 +263,6 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     paddingHorizontal: 12,
     paddingVertical: 12,
-    minWidth: CARD_MIN_WIDTH,
     flex: 1,
     flexShrink: 1,
     ...theme.shadows.card,

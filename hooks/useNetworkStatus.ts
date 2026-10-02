@@ -1,13 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import { supabaseUrl } from '@/lib/supabase';
 
 export type NetworkStatus = 'online' | 'offline' | 'unknown';
 
 let currentStatus: NetworkStatus = 'unknown';
 let initialized = false;
 const listeners = new Set<(status: NetworkStatus) => void>();
+let probeTimer: ReturnType<typeof setInterval> | null = null;
+let probing = false;
+
+const PROBE_INTERVAL_MS = 15000;
+const PROBE_TIMEOUT_MS = 8000;
 
 function notify(status: NetworkStatus) {
+  if (status === currentStatus) return;
   currentStatus = status;
   const snapshot = [...listeners];
   for (const cb of snapshot) {
@@ -17,6 +24,43 @@ function notify(status: NetworkStatus) {
 
 const onlineHandler = () => notify('online');
 const offlineHandler = () => notify('offline');
+
+async function probeConnectivity(): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/analyze-photo`, {
+      method: 'HEAD',
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return res.ok || res.status === 405 || res.status === 401;
+  } catch {
+    clearTimeout(timeoutId);
+    return false;
+  }
+}
+
+async function runProbe() {
+  if (probing) return;
+  probing = true;
+  const reachable = await probeConnectivity();
+  probing = false;
+  notify(reachable ? 'online' : 'offline');
+}
+
+function startProbing() {
+  if (probeTimer) return;
+  runProbe();
+  probeTimer = setInterval(runProbe, PROBE_INTERVAL_MS);
+}
+
+function stopProbing() {
+  if (probeTimer) {
+    clearInterval(probeTimer);
+    probeTimer = null;
+  }
+}
 
 function init() {
   if (initialized) return;
@@ -30,9 +74,8 @@ function init() {
       window.addEventListener('online', onlineHandler);
       window.addEventListener('offline', offlineHandler);
     }
-  } else {
-    currentStatus = 'online';
   }
+  startProbing();
 }
 
 export function useNetworkStatus(): NetworkStatus {

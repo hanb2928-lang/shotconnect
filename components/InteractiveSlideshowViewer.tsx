@@ -8,7 +8,7 @@ import {
   Image,
   Platform,
   ScrollView,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -28,8 +28,6 @@ import {
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import type { PsychScene } from '@/lib/psychologyEngine';
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export interface SlideshowScene {
   scene: PsychScene;
@@ -60,6 +58,7 @@ export function InteractiveSlideshowViewer({
   disclosureText,
   affiliateUrl,
 }: InteractiveSlideshowViewerProps) {
+  const { width: screenWidth } = useWindowDimensions();
   const mounted = useMountedRef();
   const [currentIdx, setCurrentIdx] = useState(0);
   const [downloading, setDownloading] = useState(false);
@@ -79,12 +78,12 @@ export function InteractiveSlideshowViewer({
   const goToSlide = useCallback((idx: number) => {
     if (idx < 0 || idx >= total) return;
     setCurrentIdx(idx);
-    scrollRef.current?.scrollTo({ x: idx * SCREEN_WIDTH, animated: true });
+    scrollRef.current?.scrollTo({ x: idx * screenWidth, animated: true });
   }, [total]);
 
   const handleScroll = useCallback((event: { nativeEvent: { contentOffset: { x: number } } }) => {
     const x = event.nativeEvent.contentOffset.x;
-    const idx = Math.round(x / SCREEN_WIDTH);
+    const idx = Math.round(x / screenWidth);
     if (idx !== currentIdx && idx >= 0 && idx < total) {
       runOnJS(setCurrentIdx)(idx);
     }
@@ -152,7 +151,7 @@ export function InteractiveSlideshowViewer({
         {scenes.map((scene, idx) => {
           const img = sceneImages?.[idx] ?? null;
           return (
-            <View key={idx} style={styles.slide}>
+            <View key={idx} style={[styles.slide, { width: screenWidth - theme.spacing.sm * 2 }]}>
               <View style={styles.slideImageWrap}>
                 {img ? (
                   <Image
@@ -339,7 +338,6 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   slide: {
-    width: SCREEN_WIDTH - theme.spacing.sm * 2,
     gap: 8,
   },
   slideImageWrap: {

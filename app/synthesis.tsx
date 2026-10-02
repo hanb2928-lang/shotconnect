@@ -33,6 +33,7 @@ import {
 } from '@/components/GenerationModePanel';
 import { PreviewExportTray } from '@/components/PreviewExportTray';
 import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
+import { isOnline } from '@/hooks/useNetworkStatus';
 import { useResultPolling } from '@/hooks/useResultPolling';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
@@ -66,6 +67,11 @@ export default function SynthesisScreen() {
   const scanIdRef = useRef<string | null>(null);
   const genStartRef = useRef<number>(0);
   const progressMsgRef = useRef<string>('');
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const productInputRef = useRef<HTMLInputElement | null>(null);
   const modelInputRef = useRef<HTMLInputElement | null>(null);
@@ -140,8 +146,9 @@ export default function SynthesisScreen() {
 
   const [jobId, setJobId] = useState<string | null>(null);
 
+  const generateLockRef = useRef(false);
   const handleGenerate = useCallback(async () => {
-    if (isGenerating) return;
+    if (isGenerating || generateLockRef.current) return;
     if (productImages.length < 3) {
       setError('제품 사진을 최소 3컷 등록해주세요.');
       return;
@@ -150,7 +157,12 @@ export default function SynthesisScreen() {
       setError('AI 범용 합성 모드에서는 모델 사진이 필요합니다.');
       return;
     }
+    if (!isOnline()) {
+      setError('인터넷 연결을 확인해주세요. 네트워크가 연결되지 않아 AI 생성을 시작할 수 없습니다.');
+      return;
+    }
     setError(null);
+    generateLockRef.current = true;
     setIsGenerating(true);
     setResultImageUrl(null);
     setResultVideoUrl(null);
@@ -182,6 +194,7 @@ export default function SynthesisScreen() {
       }
       scanIdRef.current = scanData.id;
 
+      if (!mountedRef.current) return;
       setVideoProgress({ phase: 'submitting', progress: 0.08, message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 });
 
       const submitResult = await submitVideoJobAsync(promptText, {
@@ -200,18 +213,23 @@ export default function SynthesisScreen() {
         enableFabricPhysics,
         draft: true,
       });
+      if (!mountedRef.current) return;
       setJobId(submitResult.taskId);
       setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
+      if (!mountedRef.current) return;
       setIsGenerating(false);
       setVideoProgress(null);
       setError(err instanceof Error ? err.message : 'AI 영상 생성 요청에 실패했습니다.');
+    } finally {
+      generateLockRef.current = false;
     }
   }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating]);
 
   const polling = useResultPolling(jobId, {
     scanId: scanIdRef.current,
     onCompleted: (videoUrl) => {
+      if (!mountedRef.current) return;
       setIsGenerating(false);
       setVideoProgress((prev) => prev ? { ...prev, phase: 'completed', progress: 1.0, message: '영상 생성 완료' } : null);
       if (outputMode === 'image') {
@@ -222,6 +240,7 @@ export default function SynthesisScreen() {
       notifyVideoCompleted();
     },
     onError: (errMsg) => {
+      if (!mountedRef.current) return;
       setIsGenerating(false);
       setVideoProgress((prev) => prev ? { ...prev, phase: 'error', progress: 0, message: errMsg } : null);
       setError(errMsg);
@@ -234,6 +253,7 @@ export default function SynthesisScreen() {
     if (!isGenerating) return;
     const GEN_TIMEOUT_MS = 180_000;
     const timer = setInterval(() => {
+      if (!mountedRef.current) return;
       const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
       setVideoProgress((prev) => {
         if (!prev) return prev;
@@ -248,6 +268,7 @@ export default function SynthesisScreen() {
       });
     }, 1000);
     const timeout = setTimeout(() => {
+      if (!mountedRef.current) return;
       setIsGenerating(false);
       setVideoProgress(null);
       setError('영상 생성 시간이 초과되었습니다. 다시 시도해주세요.');
@@ -260,7 +281,7 @@ export default function SynthesisScreen() {
 
   const handleDownload = useCallback(() => {
     setIsExporting(true);
-    setTimeout(() => setIsExporting(false), 1000);
+    setTimeout(() => { if (mountedRef.current) setIsExporting(false); }, 1000);
   }, []);
 
   const handleShare = useCallback(() => {

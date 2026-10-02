@@ -7,7 +7,7 @@ import {
   Image,
   Modal,
   ScrollView,
-  Dimensions,
+  useWindowDimensions,
   Pressable,
 } from 'react-native';
 import Animated, {
@@ -20,9 +20,6 @@ import { X, ChevronLeft, ChevronRight, Download } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { getThumbnailUrl } from '@/lib/imageUtils';
 import type { PsychScene } from '@/lib/psychologyEngine';
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 export interface GalleryScene {
   scene: PsychScene;
@@ -53,6 +50,7 @@ export function FullScreenGalleryModal({
   productName,
   disclosureText,
 }: FullScreenGalleryModalProps) {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [activeTab, setActiveTab] = useState<'beforeAfter' | 'comic'>(initialTab);
   const [currentIdx, setCurrentIdx] = useState(0);
   const slideProgress = useSharedValue(0);
@@ -153,9 +151,9 @@ export function FullScreenGalleryModal({
               <View style={styles.baItem}>
                 <Text style={styles.baLabel}>원본</Text>
                 {beforeImage ? (
-                  <Image source={{ uri: getThumbnailUrl(beforeImage, 600) }} style={styles.baImage} resizeMode="contain" />
+                  <Image source={{ uri: getThumbnailUrl(beforeImage, 600) }} style={[styles.baImage, { height: screenHeight * 0.5 }]} resizeMode="contain" />
                 ) : (
-                  <View style={styles.baPlaceholder}>
+                  <View style={[styles.baPlaceholder, { height: screenHeight * 0.5 }]}>
                     <Text style={styles.baPlaceholderText}>원본 없음</Text>
                   </View>
                 )}
@@ -163,9 +161,9 @@ export function FullScreenGalleryModal({
               <View style={styles.baItem}>
                 <Text style={styles.baLabel}>AI 보정</Text>
                 {afterImage ? (
-                  <Image source={{ uri: getThumbnailUrl(afterImage, 600) }} style={styles.baImage} resizeMode="contain" />
+                  <Image source={{ uri: getThumbnailUrl(afterImage, 600) }} style={[styles.baImage, { height: screenHeight * 0.5 }]} resizeMode="contain" />
                 ) : (
-                  <View style={styles.baPlaceholder}>
+                  <View style={[styles.baPlaceholder, { height: screenHeight * 0.5 }]}>
                     <Text style={styles.baPlaceholderText}>보정 전</Text>
                   </View>
                 )}
@@ -188,7 +186,7 @@ export function FullScreenGalleryModal({
               style={styles.comicScroll}
               onScroll={(e) => {
                 const x = e.nativeEvent.contentOffset.x;
-                const idx = Math.round(x / SCREEN_WIDTH);
+                const idx = Math.round(x / screenWidth);
                 if (idx !== currentIdx && idx >= 0 && idx < total) {
                   setCurrentIdx(idx);
                 }
@@ -198,8 +196,8 @@ export function FullScreenGalleryModal({
               {scenes.map((scene, idx) => {
                 const img = sceneImages?.[idx] ?? null;
                 return (
-                  <View key={idx} style={styles.cutSlide}>
-                    <View style={styles.cutImageWrap}>
+                  <View key={idx} style={[styles.cutSlide, { width: screenWidth - 16 }]}>
+                    <View style={[styles.cutImageWrap, { maxHeight: screenHeight * 0.55 }]}>
                       {img ? (
                         <Image source={{ uri: img }} style={styles.cutImage} resizeMode="contain" />
                       ) : (
@@ -356,13 +354,11 @@ const styles = StyleSheet.create({
   },
   baImage: {
     width: '100%',
-    height: SCREEN_HEIGHT * 0.5,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.dark.surfaceLight,
   },
   baPlaceholder: {
     width: '100%',
-    height: SCREEN_HEIGHT * 0.5,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.dark.surfaceLight,
     justifyContent: 'center',
@@ -392,14 +388,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cutSlide: {
-    width: SCREEN_WIDTH - 16,
     padding: 16,
     alignItems: 'center',
   },
   cutImageWrap: {
     width: '100%',
     aspectRatio: 9 / 16,
-    maxHeight: SCREEN_HEIGHT * 0.55,
     borderRadius: theme.radius.md,
     overflow: 'hidden',
     backgroundColor: theme.colors.dark.surfaceLight,

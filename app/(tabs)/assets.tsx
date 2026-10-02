@@ -10,7 +10,7 @@ import {
   Image,
   Platform,
   Modal,
-  Dimensions,
+  useWindowDimensions,
   Alert,
   TextInput,
   Linking,
@@ -36,9 +36,7 @@ import { getTrendingSuggestions } from '@/lib/trendingHashtags';
 import * as Clipboard from 'expo-clipboard';
 
 
-const { width: screenWidth } = Dimensions.get('window');
 const CARD_GAP = 12;
-const CARD_WIDTH = (screenWidth - 48 - CARD_GAP) / 2;
 
 type UploadStatus = 'not_uploaded' | 'uploaded' | 'scheduled';
 
@@ -85,6 +83,8 @@ export default function AssetsScreen() {
   const tabBarHeight = useTabBarHeight();
   const safeTop = useSafeTop();
   const { t } = useI18n();
+  const { width: screenWidth } = useWindowDimensions();
+  const CARD_WIDTH = (screenWidth - 48 - CARD_GAP) / 2;
   const [assets, setAssets] = useState<SavedAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -550,7 +550,7 @@ export default function AssetsScreen() {
             const isPinned = pinnedIds.has(item.id);
             return (
               <TouchableOpacity
-                style={[styles.card, isPinned && styles.cardPinned]}
+                style={[styles.card, { width: CARD_WIDTH }, isPinned && styles.cardPinned]}
                 activeOpacity={0.8}
                 onPress={() => setPreviewAsset(item)}
               >
@@ -996,7 +996,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: theme.typography.body, fontFamily: theme.typography.fontFamily.regular, color: theme.colors.dark.textDim, textAlign: 'center', lineHeight: 22 },
   listContent: { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
   columnWrapper: { gap: CARD_GAP, marginBottom: CARD_GAP },
-  card: { width: CARD_WIDTH, backgroundColor: theme.colors.dark.surface, borderRadius: theme.radius.lg, overflow: 'hidden', ...theme.shadows.card },
+  card: { backgroundColor: theme.colors.dark.surface, borderRadius: theme.radius.lg, overflow: 'hidden', ...theme.shadows.card },
   cardPinned: { borderColor: theme.colors.primary[400], borderWidth: 2 },
   thumbWrap: { width: '100%', aspectRatio: 1, backgroundColor: theme.colors.dark.surfaceLight, position: 'relative' },
   thumbImage: { width: '100%', height: '100%' },

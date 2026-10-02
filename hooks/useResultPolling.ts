@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
 export type JobState = 'idle' | 'polling' | 'completed' | 'failed' | 'timeout';
@@ -227,8 +228,24 @@ export function useResultPolling(
     // Start polling.
     pollTimer = setTimeout(pollOnce, 1000);
 
+    // Pause polling when app is backgrounded to avoid zombie requests.
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        if (!cancelled && !settledRef.current && !pollTimer) {
+          pollTimer = setTimeout(pollOnce, 1000);
+        }
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        if (pollTimer) {
+          clearTimeout(pollTimer);
+          pollTimer = null;
+        }
+      }
+    };
+    const appSub = AppState.addEventListener('change', handleAppState);
+
     return () => {
       cleanup();
+      appSub.remove();
     };
   }, [jobId, scanId, settle]);
 

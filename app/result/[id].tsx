@@ -14,7 +14,7 @@ import {
   AppState,
   Linking,
   Modal,
-  Dimensions,
+  useWindowDimensions,
   Animated,
   Easing,
 } from 'react-native';
@@ -95,6 +95,7 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 import { friendlyError } from '@/lib/errors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSafeTop } from '@/hooks/useSafeTop';
+import { isOnline } from '@/hooks/useNetworkStatus';
 import { LazySection } from '@/components/LazySection';
 import { ShortFormGuideCard } from '@/components/ShortFormGuideCard';
 import { TrendMatchCard } from '@/components/TrendMatchCard';
@@ -408,6 +409,7 @@ function RotatingLoader({ size, color, strokeWidth = 2 }: { size: number; color:
 
 export default function ResultScreen() {
   const router = useRouter();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { id, customPrompt: routeCustomPrompt } = useLocalSearchParams<{ id: string; customPrompt?: string }>();
   const userCustomPrompt = useRef<string>(routeCustomPrompt || '');
   const [scan, setScan] = useState<Scan | null>(null);
@@ -579,8 +581,14 @@ export default function ResultScreen() {
     setAddedHashtags((prev) => prev.filter((t) => t !== tag));
   }, []);
 
+  const regenerateLockRef = useRef(false);
   const handleRegenerate = useCallback(async () => {
-    if (!scan || isRegenerating) return;
+    if (!scan || isRegenerating || regenerateLockRef.current) return;
+    if (!isOnline()) {
+      setError('인터넷 연결을 확인해주세요. 네트워크가 연결되지 않아 카피 재생성을 할 수 없습니다.');
+      return;
+    }
+    regenerateLockRef.current = true;
     setIsRegenerating(true);
     setNarrativeVariation((v) => v + 1);
 
@@ -636,6 +644,7 @@ export default function ResultScreen() {
     if (mountedRef.current) {
       setIsRegenerating(false);
     }
+    regenerateLockRef.current = false;
   }, [scan, isRegenerating, inlineEdit.videoTemplate, inlineEdit.captionFont, inlineEdit.captionPosition, inlineEdit.bgmMood, inlineEdit.hookEffect, inlineEdit.aiPrompt, inlineEdit.captionText, activePlatform, targetPlatform, contentPurpose, selectedDurationMs]);
 
   const insets = useSafeAreaInsets();
@@ -665,6 +674,10 @@ export default function ResultScreen() {
 
   const handleAiVideoGenerate = useCallback(async () => {
     if (!scan || isGeneratingVideo || videoGenLockRef.current) return;
+    if (!isOnline()) {
+      setVideoGenError('인터넷 연결을 확인해주세요. 네트워크가 연결되지 않아 영상 생성을 시작할 수 없습니다.');
+      return;
+    }
     videoGenLockRef.current = true;
     try {
     if (hdUnsubRef.current) { hdUnsubRef.current(); hdUnsubRef.current = null; }
@@ -989,8 +1002,14 @@ export default function ResultScreen() {
     }
   }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage]);
 
+  const imageGenLockRef = useRef(false);
   const handleAiImageGenerate = useCallback(async () => {
-    if (!scan || isGeneratingImage) return;
+    if (!scan || isGeneratingImage || imageGenLockRef.current) return;
+    if (!isOnline()) {
+      setImageGenError('인터넷 연결을 확인해주세요. 네트워크가 연결되지 않아 이미지 생성을 시작할 수 없습니다.');
+      return;
+    }
+    imageGenLockRef.current = true;
     setIsGeneratingImage(true);
     setImageGenError(null);
     setGeneratedImages([]);
@@ -1153,6 +1172,7 @@ export default function ResultScreen() {
       }
     }
 
+    imageGenLockRef.current = false;
     // Auto-clear progress after 3 seconds on success
     setTimeout(() => {
       if (mountedRef.current) {
@@ -1331,6 +1351,7 @@ export default function ResultScreen() {
             }
           }
 
+          if (!mountedRef.current) return;
           setIsGeneratingVideo(true);
           setVideoGenProgress({ phase: 'generating', progress: 0.1, message: '이전 영상 생성 작업을 이어받는 중...', elapsedSec: 0 });
 
@@ -1839,14 +1860,17 @@ export default function ResultScreen() {
         .update({ custom_affiliate_links: updated })
         .eq('id', scan.id);
       if (updateError) {
+        if (!mountedRef.current) return { success: false, error: '링크 저장 실패: ' + updateError.message };
         setSavingLink(false);
         return { success: false, error: '링크 저장 실패: ' + updateError.message };
       }
+      if (!mountedRef.current) return { success: true };
       setCustomAffiliateLinks(updated);
       setSelectedAffiliate(detectedPlatform);
       setSavingLink(false);
       return { success: true };
     } catch (e: any) {
+      if (!mountedRef.current) return { success: false, error: '링크 저장 실패: ' + (e?.message || String(e)) };
       setSavingLink(false);
       return { success: false, error: '링크 저장 실패: ' + (e?.message || String(e)) };
     }
@@ -1863,6 +1887,7 @@ export default function ResultScreen() {
       if (updateError) {
         return { success: false, error: '링크 삭제 실패: ' + updateError.message };
       }
+      if (!mountedRef.current) return { success: true };
       setCustomAffiliateLinks(updated);
       setAutoMarketingCopy(null);
       return { success: true };
@@ -1939,24 +1964,33 @@ export default function ResultScreen() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadDone, setUploadDone] = useState(false);
 
+  const copyCaptionLockRef = useRef(false);
   const handleCopyCaption = async () => {
+    if (copyCaptionLockRef.current) return;
+    copyCaptionLockRef.current = true;
     try {
       if (Platform.OS === 'web' && navigator.clipboard) {
         await navigator.clipboard.writeText(captionWithLink);
+        if (!mountedRef.current) return;
         setCaptionCopied(true);
-        setTimeout(() => setCaptionCopied(false), 2000);
+        setTimeout(() => { if (mountedRef.current) setCaptionCopied(false); }, 2000);
       } else {
         await Clipboard.setStringAsync(captionWithLink);
+        if (!mountedRef.current) return;
         setCaptionCopied(true);
-        setTimeout(() => setCaptionCopied(false), 2000);
+        setTimeout(() => { if (mountedRef.current) setCaptionCopied(false); }, 2000);
       }
     } catch {
       // clipboard copy failed silently
+    } finally {
+      copyCaptionLockRef.current = false;
     }
   };
 
+  const saveVideoLockRef = useRef(false);
   const handleSaveVideo = async () => {
-    if (!generatedVideoUrl) return;
+    if (!generatedVideoUrl || saveVideoLockRef.current) return;
+    saveVideoLockRef.current = true;
     setUploadError(null);
     setUploadProgress(0);
 
@@ -1995,25 +2029,31 @@ export default function ResultScreen() {
         await MediaLibrary.createAssetAsync(downloadResult.uri);
       }
 
+      if (!mountedRef.current) return;
       setUploadProgress(100);
       setUploadDone(true);
       setTimeout(() => {
+        if (!mountedRef.current) return;
         setUploadProgress(null);
         setUploadDone(false);
       }, 2500);
     } catch (saveError) {
+      if (!mountedRef.current) return;
       setUploadProgress(null);
       const message = saveError instanceof Error ? saveError.message : '영상 저장에 실패했습니다. 다시 시도해주세요.';
       setUploadError(message);
     } finally {
+      saveVideoLockRef.current = false;
       if (fallbackObjectUrl && Platform.OS === 'web') {
         URL.revokeObjectURL(fallbackObjectUrl);
       }
     }
   };
 
+  const saveShareLockRef = useRef(false);
   const handleSaveAndShare = async () => {
-    if (uploadProgress !== null) return;
+    if (uploadProgress !== null || saveShareLockRef.current) return;
+    saveShareLockRef.current = true;
     setUploadError(null);
     setUploadDone(false);
     setUploadProgress(0);
@@ -2077,9 +2117,11 @@ export default function ResultScreen() {
       }
 
       // Gallery save succeeded — reset progress after brief success flash
+      if (!mountedRef.current) return;
       setUploadProgress(100);
       setUploadDone(true);
       const resetTimer = setTimeout(() => {
+        if (!mountedRef.current) return;
         setUploadProgress(null);
         setUploadDone(false);
       }, 2500);
@@ -2119,8 +2161,9 @@ export default function ResultScreen() {
         if (navigator.clipboard) {
           await navigator.clipboard.writeText(shareText);
         }
+        if (!mountedRef.current) return;
         setCaptionCopied(true);
-        setTimeout(() => setCaptionCopied(false), 2000);
+        setTimeout(() => { if (mountedRef.current) setCaptionCopied(false); }, 2000);
       } else {
         try {
           await Sharing.shareAsync(uri, {
@@ -2132,6 +2175,7 @@ export default function ResultScreen() {
         }
       }
     } catch (saveError) {
+      if (!mountedRef.current) return;
       setUploadProgress(null);
       let message: string;
       if (saveError instanceof Error && saveError.message) {
@@ -2147,36 +2191,48 @@ export default function ResultScreen() {
       if (fallbackObjectUrl && Platform.OS === 'web') {
         URL.revokeObjectURL(fallbackObjectUrl);
       }
+    } finally {
+      saveShareLockRef.current = false;
     }
   };
 
+  const copyHookLockRef = useRef(false);
   const handleCopyHook = async () => {
-    if (!activeHook) return;
+    if (!activeHook || copyHookLockRef.current) return;
+    copyHookLockRef.current = true;
     try {
       if (Platform.OS === 'web' && navigator.clipboard) {
         await navigator.clipboard.writeText(activeHook);
       } else {
         await Clipboard.setStringAsync(activeHook);
       }
+      if (!mountedRef.current) return;
       setHookCopied(true);
-      setTimeout(() => setHookCopied(false), 2000);
+      setTimeout(() => { if (mountedRef.current) setHookCopied(false); }, 2000);
     } catch {
       // clipboard copy failed silently
+    } finally {
+      copyHookLockRef.current = false;
     }
   };
 
+  const copyLinkLockRef = useRef(false);
   const handleCopyCommentLink = async () => {
-    if (!shortUrl) return;
+    if (!shortUrl || copyLinkLockRef.current) return;
+    copyLinkLockRef.current = true;
     try {
       if (Platform.OS === 'web' && navigator.clipboard) {
         await navigator.clipboard.writeText(shortUrl);
       } else {
         await Clipboard.setStringAsync(shortUrl);
       }
+      if (!mountedRef.current) return;
       setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
+      setTimeout(() => { if (mountedRef.current) setLinkCopied(false); }, 2000);
     } catch {
       // clipboard copy failed silently
+    } finally {
+      copyLinkLockRef.current = false;
     }
   };
 
@@ -4063,7 +4119,7 @@ export default function ResultScreen() {
         {/* === 5각도 원본 컷 풀스크린 뷰어 === */}
         <Modal visible={galleryModalVisible} transparent animationType="fade" onRequestClose={() => setGalleryModalVisible(false)}>
           <View style={styles.galleryModalOverlay}>
-            <View style={styles.galleryModalContent}>
+            <View style={[styles.galleryModalContent, { width: windowWidth, maxHeight: windowHeight }]}>
               <View style={styles.galleryModalHeader}>
                 <Text style={styles.galleryModalTitle} numberOfLines={1}>
                   {['정면', '좌측', '우측', '후면', '상부'][galleryModalIndex] ?? `컷 ${galleryModalIndex + 1}`} 컷
@@ -4074,7 +4130,7 @@ export default function ResultScreen() {
               </View>
               <Image
                 source={{ uri: allCutImages[galleryModalIndex] ?? allCutImages[0] }}
-                style={styles.galleryModalImage}
+                style={[styles.galleryModalImage, { width: windowWidth }]}
                 resizeMode="contain"
               />
               <View style={styles.galleryModalActions}>
@@ -4133,7 +4189,7 @@ export default function ResultScreen() {
         {/* === AI 생성 이미지 풀스크린 뷰어 === */}
         <Modal visible={imageViewerVisible} transparent animationType="fade" onRequestClose={() => setImageViewerVisible(false)}>
           <View style={styles.galleryModalOverlay}>
-            <View style={styles.galleryModalContent}>
+            <View style={[styles.galleryModalContent, { width: windowWidth, maxHeight: windowHeight }]}>
               <View style={styles.galleryModalHeader}>
                 <Text style={styles.galleryModalTitle} numberOfLines={1}>
                   AI 이미지 {imageViewerIndex + 1} / {generatedImages.length}
@@ -4144,7 +4200,7 @@ export default function ResultScreen() {
               </View>
               <Image
                 source={{ uri: generatedImages[imageViewerIndex] ?? generatedImages[0] }}
-                style={styles.galleryModalImage}
+                style={[styles.galleryModalImage, { width: windowWidth }]}
                 resizeMode="contain"
               />
               <View style={styles.galleryModalActions}>
@@ -4997,8 +5053,6 @@ iconButton: {
   },
   galleryModalContent: {
     flex: 1,
-    width: Dimensions.get('window').width,
-    maxHeight: Dimensions.get('window').height,
   },
   galleryModalHeader: {
     flexDirection: 'row',
@@ -5024,7 +5078,6 @@ iconButton: {
   },
   galleryModalImage: {
     flex: 1,
-    width: Dimensions.get('window').width,
   },
   galleryModalActions: {
     flexDirection: 'row',

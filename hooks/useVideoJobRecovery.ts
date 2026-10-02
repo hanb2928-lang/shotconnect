@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { Platform, AppState, type AppStateStatus } from 'react-native';
 import { getActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
 import { supabase } from '@/lib/supabase';
 
@@ -118,7 +118,16 @@ export function useVideoJobRecovery() {
       runRecovery().catch(() => {});
     };
 
+    // Pause recovery checks while backgrounded; resume on foreground.
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        runRecovery().catch(() => {});
+      }
+    };
+    const appSub = AppState.addEventListener('change', handleAppState);
+
     let cleanupFns: (() => void)[] = [];
+    cleanupFns.push(() => appSub.remove());
 
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibility);

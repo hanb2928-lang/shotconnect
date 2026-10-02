@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, AppState, type AppStateStatus } from 'react-native';
 import { enqueueJob, subscribeToJob, getJob, type RenderJob, type JobType, type JobStatus } from '@/lib/jobQueue';
 
 interface QueuedJobState {
@@ -168,10 +168,32 @@ export function useQueuedJob() {
       }
     };
 
+    // Pause polling when app is backgrounded to avoid zombie requests.
+    let bgPaused = false;
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (mySubmitId !== submitIdRef.current) return;
+      if (nextState === 'background' || nextState === 'inactive') {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+        bgPaused = true;
+      } else if (nextState === 'active' && bgPaused) {
+        bgPaused = false;
+        if (!pollingPaused) startPolling();
+      }
+    };
+    const appSub = AppState.addEventListener('change', handleAppState);
+
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.addEventListener('online', handleOnline);
       onlineCleanupRef.current = () => {
         window.removeEventListener('online', handleOnline);
+        appSub.remove();
+      };
+    } else {
+      onlineCleanupRef.current = () => {
+        appSub.remove();
       };
     }
 

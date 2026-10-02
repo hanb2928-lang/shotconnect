@@ -570,7 +570,14 @@ export default function CameraScreen() {
           if (images.length === 0) return;
           if (!isMountedRef.current) return;
           const compressed = await withTimeout(
-            prepareImageForApi(buildDataUrl(cleanBase64(images[0].base64), images[0].mimeType), getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7, 'none' as MoodFilterType),
+            new Promise<string>((resolve, reject) => {
+              InteractionManager.runAfterInteractions(async () => {
+                try {
+                  const r = await prepareImageForApi(buildDataUrl(cleanBase64(images[0].base64), images[0].mimeType), getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7, 'none' as MoodFilterType);
+                  resolve(r);
+                } catch (err) { reject(err); }
+              });
+            }),
             PICK_TIMEOUT_MS,
             '이미지 압축',
           );
@@ -603,7 +610,14 @@ export default function CameraScreen() {
       const asset = result.assets[0];
       if (!asset.uri) return;
       const { base64, mimeType } = await withTimeout(
-        compressImageToBase64(asset.uri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7),
+        new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
+          InteractionManager.runAfterInteractions(async () => {
+            try {
+              const r = await compressImageToBase64(asset.uri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
+              resolve(r);
+            } catch (err) { reject(err); }
+          });
+        }),
         PICK_TIMEOUT_MS,
         '이미지 압축',
       );
@@ -828,7 +842,14 @@ export default function CameraScreen() {
       if (result.canceled || !result.assets?.[0]?.uri) return null;
       const assetUri = result.assets[0].uri;
       const { base64, mimeType, compressedUri } = await withTimeout(
-        compressImageToBase64WithUri(assetUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7),
+        new Promise<{ base64: string; mimeType: string; compressedUri: string | null }>((resolve, reject) => {
+          InteractionManager.runAfterInteractions(async () => {
+            try {
+              const r = await compressImageToBase64WithUri(assetUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
+              resolve(r);
+            } catch (err) { reject(err); }
+          });
+        }),
         PICK_TIMEOUT_MS,
         '이미지 압축',
       );
@@ -854,12 +875,19 @@ export default function CameraScreen() {
       postCaptureVideoUriRef.current = payload;
     } else {
       try {
-        const compressed = await prepareImageForApi(
-          buildDataUrl(cleanBase64(payload), mimeType),
-          getDeviceCaptureMaxDim(),
-          isLowEndDevice() ? 0.6 : 0.7,
-          'none' as MoodFilterType,
-        );
+        const compressed = await new Promise<string>((resolve, reject) => {
+          InteractionManager.runAfterInteractions(async () => {
+            try {
+              const r = await prepareImageForApi(
+                buildDataUrl(cleanBase64(payload), mimeType),
+                getDeviceCaptureMaxDim(),
+                isLowEndDevice() ? 0.6 : 0.7,
+                'none' as MoodFilterType,
+              );
+              resolve(r);
+            } catch (err) { reject(err); }
+          });
+        });
         if (!isMountedRef.current) return;
         const b64 = cleanBase64(compressed);
         const mime = getMimeTypeFromDataUrl(compressed);

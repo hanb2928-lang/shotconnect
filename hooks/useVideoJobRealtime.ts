@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { saveActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
 
@@ -151,9 +152,28 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
       handleResult('failed', undefined, '비디오 생성 시간이 초과되었습니다. 잠시 후 다시 확인해주세요.');
     }, TIMEOUT_MS);
 
+    // Pause polling and realtime when backgrounded to avoid zombie requests.
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        if (!settledRef.current) {
+          checkDb();
+          if (!pollTimer) schedulePoll();
+          if (!channel) connectChannel();
+        }
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+        if (channel) {
+          try { supabase.removeChannel(channel); } catch { /* ignore */ }
+          channel = null;
+        }
+      }
+    };
+    const appSub = AppState.addEventListener('change', handleAppState);
+
     return () => {
       settledRef.current = true;
       cleanup();
+      appSub.remove();
     };
   }, [jobId, handleResult]);
 

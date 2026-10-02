@@ -173,7 +173,7 @@ export const InlineCameraViewfinder = forwardRef<
         ctx.scale(-1, 1);
       }
       ctx.drawImage(video, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
       const rawBase64 = dataUrl.split(',')[1];
       canvas.width = 0;
       canvas.height = 0;
@@ -189,7 +189,7 @@ export const InlineCameraViewfinder = forwardRef<
     try {
       const result = await nativeCameraRef.current.takePictureAsync({
         base64: true,
-        quality: 0.8,
+        quality: 0.7,
       });
       if (!result?.base64) return null;
       return { base64: result.base64, mimeType: 'image/jpeg' };

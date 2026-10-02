@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Image,
   ScrollView,
-  Dimensions,
+  useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
 import { Instagram, Youtube, FileText, Download, Loader as Loader2, Check, Zap, Image as ImageIcon, MessageCircle, Send, Share, Crop, RotateCcw, Check as CheckIcon } from 'lucide-react-native';
@@ -224,9 +224,6 @@ async function renderFormat(
 
 // ─── Native format card (mobile) ─────────────────────────────────────────
 
-const { width: screenWidth } = Dimensions.get('window');
-const NATIVE_CARD_WIDTH = Math.min(screenWidth - 48, 360);
-
 function NativeFormatCard({
   fmt,
   imageUrl,
@@ -245,6 +242,8 @@ function NativeFormatCard({
   shortUrl: string;
   cardRef: (ref: View | null) => void;
 }) {
+  const { width: screenWidth } = useWindowDimensions();
+  const NATIVE_CARD_WIDTH = Math.min(screenWidth - 48, 360);
   const cardHeight = Math.round(NATIVE_CARD_WIDTH * (fmt.height / fmt.width));
   const scale = crop.zoom;
 

@@ -12,7 +12,7 @@ import {
   TextInput,
   RefreshControl,
   FlatList,
-  Dimensions,
+  useWindowDimensions,
   ViewToken,
   KeyboardAvoidingView,
 } from 'react-native';
@@ -53,8 +53,6 @@ import { friendlyError } from '@/lib/errors';
 import { useSubTabBarHeight } from '@/hooks/useSubTabBarHeight';
 import { useSafeTop } from '@/hooks/useSafeTop';
 
-const { width: screenWidth } = Dimensions.get('window');
-
 const PLATFORM_OPTIONS: { key: WarmupPlatform; label: string; emoji: string }[] = [
   { key: 'instagram', label: '인스타그램', emoji: 'IG' },
   { key: 'tiktok', label: '틱톡', emoji: 'TT' },
@@ -81,6 +79,7 @@ interface DaySlide {
 }
 
 export default function WarmupScreen() {
+  const { width: screenWidth } = useWindowDimensions();
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
   const mounted = useMountedRef();
@@ -439,7 +438,7 @@ export default function WarmupScreen() {
                 }, 100);
               }}
               renderItem={({ item }) => (
-                <View style={styles.slide}>
+                <View style={[styles.slide, { width: screenWidth }]}>
                   <View style={styles.slideHeader}>
                     <View style={[styles.dayBadge, { backgroundColor: getDayColor(item.day) + '20' }]}>
                       <Text style={[styles.dayBadgeText, { color: getDayColor(item.day) }]}>{item.day}일차</Text>
@@ -805,7 +804,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   slide: {
-    width: screenWidth,
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.sm,
   },

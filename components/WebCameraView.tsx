@@ -251,7 +251,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
         ctx.scale(-1, 1);
       }
       ctx.drawImage(video, 0, 0, w, h);
-      const compressed = canvas.toDataURL('image/jpeg', 0.85);
+      const compressed = canvas.toDataURL('image/jpeg', 0.7);
       canvas.width = 0;
       canvas.height = 0;
       if (!mountedRef.current) return null;

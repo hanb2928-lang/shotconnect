@@ -5,16 +5,14 @@ import {
   StyleSheet,
   TouchableOpacity,
   Modal,
-  Dimensions,
   Platform,
   PanResponder,
+  useWindowDimensions,
   Image as RNImage,
 } from 'react-native';
 import { Eraser, RotateCcw, Undo2, Check, X, Loader } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
-
-const { width: screenWidth } = Dimensions.get('window');
 
 type BrushMode = 'erase' | 'restore';
 
@@ -39,6 +37,7 @@ export function BgRemoveEditor({
   onCancel,
 }: BgRemoveEditorProps) {
   const safeTop = useSafeTop();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [brushMode, setBrushMode] = useState<BrushMode>('erase');
   const [brushSize, setBrushSize] = useState(40);
   const [processing, setProcessing] = useState(false);
@@ -59,7 +58,7 @@ export function BgRemoveEditor({
   useEffect(() => {
     if (!visible || !imageWidth || !imageHeight) return;
     const maxW = screenWidth - 32;
-    const maxH = Dimensions.get('window').height * 0.5;
+    const maxH = screenHeight * 0.5;
     const scale = Math.min(maxW / imageWidth, maxH / imageHeight);
     setDisplaySize({
       w: Math.round(imageWidth * scale),

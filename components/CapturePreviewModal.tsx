@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Modal,
   Image,
-  Dimensions,
   ScrollView,
   Platform,
 } from 'react-native';
@@ -29,8 +28,6 @@ interface CapturePreviewModalProps {
   onConfirm: (base64: string, mimeType: string) => void;
   onRetake: () => void;
 }
-
-const { width: screenWidth } = Dimensions.get('window');
 
 export function CapturePreviewModal({
   visible,

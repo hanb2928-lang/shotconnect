@@ -9,6 +9,7 @@ import {
   Linking,
   Platform,
   Modal,
+  InteractionManager,
 } from 'react-native';
 import * as MediaLibrary from 'expo-media-library';
 import {
@@ -64,6 +65,7 @@ import { mixBgmIntoVideo, fetchBgmRecommendation, type BgmRecommendation } from 
 import { runSynthesis, getSynthesisSummary, type AngleInput } from '@/lib/aiSynthesisEngine';
 import { buildDirectingPlan, getDirectingSummary } from '@/lib/directingEngine';
 import { buildMultiPlatformPublishPlans, type PublishTarget } from '@/lib/publishManager';
+import { compressImage } from '@/lib/imageEdit';
 
 type PlatformOption = {
   key: string;
@@ -235,16 +237,20 @@ export function PostCaptureWorkflow({
     return () => { cancelled = true; };
   }, [visible, imageUri]);
 
+  const addPlatformLockRef = useRef(false);
   const handleAddPlatform = useCallback(async () => {
     const trimmed = newPlatformName.trim();
     if (!trimmed) {
       setAddError('플랫폼 이름을 입력해주세요.');
       return;
     }
+    if (addPlatformLockRef.current) return;
+    addPlatformLockRef.current = true;
     setAddingPlatform(true);
     setAddError(null);
     try {
       const mp = await addCustomPlatform({ label: trimmed, ratio: newPlatformRatio });
+      if (!mountedRef.current) return;
       const opt = managedToOption(mp);
       setCustomPlatforms((prev) => [...prev, opt]);
       setSelectedPlatformKey(opt.key);
@@ -252,14 +258,17 @@ export function PostCaptureWorkflow({
       setNewPlatformRatio('9:16');
       setShowAddModal(false);
     } catch (err) {
+      if (!mountedRef.current) return;
       setAddError(err instanceof Error ? err.message : '플랫폼 추가에 실패했습니다.');
     }
-    setAddingPlatform(false);
+    if (mountedRef.current) setAddingPlatform(false);
+    addPlatformLockRef.current = false;
   }, [newPlatformName, newPlatformRatio]);
 
   const handleDeletePlatform = useCallback(async (dbId: string, key: string) => {
     try {
       await deleteCustomPlatform(dbId);
+      if (!mountedRef.current) return;
       setCustomPlatforms((prev) => prev.filter((o) => o.key !== key));
       if (selectedPlatformKey === key) {
         setSelectedPlatformKey('instagram');
@@ -267,7 +276,7 @@ export function PostCaptureWorkflow({
     } catch {
       // ignore
     }
-  }, [selectedPlatformKey]);
+  }, [selectedPlatformKey, mountedRef]);
 
   const selectedOption = allPlatformOptions.find((o) => o.key === selectedPlatformKey) ?? BUILTIN_OPTIONS[0];
   const platformInfo = useMemo(
@@ -328,9 +337,11 @@ export function PostCaptureWorkflow({
     [customPrompt, synthesisResult.contextMatch.context, derivedProductName],
   );
 
+  const saveGalleryLockRef = useRef(false);
   const handleSaveToGallery = useCallback(async () => {
     const uri = videoUri || (imageUri || null);
-    if (!uri) return;
+    if (!uri || saveGalleryLockRef.current) return;
+    saveGalleryLockRef.current = true;
     setSavingToGallery(true);
     try {
       if (Platform.OS === 'web' && videoUri) {
@@ -366,7 +377,8 @@ export function PostCaptureWorkflow({
     } catch {
       // ignore — user can retry
     }
-    setSavingToGallery(false);
+    if (mountedRef.current) setSavingToGallery(false);
+    saveGalleryLockRef.current = false;
   }, [videoUri, imageUri, editPlan.bgmTemplate.id, editPlan.pacingBpm, bgmRecommendation]);
 
   const uriToBlob = useCallback(async (uri: string): Promise<Blob> => {
@@ -401,19 +413,21 @@ export function PostCaptureWorkflow({
           .from('videos')
           .upload(fileName, blob, { contentType, upsert: false });
         if (error) throw error;
-        setUploadRetrying(false);
+        if (mountedRef.current) setUploadRetrying(false);
         return true;
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
-        setUploadErrorMsg(lastError);
+        if (mountedRef.current) setUploadErrorMsg(lastError);
       }
     }
-    setUploadRetrying(false);
+    if (mountedRef.current) setUploadRetrying(false);
     return false;
   }, []);
 
+  const proceedLockRef = useRef(false);
   const handleProceed = useCallback(async () => {
-    if (isUploading || uploadDone) return;
+    if (isUploading || uploadDone || proceedLockRef.current) return;
+    proceedLockRef.current = true;
     setIsUploading(true);
     setUploadErrorMsg(null);
     setUploadRetryCount(0);
@@ -439,7 +453,22 @@ export function PostCaptureWorkflow({
       }
       if (uploadUri) {
         try {
-          const blob = await uriToBlob(uploadUri);
+          let finalUri = uploadUri;
+          if (imageUri && !videoUri) {
+            try {
+              finalUri = await new Promise<string>((resolve, reject) => {
+                InteractionManager.runAfterInteractions(async () => {
+                  try {
+                    const r = await compressImage(uploadUri, 1080, 0.7);
+                    resolve(r);
+                  } catch (err) { reject(err); }
+                });
+              });
+            } catch {
+              finalUri = uploadUri;
+            }
+          }
+          const blob = await uriToBlob(finalUri);
           const ext = imageUri ? 'jpg' : 'mp4';
           const contentType = imageUri ? 'image/jpeg' : 'video/mp4';
           const fileName = `shortform-${Date.now()}.${ext}`;
@@ -450,8 +479,10 @@ export function PostCaptureWorkflow({
       }
 
       if (cloudSuccess) {
+        if (!mountedRef.current) return;
         setUploadDone(true);
       } else {
+        if (!mountedRef.current) return;
         setFallbackUsed(true);
       }
 
@@ -468,7 +499,7 @@ export function PostCaptureWorkflow({
           } else if (deepLink.uploadWebUrl) {
             await Linking.openURL(deepLink.uploadWebUrl);
           }
-          setPlatformLaunched(true);
+          if (mountedRef.current) setPlatformLaunched(true);
         } catch {
           try {
             if (deepLink.appUrl) {
@@ -478,10 +509,10 @@ export function PostCaptureWorkflow({
               } else if (deepLink.webUrl) {
                 await Linking.openURL(deepLink.webUrl);
               }
-              setPlatformLaunched(true);
+              if (mountedRef.current) setPlatformLaunched(true);
             } else if (deepLink.webUrl) {
               await Linking.openURL(deepLink.webUrl);
-              setPlatformLaunched(true);
+              if (mountedRef.current) setPlatformLaunched(true);
             }
           } catch { /* best-effort */ }
         }
@@ -490,9 +521,10 @@ export function PostCaptureWorkflow({
       if (!mountedRef.current) return;
       if (typeof onProceedToAnalysis === 'function') onProceedToAnalysis(customPrompt.trim(), selectedPlatformKey, editPlan);
     } catch {
-      setFallbackUsed(true);
+      if (mountedRef.current) setFallbackUsed(true);
     } finally {
-      setIsUploading(false);
+      if (mountedRef.current) setIsUploading(false);
+      proceedLockRef.current = false;
     }
   }, [isUploading, uploadDone, videoUri, imageUri, selectedPlatformKey, customPrompt, editPlan.bgmTemplate.id, editPlan.pacingBpm, editPlan, onProceedToAnalysis, uriToBlob, uploadWithRetry, bgmRecommendation]);
 

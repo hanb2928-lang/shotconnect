@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useI18n } from '@/hooks/useI18n';
 import { theme } from '@/lib/theme';
@@ -9,6 +10,7 @@ type BannerKind = 'offline' | 'online' | null;
 export function NetworkBanner() {
   const status = useNetworkStatus();
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const [banner, setBanner] = useState<BannerKind>(null);
   const fadeAnim = useRef(new Animated.Value(0));
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,7 +63,7 @@ export function NetworkBanner() {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[styles.container, { backgroundColor, opacity: fadeAnim.current }]}
+      style={[styles.container, { backgroundColor, opacity: fadeAnim.current, paddingTop: insets.top + 8 }]}
     >
       <View style={styles.content}>
         <View style={[styles.dot, { backgroundColor: isOffline ? '#fff' : '#fff' }]}>
@@ -80,7 +82,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 9999,
-    paddingTop: 48,
     paddingBottom: 14,
     paddingHorizontal: theme.spacing.lg,
     alignItems: 'center',

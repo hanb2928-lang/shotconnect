@@ -5,13 +5,13 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
-  Dimensions,
   Platform,
   TextInput,
   Modal,
   Alert,
   ScrollView,
   KeyboardAvoidingView,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
@@ -51,8 +51,6 @@ import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { Scan, CustomAffiliateLink } from '@/types/database';
-
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 type EditMode = 'none' | 'text' | 'sticker';
 
@@ -143,6 +141,7 @@ export default function EditorScreen() {
   const { id, customPrompt } = useLocalSearchParams<{ id: string; customPrompt?: string }>();
   const insets = useSafeAreaInsets();
   const safeTop = useSafeTop();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [scan, setScan] = useState<Scan | null>(null);
   const [loading, setLoading] = useState(true);
   const [imageUri, setImageUri] = useState<string>('');
@@ -162,6 +161,11 @@ export default function EditorScreen() {
   const [bgEditorMask, setBgEditorMask] = useState<Uint8ClampedArray | null>(null);
   const undoStack = useRef<string[]>([]);
   const imageWrapRef = useRef<View | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Text overlay state
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
@@ -258,6 +262,7 @@ export default function EditorScreen() {
           setImageSize(size);
         } catch {
           // size detection will retry — use a safe default so layout doesn't jump
+          if (!mounted) return;
           setImageSize({ width: imageDisplayWidth, height: imageDisplayHeight });
         }
       } catch (err) {
@@ -292,8 +297,10 @@ export default function EditorScreen() {
     setCanUndo(undoStack.current.length > 0);
   }, []);
 
+  const bgEditLockRef = useRef(false);
   const handleQuickRemoveBg = useCallback(async () => {
-    if (processing) return;
+    if (processing || bgEditLockRef.current) return;
+    bgEditLockRef.current = true;
     setProcessing(true);
     setError(null);
     setProgressText('온디바이스 배경 제거 중...');
@@ -319,16 +326,20 @@ export default function EditorScreen() {
 
       const base64 = cleanBase64(result.dataUrl);
       const newUri = await uploadEditedImage(base64, 'image/png');
+      if (!mountedRef.current) return;
       updateImage(newUri);
       setBgPickerVisible(true);
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : '배경 제거 실패');
     }
-    setProcessing(false);
+    if (mountedRef.current) setProcessing(false);
+    bgEditLockRef.current = false;
   }, [imageUri, processing, updateImage]);
 
   const handleRemoveBg = useCallback(async () => {
-    if (processing) return;
+    if (processing || bgEditLockRef.current) return;
+    bgEditLockRef.current = true;
     setProcessing(true);
     setError(null);
     setProgressText('AI 1차 배경 제거 중...');
@@ -408,16 +419,21 @@ export default function EditorScreen() {
         }
       }
 
+      if (!mountedRef.current) return;
       setBgEditorDataUrl(editorDataUrl);
       setBgEditorMask(initialMask);
       setBgEditorVisible(true);
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : '배경 제거 실패');
     }
-    setProcessing(false);
+    if (mountedRef.current) setProcessing(false);
+    bgEditLockRef.current = false;
   }, [imageUri, processing, updateImage, imageDisplayWidth, imageDisplayHeight]);
 
   const handleBgEditorConfirm = useCallback(async (resultDataUrl: string) => {
+    if (bgEditLockRef.current) return;
+    bgEditLockRef.current = true;
     setBgEditorVisible(false);
     if (!resultDataUrl) {
       // No user edit — use the AI result as-is (already in bgEditorDataUrl)
@@ -433,6 +449,7 @@ export default function EditorScreen() {
         updateImage(newUri);
         setBgPickerVisible(true);
       } catch (err) {
+        if (!mountedRef.current) return;
         setError(err instanceof Error ? err.message : '이미지 저장 실패');
       }
       return;
@@ -444,12 +461,15 @@ export default function EditorScreen() {
     try {
       const base64 = cleanBase64(resultDataUrl);
       const newUri = await uploadEditedImage(base64, 'image/png');
+      if (!mountedRef.current) return;
       updateImage(newUri);
       setBgPickerVisible(true);
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : '편집 결과 저장 실패');
     }
-    setProcessing(false);
+    if (mountedRef.current) setProcessing(false);
+    bgEditLockRef.current = false;
   }, [bgEditorDataUrl, updateImage]);
 
   const handleBgEditorCancel = useCallback(() => {
@@ -457,7 +477,8 @@ export default function EditorScreen() {
   }, []);
 
   const handleBgSelect = useCallback(async (style: BackgroundStyle) => {
-    if (bgProcessing) return;
+    if (bgProcessing || bgEditLockRef.current) return;
+    bgEditLockRef.current = true;
     setBgProcessing(true);
     setError(null);
     try {
@@ -479,12 +500,15 @@ export default function EditorScreen() {
       const compositeDataUrl = await compositeOnBackground(dataUrl, style);
       const compositeBase64 = cleanBase64(compositeDataUrl);
       const newUri = await uploadEditedImage(compositeBase64, 'image/png');
+      if (!mountedRef.current) return;
       updateImage(newUri);
       setBgPickerVisible(false);
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : '배경 합성 실패');
     }
-    setBgProcessing(false);
+    if (mountedRef.current) setBgProcessing(false);
+    bgEditLockRef.current = false;
   }, [imageUri, bgProcessing, updateImage]);
 
   const handleBgSkip = useCallback(() => {
@@ -572,7 +596,8 @@ export default function EditorScreen() {
   }, [performReset]);
 
   const handleSave = useCallback(async () => {
-    if (!scan || processing) return;
+    if (!scan || processing || bgEditLockRef.current) return;
+    bgEditLockRef.current = true;
     setProcessing(true);
     setError(null);
     setProgressText('저장 중...');
@@ -620,12 +645,15 @@ export default function EditorScreen() {
       } catch {
         // Gallery export is the primary save action.
       }
+      if (!mountedRef.current) return;
       setProcessing(false);
       router.replace({ pathname: '/result/[id]', params: { id: scan.id, customPrompt: customPrompt || undefined } });
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : '저장 실패');
       setProcessing(false);
     }
+    bgEditLockRef.current = false;
   }, [scan, imageUri, processing, router, textOverlays, stickers, linkEntries, customPrompt]);
 
   if (error && !scan && !loading) {
@@ -697,7 +725,7 @@ export default function EditorScreen() {
       )}
 
       {/* Section 2: Main preview with overlays */}
-      <View style={styles.previewWrap} onLayout={(e) => setPreviewArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+      <View style={[styles.previewWrap, { height: Math.round(screenHeight * 0.38) }]} onLayout={(e) => setPreviewArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
         <View ref={imageWrapRef} style={[styles.imageWrap, { width: imageDisplayWidth, height: imageDisplayHeight }]}>
           {imageUri ? (
             <Image
@@ -1131,7 +1159,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   previewWrap: {
-    height: Math.round(Dimensions.get('window').height * 0.38),
     justifyContent: 'center',
     alignItems: 'center',
     padding: theme.spacing.sm,

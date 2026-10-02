@@ -4,7 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Dimensions,
+  useWindowDimensions,
   Modal,
   ScrollView,
   Platform,
@@ -29,8 +29,6 @@ import {
   Send,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
-
-const { width: screenWidth } = Dimensions.get('window');
 
 interface OnboardingStep {
   icon: React.ReactNode;
@@ -102,6 +100,8 @@ interface OnboardingModalProps {
 }
 
 export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = Math.min(screenWidth - 48, 380);
   const [step, setStep] = useState(0);
   const [phase, setPhase] = useState<TutorialPhase>('intro');
   const [demoStep, setDemoStep] = useState(0);
@@ -254,7 +254,7 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleSkip}>
       <Animated.View style={[styles.overlay, mountStyle]}>
-        <View style={styles.card}>
+        <View style={[styles.card, { width: cardWidth }]}>
           <TouchableOpacity style={styles.skipButton} onPress={handleSkip} activeOpacity={0.7}>
             <Text style={styles.skipText}>건너뛰기</Text>
           </TouchableOpacity>
@@ -432,8 +432,6 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
   );
 }
 
-const cardWidth = Math.min(screenWidth - 48, 380);
-
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -448,7 +446,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   card: {
-    width: cardWidth,
     maxHeight: '85%',
     backgroundColor: theme.colors.dark.surface,
     borderRadius: theme.radius.xl,

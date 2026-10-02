@@ -1,17 +1,16 @@
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import { theme } from '@/lib/theme';
 import { Skeleton } from './Skeleton';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 
 const CARD_GAP = 12;
-const CARD_WIDTH = (Dimensions.get('window').width - 48 - CARD_GAP) / 2;
-
-import { Dimensions } from 'react-native';
 
 export function AssetsSkeleton() {
   const safeTop = useSafeTop();
   const tabBarHeight = useTabBarHeight();
+  const { width: windowWidth } = useWindowDimensions();
+  const CARD_WIDTH = (windowWidth - 48 - CARD_GAP) / 2;
 
   return (
     <View style={styles.container}>
@@ -61,7 +60,7 @@ export function AssetsSkeleton() {
       {/* Grid placeholder */}
       <View style={[styles.grid, { paddingBottom: tabBarHeight + 24 }]}>
         {Array.from({ length: 6 }).map((_, i) => (
-          <View key={i} style={[styles.gridCard, { marginRight: CARD_GAP, marginBottom: CARD_GAP }]}>
+          <View key={i} style={[styles.gridCard, { width: CARD_WIDTH, marginRight: CARD_GAP, marginBottom: CARD_GAP }]}>
             <Skeleton width="100%" height={CARD_WIDTH} borderRadius={12} />
             <View style={styles.gridCardBody}>
               <Skeleton width="70%" height={12} />
@@ -86,6 +85,6 @@ const styles = StyleSheet.create({
   sortBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.sm },
   sortBtnRow: { flexDirection: 'row', gap: 6 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: theme.spacing.lg },
-  gridCard: { width: CARD_WIDTH, backgroundColor: theme.colors.dark.surface, borderRadius: theme.radius.lg, overflow: 'hidden' },
+  gridCard: { backgroundColor: theme.colors.dark.surface, borderRadius: theme.radius.lg, overflow: 'hidden' },
   gridCardBody: { padding: theme.spacing.sm, gap: 4 },
 });
