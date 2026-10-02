@@ -3,6 +3,7 @@ import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { getMultiAngleCache, setMultiAngleCache } from './aiCache';
 import { stepToProgress } from './videoGenSteps';
+import { logError, addBreadcrumb } from './errorLogger';
 
 export type VideoGenPhase = 'submitting' | 'generating' | 'completed' | 'error' | 'hd_upgrading' | 'hd_completed';
 
@@ -508,8 +509,8 @@ function waitForVideoCompletion(
           .maybeSingle();
         if (error || !data) return;
         handleRow(data as VideoJobRow);
-      } catch {
-        // ignore — realtime subscription is the primary path
+      } catch (err) {
+        logError(err, { component: 'aiVideoPipeline', action: 'checkDb' });
       }
     };
 
@@ -534,8 +535,8 @@ function waitForVideoCompletion(
           persisted: true,
           provider: 'runway',
         }));
-      } catch {
-        // ignore
+      } catch (err) {
+        logError(err, { component: 'aiVideoPipeline', action: 'checkScanVideoUrl' });
       }
     };
 
@@ -556,8 +557,8 @@ function waitForVideoCompletion(
               pollBackoffAttempt = 0;
               reconnectAttempts = 0;
               handleRow(payload.new as VideoJobRow);
-            } catch {
-              // Swallow exceptions in realtime callbacks to prevent native bridge crashes
+            } catch (err) {
+              addBreadcrumb('realtime', 'Realtime callback error', 'warning', { channel: `video-job:${scanId}:${submitData.taskId}` });
             }
           },
         )
@@ -659,8 +660,9 @@ function waitForVideoCompletion(
             finish(() => reject(new Error(msg)));
             return;
           }
-        } catch {
-          // ignore — DB poll and realtime are still running
+        } catch (err) {
+          addBreadcrumb('video', 'Runway poll fallback failed', 'warning', { taskId: submitData.taskId });
+          logError(err, { component: 'aiVideoPipeline', action: 'runwayPollFallback' });
         }
         scheduleNext();
       };
@@ -823,8 +825,8 @@ export function subscribeVideoJob(
         cleanup();
         callback({ status: 'FAILED', error: row.error_message ?? '비디오 생성에 실패했습니다.' });
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      logError(err, { component: 'aiVideoPipeline', action: 'subscribeVideoJob.checkAndNotify' });
     }
   };
 
@@ -874,8 +876,8 @@ export function subscribeVideoJob(
               cleanup();
               callback({ status: 'FAILED', error: row.error_message ?? '비디오 생성에 실패했습니다.' });
             }
-          } catch {
-            // Swallow exceptions in realtime callbacks to prevent native bridge crashes
+          } catch (err) {
+            addBreadcrumb('realtime', 'Realtime callback error', 'warning');
           }
         },
       )
@@ -1038,8 +1040,8 @@ export function subscribeHdUpgrade(
         cleanup();
         callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      logError(err, { component: 'aiVideoPipeline', action: 'subscribeHdUpgrade.checkAndNotify' });
     }
   };
 
@@ -1089,8 +1091,8 @@ export function subscribeHdUpgrade(
               cleanup();
               callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
             }
-          } catch {
-            // Swallow exceptions in realtime callbacks to prevent native bridge crashes
+          } catch (err) {
+            addBreadcrumb('realtime', 'Realtime callback error', 'warning');
           }
         },
       )
@@ -1184,7 +1186,8 @@ export async function recoverVideoJob(
     }
 
     return null;
-  } catch {
+  } catch (err) {
+    logError(err, { component: 'aiVideoPipeline', action: 'recoverVideoJob' });
     return null;
   }
 }

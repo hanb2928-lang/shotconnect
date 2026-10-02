@@ -11,6 +11,7 @@ import * as Linking from 'expo-linking';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { nativeHeapCooldownGuard } from './imageEdit';
 import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
+import { logError, addBreadcrumb } from './errorLogger';
 
 const UPLOAD_MAX_RETRIES = 2;
 const UPLOAD_RETRY_DELAY_MS = 1500;
@@ -206,7 +207,8 @@ async function invokeStereoCutAuto(
     });
     if (error || !data) return null;
     return data as CloudPipelineResult;
-  } catch {
+  } catch (err) {
+    logError(err, { component: 'stereoPipeline', action: 'invokeStereoCutAuto' });
     return null;
   }
 }
@@ -250,8 +252,8 @@ export async function createScanFromAngleShots(
   if (additionalUrls.length > 0) {
     try {
       await supabase.from('scans').update({ additional_image_urls: additionalUrls }).eq('id', scanId);
-    } catch {
-      // non-fatal — angles are still used for in-memory synthesis
+    } catch (err) {
+      logError(err, { component: 'stereoPipeline', action: 'updateAdditionalUrls' });
     }
   }
 
@@ -320,8 +322,8 @@ export async function runStereoPipeline(
   if (additionalUrls.length > 0) {
     try {
       await supabase.from('scans').update({ additional_image_urls: additionalUrls }).eq('id', scanId);
-    } catch {
-      // non-fatal — angles are still used for in-memory synthesis
+    } catch (err) {
+      logError(err, { component: 'stereoPipeline', action: 'updateAdditionalUrls' });
     }
   }
 

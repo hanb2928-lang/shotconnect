@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Cpu, Zap, TrendingUp, Gauge } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
+import { safeInvoke } from '@/lib/apiClient';
 import { theme as staticTheme } from '@/lib/theme';
 
 interface AutoscaleConfig {
@@ -43,10 +44,10 @@ export function GpuAutoscaleCard() {
   const loadStatus = useCallback(async () => {
     setRefreshing(true);
     try {
-      const { data, error } = await supabase.functions.invoke('autoscale-manager', {
+      const data = await safeInvoke(() => supabase.functions.invoke('autoscale-manager', {
         body: { trigger: true },
-      });
-      if (!error && data) {
+      })).catch(() => null);
+      if (data) {
         setStatus(data as AutoscaleStatus);
       }
     } catch {

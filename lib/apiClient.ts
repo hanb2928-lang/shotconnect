@@ -1,6 +1,7 @@
 import { supabaseAnonKey } from '@/lib/supabase';
 import { getCached, setCached, getStaleCached } from '@/lib/offlineCache';
 import { isOnline } from '@/hooks/useNetworkStatus';
+import { addBreadcrumb } from '@/lib/errorLogger';
 
 interface SafeFetchOptions extends RequestInit {
   timeoutMs?: number;
@@ -133,6 +134,7 @@ async function doFetch(
 
       if (response.status === 429) {
         if (attempt < retries) {
+          addBreadcrumb('api', `Rate limited (429), retrying attempt ${attempt + 1}`, 'warning', { url });
           lastError = new ApiError('요청이 너무 많습니다. 잠시 후 다시 시도해주세요.', response.status);
           await new Promise((r) => setTimeout(r, backoffDelay(attempt)));
           continue;
@@ -149,6 +151,7 @@ async function doFetch(
           // body isn't JSON; keep default message
         }
         if (attempt < retries) {
+          addBreadcrumb('api', `Server error (${response.status}), retrying attempt ${attempt + 1}`, 'warning', { url });
           lastError = new ApiError(serverMsg, response.status);
           await new Promise((r) => setTimeout(r, backoffDelay(attempt)));
           continue;
@@ -257,4 +260,108 @@ export function friendlyApiError(err: unknown, fallback: string): string {
   if (err instanceof ApiError) return err.message;
   if (err instanceof Error) return err.message;
   return fallback;
+}
+
+// --- safeInvoke: retry wrapper for supabase.functions.invoke ---
+
+const INVOKE_DEFAULT_RETRIES = 2;
+
+interface InvokeResult<T> {
+  data: T | null;
+  error: { message: string; status?: number } | null;
+}
+
+function isInvokeRetryableError(error: { message?: string; status?: number } | null): boolean {
+  if (!error) return false;
+  const status = error.status;
+  if (status !== undefined) {
+    return status === 408 || status === 429 || (status >= 500 && status < 600);
+  }
+  const msg = (error.message || '').toLowerCase();
+  return msg.includes('failed to fetch') || msg.includes('network') || msg.includes('timeout') || msg.includes('abort');
+}
+
+/**
+ * Wraps supabase.functions.invoke with exponential backoff retry.
+ * Retries on network errors, timeouts, 429 (rate limit), and 5xx server errors.
+ * Does NOT retry on 4xx client errors (except 408/429) since those are permanent.
+ */
+export async function safeInvoke<T>(
+  invokeFn: () => Promise<InvokeResult<T>>,
+  retries: number = INVOKE_DEFAULT_RETRIES,
+): Promise<T> {
+  let lastError: { message: string; status?: number } | null = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await invokeFn();
+
+      if (result.error) {
+        const msg = result.error.message || '알 수 없는 오류가 발생했습니다.';
+        const errObj = { message: msg, status: result.error.status };
+
+        if (attempt < retries && isInvokeRetryableError(errObj)) {
+          addBreadcrumb('invoke', `Retryable error, retrying attempt ${attempt + 1}`, 'warning', { message: msg, status: result.error.status });
+          lastError = errObj;
+          if (!isOnline()) {
+            const recovered = await waitForOnline();
+            if (!recovered) {
+              throw new ApiError('네트워크 연결이 끊겨 재시도할 수 없습니다. 인터넷 연결을 확인해주세요.', 0);
+            }
+          }
+          await new Promise((r) => setTimeout(r, backoffDelay(attempt)));
+          continue;
+        }
+
+        if (result.error.status === 401 || result.error.status === 403) {
+          throw new ApiError('인증이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.', result.error.status);
+        }
+        throw new ApiError(msg, result.error.status ?? 0);
+      }
+
+      return result.data as T;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+
+      const msg = err instanceof Error ? err.message : String(err);
+      const errObj = { message: msg };
+
+      if (attempt < retries && isInvokeRetryableError(errObj)) {
+        lastError = errObj;
+        if (!isOnline()) {
+          const recovered = await waitForOnline();
+          if (!recovered) {
+            throw new ApiError('네트워크 연결이 끊겨 재시도할 수 없습니다. 인터넷 연결을 확인해주세요.', 0);
+          }
+        }
+        await new Promise((r) => setTimeout(r, backoffDelay(attempt)));
+        continue;
+      }
+
+      if (isInvokeRetryableError(errObj)) {
+        throw new ApiError('네트워크 연결에 실패했습니다. 인터넷 연결을 확인해주세요.', 0);
+      }
+      throw err;
+    }
+  }
+
+  throw new ApiError(lastError?.message || '요청에 실패했습니다.', lastError?.status ?? 0);
+}
+
+// --- safeFetchJson: fetch + JSON parse with retry + typed result ---
+
+export async function safeFetchJson<T>(
+  url: string,
+  options: SafeFetchOptions = {},
+): Promise<T> {
+  const response = await safeFetch(url, options);
+  if (!response.ok) {
+    let msg = `서버 오류 (${response.status})`;
+    try {
+      const errData = await response.json();
+      if (errData?.error) msg = errData.error;
+    } catch {}
+    throw new ApiError(msg, response.status);
+  }
+  return response.json() as Promise<T>;
 }

@@ -11,6 +11,7 @@ import { aiCachedCall } from './aiCache';
 import { hashObject } from './contentHash';
 import { cleanBase64 } from './base64';
 import { supabase } from './supabase';
+import { safeInvoke } from './apiClient';
 
 /**
  * Web Audio API BGM engine — supports both bundled audio files and FM synthesis fallback.
@@ -779,8 +780,8 @@ export async function fetchBgmRecommendation(imageDataUrl: string, mimeType: str
       'bgm-recommend',
       cacheInput,
       async () => {
-        const { data, error } = await supabase.functions.invoke('recommend-bgm', { body: { imageDataUrl, mimeType } });
-        if (error || !data) return FALLBACK_RECOMMENDATION;
+        const data = await safeInvoke(() => supabase.functions.invoke('recommend-bgm', { body: { imageDataUrl, mimeType } })).catch(() => null);
+        if (!data) return FALLBACK_RECOMMENDATION;
         const raw = data as Record<string, unknown>;
         const rawCategory = String(raw.category ?? raw.templateId ?? '');
         const mappedCategory: BgmCategory = moodLabelToCategory(rawCategory);

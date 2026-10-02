@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { aiCachedCall } from './aiCache';
 import { hashObject } from './contentHash';
 import { compressImagesInParallel } from './parallelImageCompress';
+import { safeInvoke, ApiError } from './apiClient';
 
 export interface ProductVisionResult {
   productName: string;
@@ -63,31 +64,28 @@ async function fetchVisionFromApi(
 
   for (let attempt = 0; attempt <= VISION_MAX_RETRIES; attempt++) {
     try {
-      const result = await Promise.race([
-        supabase.functions.invoke('analyze-product-vision', {
+      const data = await Promise.race([
+        safeInvoke(() => supabase.functions.invoke('analyze-product-vision', {
           body: { images, productName, scanId },
-        }),
-        new Promise<{ data: null; error: { message: string } }>((resolve) =>
+        })),
+        new Promise<null>((resolve) =>
           setTimeout(
-            () => resolve({ data: null, error: { message: `Vision AI 분석 요청 시간이 초과되었습니다. 네트워크 연결을 확인해주세요. (제한: ${VISION_TIMEOUT_MS / 1000}초)` } }),
+            () => resolve(null),
             VISION_TIMEOUT_MS,
           ),
         ),
       ]);
 
-      const { data, error } = result;
-
-      if (error) {
-        throw new Error(error.message ?? 'Vision AI 분석 실패');
-      }
-
       if (!data) {
-        throw new Error('Vision AI 분석 결과를 받지 못했습니다.');
+        throw new Error(`Vision AI 분석 요청 시간이 초과되었습니다. 네트워크 연결을 확인해주세요. (제한: ${VISION_TIMEOUT_MS / 1000}초)`);
       }
 
       return data as ProductVisionResult;
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429) {
+        break;
+      }
       if (attempt < VISION_MAX_RETRIES) {
         await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
       }
