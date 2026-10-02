@@ -27,6 +27,7 @@ const AUDIO_PROBE_MAX_RETRIES = 3;
 const AUDIO_PROBE_BASE_DELAY_MS = 1000;
 
 import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
+import { flushPostSynthesisMemory } from '@/lib/synthesisGc';
 
 /**
  * Verify that a URL is actually reachable via HTTP before attempting
@@ -129,6 +130,7 @@ export async function muxVideoWithAudio(
   // This keeps the UI responsive during the real-time muxing capture.
   let offscreenWorker: Worker | null = null;
   let useOffscreenDraw = false;
+  let workerBlobUrl: string | null = null;
   if (typeof OffscreenCanvas !== 'undefined' && canvas.transferControlToOffscreen) {
     try {
       const offscreen = canvas.transferControlToOffscreen();
@@ -153,9 +155,9 @@ export async function muxVideoWithAudio(
         };
       `;
       const blob = new Blob([workerSource], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(blob);
-      registerTempFile(workerUrl, 'muxWorkerBlob');
-      offscreenWorker = new Worker(workerUrl);
+      workerBlobUrl = URL.createObjectURL(blob);
+      registerTempFile(workerBlobUrl, 'muxWorkerBlob');
+      offscreenWorker = new Worker(workerBlobUrl);
       offscreenWorker.postMessage({ type: 'init', canvas: offscreen }, [offscreen]);
       useOffscreenDraw = await new Promise<boolean>((resolve) => {
         const timeout = setTimeout(() => resolve(false), 2000);
@@ -171,8 +173,11 @@ export async function muxVideoWithAudio(
       if (!useOffscreenDraw) {
         offscreenWorker.terminate();
         offscreenWorker = null;
-        URL.revokeObjectURL(workerUrl);
-        unregisterTempFile(workerUrl);
+        if (workerBlobUrl) {
+          URL.revokeObjectURL(workerBlobUrl);
+          unregisterTempFile(workerBlobUrl);
+          workerBlobUrl = null;
+        }
       }
     } catch {
       offscreenWorker = null;
@@ -247,10 +252,26 @@ export async function muxVideoWithAudio(
         offscreenWorker.terminate();
         offscreenWorker = null;
       }
+      // Revoke the worker blob URL — it was kept alive for the worker's
+      // lifetime and is no longer needed after termination.
+      if (workerBlobUrl) {
+        URL.revokeObjectURL(workerBlobUrl);
+        unregisterTempFile(workerBlobUrl);
+        workerBlobUrl = null;
+      }
+      // Disconnect the audio graph nodes before closing the context.
+      // sourceNode holds a strong reference to the audio element; without
+      // disconnect, the element's decoded audio buffer stays in memory.
+      try { sourceNode.disconnect(); } catch {}
+      try { sourceNode.disconnect(audioCtx.destination); } catch {}
       audio.pause();
       video.pause();
       audio.src = '';
       video.src = '';
+      audio.removeAttribute('src');
+      video.removeAttribute('src');
+      audio.load();
+      video.load();
       audioCtx.close().catch(() => {});
       videoStream.getTracks().forEach((t) => t.stop());
       audioTracks.forEach((t) => t.stop());
@@ -276,12 +297,16 @@ export async function muxVideoWithAudio(
       // Yield to the event loop before resolving so pending UI updates
       // and bridge messages can flush after the heavy blob construction.
       setTimeout(() => {
-        resolve({
-          blob, url, durationSec,
-          revoke: () => {
-            URL.revokeObjectURL(url);
-            unregisterTempFile(url);
-          },
+        // Flush all transient synthesis resources (worker URLs, audio
+        // nodes, temp files) before the caller starts the next clip.
+        flushPostSynthesisMemory().finally(() => {
+          resolve({
+            blob, url, durationSec,
+            revoke: () => {
+              URL.revokeObjectURL(url);
+              unregisterTempFile(url);
+            },
+          });
         });
       }, 0);
     };
@@ -290,7 +315,7 @@ export async function muxVideoWithAudio(
       if (settled) return;
       settled = true;
       cleanup();
-      resolve(null);
+      flushPostSynthesisMemory().finally(() => resolve(null));
     };
 
     // Start playback and recording
