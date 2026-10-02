@@ -5,6 +5,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
 import { isLowEndDevice } from '@/lib/devicePerformance';
+import { withFileLock } from '@/lib/fileLock';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -194,14 +195,16 @@ export async function compressImageToBase64(
       actions,
       { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
     );
-    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-    assertNativeImageSize(fileInfo.size);
-    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-      encoding: FileSystem.EncodingType.Base64,
+    return await withFileLock(manipulated.uri, async () => {
+      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+      if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+      assertNativeImageSize(fileInfo.size);
+      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      return { base64, mimeType: 'image/jpeg' };
     });
-    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
-    return { base64, mimeType: 'image/jpeg' };
   } catch {
     const fileInfo = await FileSystem.getInfoAsync(uri);
     if (!fileInfo.exists) throw new Error('이미지를 불러올 수 없습니다.');
@@ -400,14 +403,16 @@ export async function prepareImageForApi(
       { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
     );
 
-    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-    assertNativeImageSize(fileInfo.size);
-    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-      encoding: FileSystem.EncodingType.Base64,
+    return await withFileLock(manipulated.uri, async () => {
+      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+      if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+      assertNativeImageSize(fileInfo.size);
+      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      return `data:image/jpeg;base64,${base64}`;
     });
-    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
-    return `data:image/jpeg;base64,${base64}`;
   } catch {
     throw new Error('이미지 압축에 실패했습니다. 더 낮은 해상도로 다시 촬영해주세요.');
   }
@@ -456,13 +461,15 @@ export async function prepareImageForEdit(
       { compress: 1, format: ImageManipulator.SaveFormat.PNG },
     );
 
-    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-      encoding: FileSystem.EncodingType.Base64,
+    return await withFileLock(manipulated.uri, async () => {
+      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+      if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      return `data:image/png;base64,${base64}`;
     });
-    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
-    return `data:image/png;base64,${base64}`;
   } catch {
     return normalizedDataUrl;
   }
@@ -591,14 +598,16 @@ export async function compressImageToBase64WithUri(
       actions,
       { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
     );
-    const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-    if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-    assertNativeImageSize(fileInfo.size);
-    const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-      encoding: FileSystem.EncodingType.Base64,
+    return await withFileLock(manipulated.uri, async () => {
+      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+      if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+      assertNativeImageSize(fileInfo.size);
+      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      return { base64, mimeType: 'image/jpeg', compressedUri: null };
     });
-    FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
-    return { base64, mimeType: 'image/jpeg', compressedUri: null };
   } catch {
     const result = await compressImageToBase64(uri, maxDimension, quality);
     return { ...result, compressedUri: null };
