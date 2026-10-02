@@ -2,11 +2,11 @@ import React from 'react';
 import {
   View,
   Text,
-  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import {
   Sparkles,
   Clock,
@@ -215,8 +215,8 @@ export function ResultPreviewSection({
             onPress={() => onOpenImageViewer(selectedImageIndex)}
             activeOpacity={0.95}
           >
-            <Image
-              source={{ uri: generatedImages[selectedImageIndex] ?? generatedImages[0] }}
+            <CachedImage
+              uri={generatedImages[selectedImageIndex] ?? generatedImages[0]}
               style={styles.imageHeroImg}
               resizeMode="contain"
             />
@@ -234,8 +234,8 @@ export function ResultPreviewSection({
                   onPress={() => onSelectImage(idx)}
                   activeOpacity={0.85}
                 >
-                  <Image
-                    source={{ uri: getThumbnailUrl(imgUri, 120) }}
+                  <CachedImage
+                    uri={getThumbnailUrl(imgUri, 120)}
                     style={[
                       styles.imageThumbItem,
                       idx === selectedImageIndex && styles.imageThumbItemActive,

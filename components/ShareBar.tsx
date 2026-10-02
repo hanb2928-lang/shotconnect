@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, TouchableOpacity, Share, Platform, Linking, Modal, Pressable, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Share, Platform, Linking, Modal, Pressable, ScrollView } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import { Copy, Check, Clapperboard, Download, CloudUpload, Loader as Loader2, Instagram, MessageCircle, Globe, ClipboardCheck, ChevronDown, Share2, X, ExternalLink, Eye, ArrowLeft, Send } from 'lucide-react-native';
 import { useRef, useState, useCallback, useEffect } from 'react';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, withDelay, Easing } from 'react-native-reanimated';
@@ -476,8 +477,8 @@ export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName,
             <ScrollView style={styles.previewScroll} showsVerticalScrollIndicator={false}>
               {previewModal?.uri ? (
                 <View style={styles.previewImageWrap}>
-                  <Image
-                    source={{ uri: previewModal.uri }}
+                  <CachedImage
+                    uri={previewModal.uri}
                     style={styles.previewImage}
                     resizeMode="contain"
                   />

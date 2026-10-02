@@ -6,11 +6,12 @@ import {
   TouchableOpacity,
   Platform,
   ActivityIndicator,
-  Image,
   ScrollView,
   useWindowDimensions,
+  Image as RNImage,
   type LayoutChangeEvent,
 } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import { Instagram, Youtube, FileText, Download, Loader as Loader2, Check, Zap, Image as ImageIcon, MessageCircle, Send, Share, Crop, RotateCcw, Check as CheckIcon } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { uploadAssetBlob, uploadAssetFromFileUri, saveAssetRecord } from '@/lib/savedAssets';
@@ -254,8 +255,8 @@ function NativeFormatCard({
       style={[nativeStyles.card, { width: NATIVE_CARD_WIDTH, height: cardHeight }]}
     >
       <View style={nativeStyles.imageContainer}>
-        <Image
-          source={{ uri: imageUrl }}
+        <CachedImage
+          uri={imageUrl}
           style={[
             nativeStyles.image,
             {
@@ -347,9 +348,9 @@ function CropEditor({
       el.onerror = () => setImgAspect(null);
       el.src = imageUrl;
     } else {
-      Image.getSize(
+      RNImage.getSize(
         imageUrl,
-        (w, h) => setImgAspect(w / h),
+        (w: number, h: number) => setImgAspect(w / h),
         () => setImgAspect(null),
       );
     }
@@ -502,8 +503,8 @@ function CropEditor({
             style={cropStyles.previewInner}
           >
             {/* Full original image (contain mode) */}
-            <Image
-              source={{ uri: imageUrl }}
+            <CachedImage
+              uri={imageUrl}
               style={cropStyles.fullImage}
               resizeMode="contain"
             />
@@ -1266,8 +1267,8 @@ export function MultiPlatformExport({
               }
               return (
                 <View key={r.format.key} style={styles.previewCard}>
-                  <Image
-                    source={{ uri: r.uri }}
+                  <CachedImage
+                    uri={r.uri ?? ''}
                     style={{
                       width: '100%',
                       aspectRatio: r.format.width / r.format.height,

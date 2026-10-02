@@ -5,11 +5,11 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   Platform,
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -154,8 +154,8 @@ export function InteractiveSlideshowViewer({
             <View key={idx} style={[styles.slide, { width: screenWidth - theme.spacing.sm * 2 }]}>
               <View style={styles.slideImageWrap}>
                 {img ? (
-                  <Image
-                    source={{ uri: img }}
+                  <CachedImage
+                    uri={img}
                     style={styles.slideImage}
                     resizeMode="cover"
                   />

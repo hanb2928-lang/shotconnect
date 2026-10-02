@@ -5,7 +5,6 @@ import {
   Text,
   TouchableOpacity,
   FlatList,
-  Image,
   StyleSheet,
   ActivityIndicator,
   TextInput,
@@ -15,6 +14,7 @@ import {
   Linking,
   Alert,
 } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import { Search, Film, Check, X, RefreshCw, Settings, Download, Image as ImageIcon, Camera, RotateCcw } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -565,8 +565,8 @@ export function StockVideoPicker({
 
       {selectedClip && (
         <View style={styles.selectedBox}>
-          <Image
-            source={{ uri: getThumbnailUrl(selectedClip.thumbnailUrl, 96) }}
+          <CachedImage
+            uri={getThumbnailUrl(selectedClip.thumbnailUrl, 96)}
             style={styles.selectedThumb}
             resizeMode="cover"
           />
@@ -637,8 +637,8 @@ export function StockVideoPicker({
               onPress={() => onSelectClip(isSelected ? null : item)}
               activeOpacity={0.85}
             >
-              <Image
-                source={{ uri: getThumbnailUrl(item.thumbnailUrl, 240) }}
+              <CachedImage
+                uri={getThumbnailUrl(item.thumbnailUrl, 240)}
                 style={styles.clipThumb}
                 resizeMode="cover"
               />
@@ -799,8 +799,8 @@ export function StockVideoPicker({
         <View style={styles.cameraSection}>
           {mobileCapturedUri ? (
             <View style={styles.capturePreviewWrap}>
-              <Image
-                source={{ uri: mobileCapturedUri }}
+              <CachedImage
+                uri={mobileCapturedUri}
                 style={{ width: '100%', height: 400, borderRadius: 12 }}
                 resizeMode="contain"
               />

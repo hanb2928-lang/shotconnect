@@ -9,8 +9,8 @@ import {
   TextInput,
   Linking,
   Platform,
-  Image,
 } from 'react-native';
+import { CachedImage } from '@/components/CachedImage';
 import { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
 import { ShoppingBag, Send, Globe, Store, ExternalLink, TrendingUp, Link2, Copy, Check, Camera, Image as ImageIcon, Film, Sparkles, FileText, Hash, Type, Youtube, ChevronDown, Loader, Plus, X, Palette, Share2, ShieldCheck, TriangleAlert as AlertTriangle, ArrowRight, RefreshCw, Music2, Download, Video, Maximize2, Lock, Zap, Smile, Sun, Moon, Flame, Coffee } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
@@ -1413,14 +1413,14 @@ export default function AffiliateScreen() {
           {productMeta && (productMeta.productName || productMeta.price) && (
             <View style={styles.productMetaCard}>
               {imagePreviewUri ? (
-                <Image
-                  source={{ uri: imagePreviewUri }}
+                <CachedImage
+                  uri={imagePreviewUri}
                   style={styles.productMetaImage}
                   resizeMode="cover"
                 />
               ) : productMeta.image ? (
-                <Image
-                  source={{ uri: productMeta.image }}
+                <CachedImage
+                  uri={productMeta.image}
                   style={styles.productMetaImage}
                   resizeMode="cover"
                 />
@@ -1527,14 +1527,14 @@ export default function AffiliateScreen() {
               {productMeta && (productMeta.productName || productMeta.price) && (
                 <View style={styles.productMetaCard}>
                   {imagePreviewUri ? (
-                    <Image
-                      source={{ uri: imagePreviewUri }}
+                    <CachedImage
+                      uri={imagePreviewUri}
                       style={styles.productMetaImage}
                       resizeMode="cover"
                     />
                   ) : productMeta.image ? (
-                    <Image
-                      source={{ uri: productMeta.image }}
+                    <CachedImage
+                      uri={productMeta.image}
                       style={styles.productMetaImage}
                       resizeMode="cover"
                     />
