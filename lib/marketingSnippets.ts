@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { sanitizeForDatabaseAndExport } from '@/lib/textSanitizer';
 import type { MarketingSnippet } from '@/types/database';
 
 export async function fetchSnippets(): Promise<MarketingSnippet[]> {
@@ -19,10 +20,10 @@ export async function addSnippet(
   const { data, error } = await supabase
     .from('marketing_snippets')
     .insert({
-      title,
-      content,
+      title: sanitizeForDatabaseAndExport(title, 200),
+      content: sanitizeForDatabaseAndExport(content, 2000),
       snippet_type: snippetType,
-      platform: platform || null,
+      platform: platform ? sanitizeForDatabaseAndExport(platform, 50) : null,
     })
     .select()
     .single();
