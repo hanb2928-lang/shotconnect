@@ -71,6 +71,7 @@ export async function muxVideoWithAudio(
   videoUrl: string,
   audioUrl: string,
   onProgress?: MuxProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<MuxResult | null> {
   if (typeof window === 'undefined') return null;
   if (typeof document === 'undefined') return null;
@@ -262,9 +263,21 @@ export async function muxVideoWithAudio(
     let rafId: number | null = null;
     let startTime = 0;
     let settled = false;
+    let outputUrl: string | null = null;
+    let onAbort: (() => void) | null = null;
 
     const cleanup = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
+      if (onAbort && abortSignal) {
+        abortSignal.removeEventListener('abort', onAbort);
+      }
+      // Revoke the output Blob URL if it was created but the mux was
+      // aborted before the caller could consume it.
+      if (outputUrl) {
+        URL.revokeObjectURL(outputUrl);
+        unregisterTempFile(outputUrl);
+        outputUrl = null;
+      }
       if (offscreenWorker) {
         offscreenWorker.postMessage({ type: 'done' });
         offscreenWorker.terminate();
@@ -298,6 +311,28 @@ export async function muxVideoWithAudio(
       chunks.length = 0;
     };
 
+    // If an abort signal is already aborted, resolve immediately.
+    if (abortSignal?.aborted) {
+      cleanup();
+      resolve(null);
+      return;
+    }
+
+    // Listen for abort — immediately stop the recorder, cancel the RAF
+    // loop, and clean up all resources. This prevents leaked Blob URLs,
+    // dangling workers, and orphaned audio contexts when the user
+    // navigates away or cancels mid-mux.
+    onAbort = () => {
+      if (settled) return;
+      settled = true;
+      if (recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch {}
+      }
+      cleanup();
+      flushPostSynthesisMemory().finally(() => resolve(null));
+    };
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+
     recorder.onstop = () => {
       if (settled) return;
       settled = true;
@@ -309,7 +344,8 @@ export async function muxVideoWithAudio(
       }
 
       const blob = new Blob(chunks, { type: mimeType });
-      const url = URL.createObjectURL(blob);
+      outputUrl = URL.createObjectURL(blob);
+      const url = outputUrl;
       registerTempFile(url, 'muxOutputBlob');
       onProgress?.({ phase: 'finalizing', progress: 1 });
       // Yield to the event loop before resolving so pending UI updates
@@ -323,6 +359,7 @@ export async function muxVideoWithAudio(
             revoke: () => {
               URL.revokeObjectURL(url);
               unregisterTempFile(url);
+              outputUrl = null;
             },
           });
         });

@@ -190,7 +190,7 @@ export async function mergeClipsSequentially(
           throw new Error('비디오 메타데이터 로딩 실패 (timeout)');
         }
 
-        const mux = await muxVideoWithAudio(clip.videoUrl, clip.audioUrl, clipProgress);
+        const mux = await muxVideoWithAudio(clip.videoUrl, clip.audioUrl, clipProgress, currentAbort?.signal);
 
         if (mux) {
           clipResult = { id: clip.id, mux, attempts: attempt + 1 };
@@ -277,9 +277,9 @@ export async function mergeClipsSequentially(
 }
 
 /**
- * Cancel the current merge queue. The in-progress clip will finish
- * (muxVideoWithAudio doesn't support mid-stream abort), but no
- * further clips will be processed.
+ * Cancel the current merge queue. The in-progress clip's mux is
+ * aborted immediately — the recorder stops, the RAF loop cancels,
+ * and all temp Blob URLs and worker resources are released.
  */
 export function cancelMergeQueue(): void {
   queueState = 'idle';
