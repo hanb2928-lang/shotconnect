@@ -1,7 +1,8 @@
 import { Platform } from 'react-native';
 import { uint8ArrayToBase64 } from '@/lib/base64';
 import { encodeBase64InWorker } from '@/lib/workerPool';
-import { getDeviceTier, getAdaptiveRenderParams } from '@/lib/devicePerformance';
+import { getDeviceTier, getAdaptiveRenderParams, onMemoryPressureChange, getMemoryPressure, type DeviceTier } from '@/lib/devicePerformance';
+import { addBreadcrumb, logWarning } from '@/lib/errorLogger';
 
 export interface VideoRecordingOptions {
   maxDurationMs?: number;
@@ -25,6 +26,8 @@ function resolveDefaultBitrate(): number {
 
 const DEFAULT_VIDEO_BITRATE = resolveDefaultBitrate();
 const DEFAULT_MAX_DURATION_MS = 30_000;
+const CHUNK_SIZE_WARN_BYTES = 15_000_000; // 15 MB accumulated chunks — log a warning
+const CHUNK_SIZE_CRITICAL_BYTES = 40_000_000; // 40 MB — log error-level telemetry
 
 function pickVideoMimeType(): string {
   if (typeof MediaRecorder === 'undefined') return 'video/webm';
@@ -78,12 +81,56 @@ export function startVideoRecording(
 
   const promise = new Promise<VideoRecordingResult>((resolve, reject) => {
     const chunks: Blob[] = [];
+    let accumulatedBytes = 0;
+    let warnedAtSize = false;
+    let criticalLogged = false;
 
     recorder.ondataavailable = (e: BlobEvent) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
+      if (e.data && e.data.size > 0) {
+        chunks.push(e.data);
+        accumulatedBytes += e.data.size;
+
+        if (accumulatedBytes >= CHUNK_SIZE_CRITICAL_BYTES && !criticalLogged) {
+          criticalLogged = true;
+          addBreadcrumb('video', `Recording chunk memory spike: ${(accumulatedBytes / 1_000_000).toFixed(1)}MB`, 'error', {
+            chunkCount: chunks.length,
+            bitrate: recorder.videoBitsPerSecond ?? null,
+          });
+          logWarning(`Video recording memory spike: ${(accumulatedBytes / 1_000_000).toFixed(1)}MB accumulated`, {
+            component: 'videoRecorder',
+            action: 'chunk-accumulation',
+            extra: { chunkCount: chunks.length, bytes: accumulatedBytes },
+          });
+        } else if (accumulatedBytes >= CHUNK_SIZE_WARN_BYTES && !warnedAtSize) {
+          warnedAtSize = true;
+          addBreadcrumb('video', `Recording chunk memory high: ${(accumulatedBytes / 1_000_000).toFixed(1)}MB`, 'warning', {
+            chunkCount: chunks.length,
+          });
+        }
+      }
     };
 
+    // If memory pressure spikes to severe during recording, request
+    // smaller timeslices from the MediaRecorder to reduce peak memory.
+    const pressureUnsub = onMemoryPressureChange((level) => {
+      if (level === 'severe') {
+        addBreadcrumb('video', 'Severe memory pressure during recording — requesting 500ms timeslices', 'error');
+        logWarning('Severe memory pressure during active video recording', {
+          component: 'videoRecorder',
+          action: 'pressure-spike-during-record',
+          extra: { accumulatedBytes, chunkCount: chunks.length },
+        });
+        try {
+          // Request data more frequently to keep chunk sizes small
+          recorder.requestData();
+        } catch {
+          // requestData can throw if recorder is in wrong state
+        }
+      }
+    });
+
     recorder.onstop = () => {
+      pressureUnsub();
       const mimeType = recorder.mimeType || 'video/webm';
       const blob = new Blob(chunks, { type: mimeType });
       chunks.length = 0;
@@ -91,6 +138,7 @@ export function startVideoRecording(
     };
 
     recorder.onerror = () => {
+      pressureUnsub();
       reject(new Error('비디오 녹화 중 오류가 발생했습니다.'));
     };
 

@@ -29,10 +29,23 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { installGlobalErrorHandlers } from '@/lib/errorLogger';
 import { installMediaCacheLifecycleHook } from '@/lib/mediaCache';
 import { startPressureMonitoring } from '@/lib/devicePerformance';
+import { sweepTempFiles } from '@/lib/tempFileManager';
 
 installGlobalErrorHandlers();
 installMediaCacheLifecycleHook();
 startPressureMonitoring();
+
+// Run a temp file GC sweep 5s after boot — non-blocking, best-effort.
+// Cleans up orphaned Blob URLs and temp files from a previous session.
+setTimeout(() => { sweepTempFiles().catch(() => {}); }, 5000);
+
+if (Platform.OS === 'web' && typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      sweepTempFiles().catch(() => {});
+    }
+  });
+}
 
 SplashScreen.preventAutoHideAsync();
 

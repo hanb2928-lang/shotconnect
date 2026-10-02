@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { safeSupabaseCall } from '@/lib/apiClient';
 import { fetchShortLinkClicks } from '@/lib/linkBookmarks';
 
 export interface DashboardSummary {
@@ -12,21 +13,21 @@ export interface DashboardSummary {
 }
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
-  const [revenueRes, bookmarkRes, shortLinkClicks] = await Promise.all([
-    supabase.from('revenue_records').select('platform,amount,period_month,created_at'),
-    supabase.from('link_bookmarks').select('id', { count: 'exact', head: true }),
+  const [revenueRows, bookmarkCount, shortLinkClicks] = await Promise.all([
+    safeSupabaseCall<{ platform: string; amount: number; period_month: string; created_at: string }[]>(
+      async () => {
+        const result = await supabase.from('revenue_records').select('platform,amount,period_month,created_at');
+        return result as unknown as { data: { platform: string; amount: number; period_month: string; created_at: string }[] | null; error: { message: string } | null };
+      },
+    ).catch(() => [] as { platform: string; amount: number; period_month: string; created_at: string }[]),
+    (async () => {
+      const res = await supabase
+        .from('link_bookmarks')
+        .select('id', { count: 'exact', head: true });
+      return res.count || 0;
+    })().catch(() => 0),
     fetchShortLinkClicks(),
   ]);
-
-  if (revenueRes.error) throw new Error(revenueRes.error.message);
-  if (bookmarkRes.error) throw new Error(bookmarkRes.error.message);
-
-  const revenueRows = (revenueRes.data ?? []) as {
-    platform: string;
-    amount: number;
-    period_month: string;
-    created_at: string;
-  }[];
 
   const totalRevenue = revenueRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
   const totalClicks = shortLinkClicks.reduce((sum, l) => sum + (l.click_count || 0), 0);
@@ -53,7 +54,7 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
     totalRevenue,
     totalClicks,
     totalLinks: shortLinkClicks.length,
-    totalBookmarks: bookmarkRes.count || 0,
+    totalBookmarks: bookmarkCount,
     platformRevenue,
     monthlyRevenue,
     topLinks: shortLinkClicks.slice(0, 5),

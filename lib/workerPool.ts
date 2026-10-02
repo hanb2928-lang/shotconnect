@@ -8,6 +8,8 @@
  */
 
 import { Platform } from 'react-native';
+import { onMemoryPressureChange, getMemoryPressure } from '@/lib/devicePerformance';
+import { addBreadcrumb, logWarning } from '@/lib/errorLogger';
 
 export type WorkerTaskType = 'base64-encode' | 'base64-decode' | 'image-compress' | 'video-luminance' | 'subject-crop';
 
@@ -34,12 +36,28 @@ type PendingTask = {
 };
 
 const MAX_POOL_SIZE = 3;
+const MAX_CONCURRENT_UNDER_PRESSURE = 1;
 let pool: Worker[] = [];
 let workerBlobUrls: string[] = [];
 
 let pending = new Map<number, PendingTask>();
 let taskIdCounter = 0;
 let initialized = false;
+let activeDispatches = 0;
+let pressureUnsub: (() => void) | null = null;
+
+onMemoryPressureChange((level) => {
+  if (level === 'severe') {
+    addBreadcrumb('worker', 'Worker pool throttling enabled — severe memory pressure', 'error', { activeDispatches, poolSize: pool.length });
+    logWarning('Worker pool entering throttle mode due to severe memory pressure', {
+      component: 'workerPool',
+      action: 'pressure-throttle',
+      extra: { activeDispatches, poolSize: pool.length },
+    });
+  } else if (level === 'none') {
+    addBreadcrumb('worker', 'Worker pool throttling disabled — memory pressure cleared', 'warning');
+  }
+});
 
 /**
  * The worker source code as a string. This runs in a separate thread.
@@ -334,6 +352,7 @@ function handleWorkerMessage(e: MessageEvent<WorkerTaskResponse>) {
   const task = pending.get(id);
   if (!task) return;
   pending.delete(id);
+  activeDispatches = Math.max(0, activeDispatches - 1);
 
   if (ok) {
     task.resolve(result);
@@ -351,7 +370,15 @@ function dispatch(
       reject(new Error('No workers available'));
       return;
     }
+
+    const pressure = getMemoryPressure();
+    if (pressure === 'severe' && activeDispatches >= MAX_CONCURRENT_UNDER_PRESSURE) {
+      reject(new Error('Worker pool throttled due to severe memory pressure'));
+      return;
+    }
+
     pending.set(request.id, { resolve, reject, transferables });
+    activeDispatches++;
 
     // Find a worker with the fewest pending tasks (simplified: round-robin)
     const worker = pool[request.id % pool.length];
@@ -360,11 +387,13 @@ function dispatch(
         worker.postMessage(request, transferables || []);
       } catch (err) {
         pending.delete(request.id);
+        activeDispatches--;
         reject(err instanceof Error ? err : new Error('Worker dispatch failed'));
       }
     } else {
       // No workers available — reject
       pending.delete(request.id);
+      activeDispatches--;
       reject(new Error('No workers available'));
     }
   });
@@ -545,5 +574,6 @@ export function terminateWorkerPool(): void {
   });
   workerBlobUrls = [];
   pending.clear();
+  activeDispatches = 0;
   initialized = false;
 }

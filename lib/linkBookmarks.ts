@@ -1,14 +1,18 @@
 import { supabase } from '@/lib/supabase';
+import { safeSupabaseCall } from '@/lib/apiClient';
 import { createShortLink } from '@/lib/shortUrl';
 import type { LinkBookmark } from '@/types/database';
 
 export async function fetchLinkBookmarks(): Promise<LinkBookmark[]> {
-  const { data, error } = await supabase
-    .from('link_bookmarks')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) return [];
-  return (data ?? []) as LinkBookmark[];
+  return safeSupabaseCall<LinkBookmark[]>(
+    async () => {
+      const result = await supabase
+        .from('link_bookmarks')
+        .select('*')
+        .order('created_at', { ascending: false });
+      return result as unknown as { data: LinkBookmark[] | null; error: { message: string } | null };
+    },
+  ).catch(() => [] as LinkBookmark[]);
 }
 
 export async function addLinkBookmark(
@@ -43,11 +47,16 @@ export async function deleteLinkBookmark(id: string): Promise<void> {
 export async function fetchShortLinkClicks(): Promise<
   { slug: string; destination_url: string; click_count: number; last_clicked_at: string | null }[]
 > {
-  const { data, error } = await supabase
-    .from('short_links')
-    .select('slug,destination_url,click_count,last_clicked_at')
-    .order('click_count', { ascending: false })
-    .limit(50);
-  if (error) return [];
-  return (data ?? []) as { slug: string; destination_url: string; click_count: number; last_clicked_at: string | null }[];
+  return safeSupabaseCall<
+    { slug: string; destination_url: string; click_count: number; last_clicked_at: string | null }[]
+  >(
+    async () => {
+      const result = await supabase
+        .from('short_links')
+        .select('slug,destination_url,click_count,last_clicked_at')
+        .order('click_count', { ascending: false })
+        .limit(50);
+      return result as unknown as { data: { slug: string; destination_url: string; click_count: number; last_clicked_at: string | null }[] | null; error: { message: string } | null };
+    },
+  ).catch(() => [] as { slug: string; destination_url: string; click_count: number; last_clicked_at: string | null }[]);
 }

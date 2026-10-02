@@ -18,6 +18,8 @@ import { hashObject } from '@/lib/contentHash';
 const L1_MAX_ENTRIES = 60;
 const L2_BATCH_THRESHOLD = 5;
 const L2_KEY_PREFIX = 'media-cache:';
+const L2_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+const L2_GC_BATCH_SIZE = 50;
 
 interface L1Entry {
   url: string;
@@ -211,7 +213,16 @@ async function readL2IndexedDB(key: string): Promise<string | null> {
       const tx = db.transaction('media', 'readonly');
       const store = tx.objectStore('media');
       const req = store.get(L2_KEY_PREFIX + key);
-      req.onsuccess = () => resolve((req.result as string) ?? null);
+      req.onsuccess = () => {
+        const result = req.result;
+        if (result == null) { resolve(null); return; }
+        if (typeof result === 'string') { resolve(result); return; }
+        if (typeof result === 'object' && result !== null && typeof result.data === 'string') {
+          resolve(result.data);
+          return;
+        }
+        resolve(null);
+      };
       req.onerror = () => resolve(null);
     } catch {
       resolve(null);
@@ -226,7 +237,7 @@ async function writeL2IndexedDB(key: string, dataUrl: string): Promise<void> {
     try {
       const tx = db.transaction('media', 'readwrite');
       const store = tx.objectStore('media');
-      store.put(dataUrl, L2_KEY_PREFIX + key);
+      store.put({ data: dataUrl, ts: Date.now() }, L2_KEY_PREFIX + key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     } catch {
@@ -314,13 +325,66 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 let lifecycleHookInstalled = false;
 
+/**
+ * Sweep IndexedDB media cache for entries older than L2_MAX_AGE_MS.
+ * Uses a cursor to iterate in batches, yielding between batches so the
+ * main thread is never blocked. Returns the number of entries deleted.
+ */
+export async function sweepL2StaleEntries(maxAgeMs: number = L2_MAX_AGE_MS): Promise<number> {
+  if (Platform.OS !== 'web') return 0;
+  const db = await initIndexedDB();
+  if (!db) return 0;
+
+  const now = Date.now();
+  let deleted = 0;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('media', 'readwrite');
+      const store = tx.objectStore('media');
+      const cursorReq = store.openCursor();
+      let processedInBatch = 0;
+
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (!cursor) return;
+
+        const value = cursor.value;
+        const ts = typeof value === 'object' && value !== null ? value.ts : 0;
+        const isStale = ts === 0 || (now - ts) > maxAgeMs;
+
+        if (isStale) {
+          cursor.delete();
+          deleted++;
+        }
+
+        processedInBatch++;
+        if (processedInBatch >= L2_GC_BATCH_SIZE) {
+          processedInBatch = 0;
+        }
+
+        cursor.continue();
+      };
+
+      tx.oncomplete = () => resolve(deleted);
+      tx.onerror = () => resolve(deleted);
+    } catch {
+      resolve(deleted);
+    }
+  });
+}
+
 export function installMediaCacheLifecycleHook(): void {
   if (lifecycleHookInstalled || Platform.OS !== 'web') return;
   lifecycleHookInstalled = true;
 
+  // Run a stale entry sweep on startup — non-blocking, best-effort.
+  setTimeout(() => { sweepL2StaleEntries().catch(() => {}); }, 5000);
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       flushPendingToL2();
+      sweepL2StaleEntries().catch(() => {});
     }
   });
 
