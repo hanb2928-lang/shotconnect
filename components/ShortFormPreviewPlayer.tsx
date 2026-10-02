@@ -8,8 +8,7 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
-import * as FileSystem from 'expo-file-system/legacy';
+
 import {
   Play,
   Pause,
@@ -32,6 +31,7 @@ import {
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { getActiveCopyOverlay } from '@/lib/promptBuilder';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
+import { NativeVideoPlayer } from '@/components/NativeVideoPlayer';
 
 interface ShortFormPreviewPlayerProps {
   editPlan: ShortFormEditPlan;
@@ -106,23 +106,7 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
       setVideoSrc(videoUri);
       return;
     }
-    if (videoUri.startsWith('data:') || videoUri.startsWith('blob:')) {
-      setVideoSrc(videoUri);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const base64 = await FileSystem.readAsStringAsync(videoUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (cancelled) return;
-        setVideoSrc(`data:video/mp4;base64,${base64}`);
-      } catch {
-        if (!cancelled) setVideoSrc(videoUri);
-      }
-    })();
-    return () => { cancelled = true; };
+    setVideoSrc(videoUri);
   }, [videoUri]);
 
   useEffect(() => {
@@ -558,13 +542,6 @@ useEffect(() => {
     return { justifyContent: 'center' };
   }, [activeSegment, safeZonePadding]);
 
-  const videoHtml = useMemo(() => {
-    if (!videoSrc) return '';
-    return `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{margin:0;padding:0;}body{background:#000;overflow:hidden;}video{width:100%;height:100%;object-fit:cover;}</style></head><body><video id="v" src="${videoSrc}" autoplay muted loop playsinline webkit-playsinline onerror="window.ReactNativeWebView.postMessage('video_error')"></video><script>var v=document.getElementById('v');v.addEventListener('error',function(){window.ReactNativeWebView.postMessage('video_error');},{once:true});v.addEventListener('canplay',function(){window.ReactNativeWebView.postMessage('video_loaded');},{once:true});v.addEventListener('loadeddata',function(){window.ReactNativeWebView.postMessage('video_loaded');},{once:true});setTimeout(function(){if(v.readyState===0){window.ReactNativeWebView.postMessage('video_error');}},8000);</script></body></html>`;
-  }, [videoSrc]);
-
-  const webviewSource = useMemo(() => ({ html: videoHtml }), [videoHtml]);
-
   const handleVideoError = useCallback(() => {
     setVideoError(true);
     setVideoFallbackMode(true);
@@ -609,29 +586,18 @@ useEffect(() => {
                 }}
               />
             ) : (
-              <WebView
-                key={videoSrc}
-                source={webviewSource}
-                style={[styles.webViewFill, { opacity: videoLoaded ? 1 : 0, backgroundColor: 'transparent' }]}
-                javaScriptEnabled
-                allowsInlineMediaPlayback
-                mediaPlaybackRequiresUserAction={false}
-                scrollEnabled={false}
-                mixedContentMode="always"
-                originWhitelist={['*']}
-                allowFileAccess
-                onMessage={(event) => {
-                  if (event.nativeEvent.data === 'video_error') {
-                    handleVideoError();
-                  } else if (event.nativeEvent.data === 'video_loaded') {
-                    setVideoLoaded(true);
-                    if (videoTimeoutRef.current) {
-                      clearTimeout(videoTimeoutRef.current);
-                      videoTimeoutRef.current = null;
-                    }
+              <NativeVideoPlayer
+                videoUri={videoSrc!}
+                isPlaying={isPlaying}
+                onLoad={() => {
+                  setVideoLoaded(true);
+                  if (videoTimeoutRef.current) {
+                    clearTimeout(videoTimeoutRef.current);
+                    videoTimeoutRef.current = null;
                   }
                 }}
                 onError={handleVideoError}
+                style={styles.webViewFill}
               />
             )
           ) : null}

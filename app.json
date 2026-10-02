@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.shotconnect.app",
+      "jsEngine": "hermes",
       "infoPlist": {
         "NSCameraUsageDescription": "제품 촬영과 AI 분석을 위해 카메라를 사용합니다.",
         "NSMicrophoneUsageDescription": "영상 촬영 시 음성을 녹음하기 위해 마이크를 사용합니다."
@@ -57,6 +58,7 @@
       "expo-image-picker",
       "expo-image",
       "expo-camera",
+      "expo-video",
       "expo-media-library",
       [
         "expo-build-properties",
