@@ -697,7 +697,9 @@ export async function submitVideoJobAsync(
   prompt: string,
   options: GenerateAiVideoOptions,
 ): Promise<SubmitOnlyResult> {
-  const { data, error } = await supabase.functions.invoke('generate-video', {
+  const SUBMIT_TIMEOUT_MS = 45_000;
+
+  const invokePromise = supabase.functions.invoke('generate-video', {
     body: {
       mode: 'submit',
       prompt,
@@ -735,6 +737,12 @@ export async function submitVideoJobAsync(
       enableFabricPhysics: options.enableFabricPhysics,
     },
   });
+
+  const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+    setTimeout(() => resolve({ data: null, error: new Error('영상 생성 요청 시간이 초과되었습니다. 다시 시도해주세요.') }), SUBMIT_TIMEOUT_MS),
+  );
+
+  const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
 
   if (error) throw await buildVideoFunctionError(error);
   if (!data || typeof data.taskId !== 'string') {
