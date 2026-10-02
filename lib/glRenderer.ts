@@ -285,6 +285,10 @@ function invalidateContext(gl: WebGL2RenderingContext): void {
     cache.clear();
     programCache.delete(gl);
   }
+  // Reset the shared quad buffer — it was created on the now-dead context
+  // and its handle is invalid. The next ensureQuad() call will recreate it
+  // on the new (restored) context.
+  quadBuffer = null;
 }
 
 /**
@@ -484,6 +488,10 @@ export function attachWebGLContextLossHandler(
   };
 
   const handleContextRestored = () => {
+    // Reset all stale GL resources from the dead context.
+    // The quad buffer was created on the old context and its handle
+    // is no longer valid — null it out so ensureQuad recreates it.
+    quadBuffer = null;
     glContextLostGlobal = false;
     onRestoreCallback();
   };
