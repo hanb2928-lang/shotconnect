@@ -1178,7 +1178,7 @@ export default function CameraScreen() {
             />
           </View>
 
-          <View style={[styles.bottomBar, { paddingBottom: theme.spacing.sm }]}>
+          <View style={[styles.bottomBar, { paddingBottom: bottomInset + theme.spacing.sm }]}>
             {error && (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorText}>{error}</Text>
@@ -1292,7 +1292,7 @@ export default function CameraScreen() {
           )}
         </View>
 
-        <View style={[styles.bottomBar, { paddingBottom: theme.spacing.sm }]}>
+        <View style={[styles.bottomBar, { paddingBottom: bottomInset + theme.spacing.sm }]}>
           {error && (
             <View style={styles.errorBanner}>
               <Text style={styles.errorText}>{error}</Text>
@@ -1384,7 +1384,7 @@ export default function CameraScreen() {
           />
         </View>
 
-        <View style={[styles.bottomBar, { paddingBottom: theme.spacing.sm }]}>
+        <View style={[styles.bottomBar, { paddingBottom: bottomInset + theme.spacing.sm }]}>
           {error && (
             <View style={styles.errorBanner}>
               <Text style={styles.errorText}>{error}</Text>
@@ -1498,7 +1498,7 @@ export default function CameraScreen() {
         )}
       </View>
 
-      <View style={[styles.bottomBar, { paddingBottom: theme.spacing.sm }]}>
+      <View style={[styles.bottomBar, { paddingBottom: bottomInset + theme.spacing.sm }]}>
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>

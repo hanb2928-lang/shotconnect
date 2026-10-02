@@ -666,6 +666,7 @@ export default function ResultScreen() {
   const handleAiVideoGenerate = useCallback(async () => {
     if (!scan || isGeneratingVideo || videoGenLockRef.current) return;
     videoGenLockRef.current = true;
+    try {
     if (hdUnsubRef.current) { hdUnsubRef.current(); hdUnsubRef.current = null; }
     if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
     setIsGeneratingVideo(true);
@@ -972,8 +973,19 @@ export default function ResultScreen() {
         clearInterval(draftProgressTimerRef.current);
         draftProgressTimerRef.current = null;
       }
+    }
+    } catch {
+      if (mountedRef.current) {
+        setVideoStage('failed');
+        setIsGeneratingVideo(false);
+        setVideoGenProgress(null);
+      }
     } finally {
       videoGenLockRef.current = false;
+      if (draftProgressTimerRef.current) {
+        clearInterval(draftProgressTimerRef.current);
+        draftProgressTimerRef.current = null;
+      }
     }
   }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage]);
 
@@ -985,6 +997,7 @@ export default function ResultScreen() {
     setSelectedImageIndex(0);
     setImageGenProgress({ phase: 'submitting', progress: 0, message: '이미지 생성 준비 중...', completedCount: 0, totalCount: 5 });
 
+    try {
     const sizeMap: Record<string, '1024x1024' | '1792x1024' | '1024x1792'> = {
       '1:1': '1024x1024',
       '4:5': '1024x1792',
@@ -1126,6 +1139,12 @@ export default function ResultScreen() {
     } catch (err) {
       if (mountedRef.current) {
         setImageGenError(err instanceof Error ? err.message : '이미지 생성 중 오류가 발생했습니다.');
+        setImageGenProgress({ phase: 'error', progress: 1, message: '생성 실패', completedCount: 0, totalCount: 5 });
+      }
+    }
+    } catch {
+      if (mountedRef.current) {
+        setImageGenError('이미지 생성 준비 중 오류가 발생했습니다.');
         setImageGenProgress({ phase: 'error', progress: 1, message: '생성 실패', completedCount: 0, totalCount: 5 });
       }
     } finally {
