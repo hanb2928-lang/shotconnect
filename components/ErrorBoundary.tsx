@@ -133,4 +133,20 @@ const styles = StyleSheet.create({
     fontFamily: theme.typography.fontFamily.bold,
     color: '#fff',
   },
+  skeleton: {
+    width: '100%',
+    height: 200,
+    backgroundColor: theme.colors.dark.surface,
+    borderRadius: theme.radius.lg,
+  },
 });
+
+export function SafeLazyLoad({ children, fallback }: { children: React.ReactNode; fallback?: React.ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <React.Suspense fallback={fallback ?? <View style={styles.skeleton} />}>
+        {children}
+      </React.Suspense>
+    </ErrorBoundary>
+  );
+}
