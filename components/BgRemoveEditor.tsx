@@ -13,6 +13,7 @@ import {
 import { Eraser, RotateCcw, Undo2, Check, X, Loader } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
+import { glBuildMask, glOverlayComposite, glCheckerAlphaMask, glApplyAlphaMask, isWebGL2Available } from '@/lib/glRenderer';
 
 type BrushMode = 'erase' | 'restore';
 
@@ -106,16 +107,33 @@ export function BgRemoveEditor({
       if (!maskCtx) return;
 
       if (initialMask && initialMask.length === imageWidth * imageHeight * 4) {
-        // Build mask from initial alpha: if alpha < 128, pixel was removed (black), else keep (white)
-        const maskImg = maskCtx.createImageData(imageWidth, imageHeight);
+        // Build mask from initial alpha on the GPU via a shader, falling
+        // back to the CPU pixel loop if WebGL2 is unavailable.
+        const alphaCanvas = document.createElement('canvas');
+        alphaCanvas.width = imageWidth;
+        alphaCanvas.height = imageHeight;
+        const aCtx = alphaCanvas.getContext('2d');
+        if (!aCtx) return;
+        const alphaImg = aCtx.createImageData(imageWidth, imageHeight);
         for (let i = 0; i < imageWidth * imageHeight; i++) {
-          const alpha = initialMask[i * 4 + 3];
-          maskImg.data[i * 4] = alpha < 128 ? 0 : 255;
-          maskImg.data[i * 4 + 1] = alpha < 128 ? 0 : 255;
-          maskImg.data[i * 4 + 2] = alpha < 128 ? 0 : 255;
-          maskImg.data[i * 4 + 3] = 255;
+          alphaImg.data[i * 4 + 3] = initialMask[i * 4 + 3];
         }
-        maskCtx.putImageData(maskImg, 0, 0);
+        aCtx.putImageData(alphaImg, 0, 0);
+
+        const glResult = glBuildMask(alphaCanvas, imageWidth, imageHeight, 0.5);
+        if (glResult) {
+          maskCtx.drawImage(glResult, 0, 0);
+        } else {
+          const maskImg = maskCtx.createImageData(imageWidth, imageHeight);
+          for (let i = 0; i < imageWidth * imageHeight; i++) {
+            const alpha = initialMask[i * 4 + 3];
+            maskImg.data[i * 4] = alpha < 128 ? 0 : 255;
+            maskImg.data[i * 4 + 1] = alpha < 128 ? 0 : 255;
+            maskImg.data[i * 4 + 2] = alpha < 128 ? 0 : 255;
+            maskImg.data[i * 4 + 3] = 255;
+          }
+          maskCtx.putImageData(maskImg, 0, 0);
+        }
       } else {
         // No initial mask — start with everything kept (white)
         maskCtx.fillStyle = 'white';
@@ -144,12 +162,62 @@ export function BgRemoveEditor({
     dCtx.drawImage(canvasRef.current, 0, 0, displayCanvas.width, displayCanvas.height);
 
     const maskCanvas = maskCanvasRef.current;
+
+    // GPU path: composite red overlay onto removed areas via a shader,
+    // then draw checker only behind removed areas via a GPU alpha mask.
+    // Falls back to the original CPU pixel loops if WebGL2 is unavailable.
+    if (isWebGL2Available()) {
+      const overlayResult = glOverlayComposite(
+        canvasRef.current, maskCanvas, imageWidth, imageHeight,
+        [220 / 255, 50 / 255, 50 / 255], 140 / 255,
+      );
+      if (overlayResult) {
+        dCtx.drawImage(overlayResult, 0, 0, displayCanvas.width, displayCanvas.height);
+      }
+
+      const checkerKey = `${imageWidth}x${imageHeight}`;
+      if (!checkerCanvasRef.current || checkerBuiltFor.current !== checkerKey) {
+        const checkerCanvas = document.createElement('canvas');
+        checkerCanvas.width = imageWidth;
+        checkerCanvas.height = imageHeight;
+        const cCtx = checkerCanvas.getContext('2d');
+        if (cCtx) {
+          const checkerSize = 12;
+          for (let y = 0; y < imageHeight; y += checkerSize) {
+            for (let x = 0; x < imageWidth; x += checkerSize) {
+              const isLight = ((x / checkerSize) + (y / checkerSize)) % 2 === 0;
+              cCtx.fillStyle = isLight ? '#e8e8e8' : '#c0c0c0';
+              cCtx.fillRect(x, y, checkerSize, checkerSize);
+            }
+          }
+        }
+        checkerCanvasRef.current = checkerCanvas;
+        checkerBuiltFor.current = checkerKey;
+      }
+
+      const checkerCanvas = checkerCanvasRef.current!;
+      const alphaMask = glCheckerAlphaMask(maskCanvas, imageWidth, imageHeight);
+      if (alphaMask) {
+        const cCtx = checkerCanvas.getContext('2d');
+        if (cCtx) {
+          cCtx.globalCompositeOperation = 'destination-in';
+          cCtx.drawImage(alphaMask, 0, 0);
+          cCtx.globalCompositeOperation = 'source-over';
+        }
+      }
+
+      dCtx.globalCompositeOperation = 'destination-over';
+      dCtx.drawImage(checkerCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+      dCtx.globalCompositeOperation = 'source-over';
+      return;
+    }
+
+    // CPU fallback path (original implementation)
     const maskCtx = maskCanvas.getContext('2d');
     if (!maskCtx) return;
 
     const maskData = maskCtx.getImageData(0, 0, imageWidth, imageHeight);
 
-    // Reuse persistent overlay canvas
     if (!overlayCanvasRef.current) {
       overlayCanvasRef.current = document.createElement('canvas');
     }
@@ -174,7 +242,6 @@ export function BgRemoveEditor({
     oCtx.putImageData(overlayData, 0, 0);
     dCtx.drawImage(overlayCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
 
-    // Build checkerboard once and cache
     const checkerKey = `${imageWidth}x${imageHeight}`;
     if (!checkerCanvasRef.current || checkerBuiltFor.current !== checkerKey) {
       const checkerCanvas = document.createElement('canvas');
@@ -198,7 +265,6 @@ export function BgRemoveEditor({
     const cCtx = checkerCanvas.getContext('2d');
     if (!cCtx) return;
 
-    // Apply checker only to removed areas using composite ops on the checker itself
     cCtx.globalCompositeOperation = 'destination-in';
     const removedMask = document.createElement('canvas');
     removedMask.width = imageWidth;
@@ -359,24 +425,31 @@ export function BgRemoveEditor({
     setProcessing(true);
 
     try {
+      // GPU path: apply mask as alpha in a single shader pass.
+      const glResult = glApplyAlphaMask(canvasRef.current, maskCanvasRef.current, imageWidth, imageHeight);
+      if (glResult) {
+        const dataUrl = glResult.toDataURL('image/png');
+        onConfirm(dataUrl);
+        return;
+      }
+
+      // CPU fallback
       const resultCanvas = document.createElement('canvas');
       resultCanvas.width = imageWidth;
       resultCanvas.height = imageHeight;
       const rCtx = resultCanvas.getContext('2d');
       if (!rCtx) throw new Error('캔버스를 생성할 수 없습니다');
 
-      // Draw the image
       rCtx.drawImage(canvasRef.current, 0, 0);
 
-      // Apply the mask: set alpha based on mask (white = opaque, black = transparent)
       const imgData = rCtx.getImageData(0, 0, imageWidth, imageHeight);
       const maskCtx = maskCanvasRef.current.getContext('2d');
       if (!maskCtx) throw new Error('마스크를 읽을 수 없습니다');
       const maskData = maskCtx.getImageData(0, 0, imageWidth, imageHeight);
 
       for (let i = 0; i < imageWidth * imageHeight; i++) {
-        const maskVal = maskData.data[i * 4]; // red channel: 255 = keep, 0 = remove
-        imgData.data[i * 4 + 3] = maskVal; // set alpha directly
+        const maskVal = maskData.data[i * 4];
+        imgData.data[i * 4 + 3] = maskVal;
       }
 
       rCtx.putImageData(imgData, 0, 0);

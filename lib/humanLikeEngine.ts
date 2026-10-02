@@ -63,6 +63,28 @@ export function applyPixelNoiseToCanvas(
   params: VisualRandomizationParams,
 ): void {
   if (Math.abs(params.hueShift) < 0.01) return;
+
+  // GPU path: run a single fragment shader pass for hue/sat/brightness shift.
+  // This avoids the getImageData/putImageData round-trip and per-pixel JS loop.
+  const { glColorFilter, isWebGL2Available } = require('@/lib/glRenderer') as typeof import('@/lib/glRenderer');
+  if (isWebGL2Available()) {
+    const sourceCanvas = ctx.canvas;
+    const result = glColorFilter(
+      sourceCanvas,
+      width,
+      height,
+      params.hueShift / 100,
+      params.saturationShift / 100,
+      params.brightnessShift / 100,
+    );
+    if (result) {
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(result, 0, 0);
+      return;
+    }
+  }
+
+  // CPU fallback
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
   const shift = params.hueShift / 100;
