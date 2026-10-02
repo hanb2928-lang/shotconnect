@@ -616,9 +616,11 @@ export default function AffiliateScreen() {
           setMediaLoading(false);
           return;
         }
-        const compressed = await Promise.all(
-          result.assets.slice(0, 4).map((a) => compressImageToBase64(a.uri, 1280, 0.7)),
-        );
+        const compressed: { base64: string; mimeType: string }[] = [];
+        for (const asset of result.assets.slice(0, 4)) {
+          const c = await compressImageToBase64(asset.uri, 1280, 0.7);
+          compressed.push(c);
+        }
         const newImages = compressed.map((c) => ({ uri: buildDataUrl(c.base64, c.mimeType), mime: c.mimeType }));
         setMultiImages((prev) => [...prev, ...newImages].slice(0, 4));
         setSelectedImage(compressed[0].base64);
