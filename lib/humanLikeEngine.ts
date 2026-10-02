@@ -8,6 +8,8 @@
  * 4. Human Action Pacing — upload cooldown tracking + safety score
  */
 
+import { sanitizeEncodedText, safeTruncate } from './textSanitizer';
+
 // ─── 1. Dynamic Visual Variation ───────────────────────────────────────────
 
 export interface VisualRandomizationParams {
@@ -198,6 +200,8 @@ export function spinCaption(
   originalCaption: string,
   originalHashtags: string[],
 ): CaptionVariation {
+  // Sanitize inputs to remove any orphaned surrogates from AI-generated text
+  // before manipulating it, so we don't propagate broken emoji into variations.
   const seed = Math.random();
 
   // Spin hook: 50% chance to add a random prefix or suffix
@@ -229,9 +233,9 @@ export function spinCaption(
   }
 
   return {
-    hook,
-    caption,
-    hashtags: originalHashtags,
+    hook: sanitizeEncodedText(hook),
+    caption: sanitizeEncodedText(caption),
+    hashtags: originalHashtags.map(sanitizeEncodedText),
     variationSeed: seed,
   };
 }
@@ -247,7 +251,7 @@ export function generateCaptionVariations(
 
   for (let i = 0; i < count * 2 && variations.length < count; i++) {
     const v = spinCaption(hook, caption, hashtags);
-    const key = v.hook + v.caption.slice(0, 30);
+    const key = v.hook + safeTruncate(v.caption, 30);
     if (!seen.has(key)) {
       seen.add(key);
       variations.push(v);

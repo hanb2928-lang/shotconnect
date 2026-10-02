@@ -115,6 +115,25 @@ function isNetworkError(err: unknown): boolean {
   return false;
 }
 
+const INVOKE_TIMEOUT_MS = 60_000;
+
+function invokeWithTimeout(
+  fnName: string,
+  body: Record<string, unknown>,
+  timeoutMs = INVOKE_TIMEOUT_MS,
+): Promise<{ data: unknown; error: unknown }> {
+  const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+    setTimeout(
+      () => resolve({ data: null, error: new Error('AI 서버 응답 시간이 초과되었습니다. 네트워크 상태를 확인하고 다시 시도해주세요.') }),
+      timeoutMs,
+    ),
+  );
+  return Promise.race([
+    supabase.functions.invoke(fnName, { body }) as Promise<{ data: unknown; error: unknown }>,
+    timeoutPromise,
+  ]);
+}
+
 async function invokeWithNetworkRetry(
   fnName: string,
   body: Record<string, unknown>,
@@ -124,12 +143,13 @@ async function invokeWithNetworkRetry(
   let lastError: unknown = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const { data, error } = await supabase.functions.invoke(fnName, { body });
+      const { data, error } = await invokeWithTimeout(fnName, body);
       if (error) throw error;
       return { data, error: null };
     } catch (err) {
       lastError = err;
-      if (attempt < maxRetries && isNetworkError(err)) {
+      const isTimeout = err instanceof Error && (err.message.includes('초과') || err.message.includes('timeout'));
+      if (attempt < maxRetries && (isNetworkError(err) || isTimeout)) {
         if (!isOnline()) {
           onRetry?.(attempt + 1, '네트워크 연결 대기 중...');
           const recovered = await waitForOnline();

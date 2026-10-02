@@ -1,6 +1,7 @@
 import { PLATFORM_SPECS, getPlatformSpec, type PlatformSpec } from './platformSpecs';
 import type { ShortFormPlatform } from './shortFormEditEngine';
 import type { UsageContext } from './aiSynthesisEngine';
+import { safeTruncate } from './textSanitizer';
 
 export type PublishTarget = 'youtube' | 'instagram' | 'tiktok';
 
@@ -110,7 +111,7 @@ function generateTitle(productName: string, context: UsageContext, target: Publi
   if (pName.length <= 15) {
     return `${prefix}${pName} ${ctxLabel[context]} | 이거 모르면 손해`;
   }
-  return `${prefix}${pName.slice(0, 12)}... ${ctxLabel[context]}`;
+  return `${prefix}${safeTruncate(pName, 12)}... ${ctxLabel[context]}`;
 }
 
 function generateDescription(productName: string, context: UsageContext, target: PublishTarget): string {

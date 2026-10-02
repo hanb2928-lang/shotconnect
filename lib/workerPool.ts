@@ -9,7 +9,7 @@
 
 import { Platform } from 'react-native';
 
-export type WorkerTaskType = 'base64-encode' | 'base64-decode' | 'image-compress' | 'video-luminance';
+export type WorkerTaskType = 'base64-encode' | 'base64-decode' | 'image-compress' | 'video-luminance' | 'subject-crop';
 
 export interface WorkerTaskRequest {
   id: number;
@@ -36,7 +36,7 @@ type PendingTask = {
 const MAX_POOL_SIZE = 3;
 let pool: Worker[] = [];
 let workerBlobUrls: string[] = [];
-let taskQueue: { request: WorkerTaskRequest; transferables?: Transferable[] }[] = [];
+
 let pending = new Map<number, PendingTask>();
 let taskIdCounter = 0;
 let initialized = false;
@@ -87,6 +87,16 @@ self.onmessage = function(e) {
       var result = computeLuminance(bitmap);
       if (bitmap) bitmap.close();
       self.postMessage({ id: id, ok: true, result: result });
+      return;
+    }
+
+    if (type === 'subject-crop') {
+      var dataUrl = msg.dataUrl;
+      cropToSubject(dataUrl).then(function(result) {
+        self.postMessage({ id: id, ok: true, result: result });
+      }).catch(function(err) {
+        self.postMessage({ id: id, ok: false, error: String(err) });
+      });
       return;
     }
 
@@ -183,8 +193,82 @@ function computeLuminance(bitmap) {
   }
 }
 
-function compressImage(dataUrl, maxDim, quality) {
+function cropToSubject(dataUrl) {
   return new Promise(function(resolve, reject) {
+    if (typeof OffscreenCanvas === 'undefined') {
+      reject(new Error('OffscreenCanvas not supported in worker'));
+      return;
+    }
+    var img = new Image();
+    img.onload = function() {
+      var naturalW = img.naturalWidth || img.width;
+      var naturalH = img.naturalHeight || img.height;
+      var maxDim = 1024;
+      var scale = Math.min(1, maxDim / Math.max(naturalW, naturalH));
+      var w = Math.max(1, Math.round(naturalW * scale));
+      var h = Math.max(1, Math.round(naturalH * scale));
+
+      if (!offscreenCanvas) {
+        offscreenCanvas = new OffscreenCanvas(w, h);
+        offscreenCtx = offscreenCanvas.getContext('2d');
+      } else {
+        offscreenCanvas.width = w;
+        offscreenCanvas.height = h;
+      }
+
+      offscreenCtx.clearRect(0, 0, w, h);
+      offscreenCtx.drawImage(img, 0, 0, w, h);
+      var imageData = offscreenCtx.getImageData(0, 0, w, h);
+      var data = imageData.data;
+
+      var minX = w, maxX = 0, minY = h, maxY = 0;
+      var foundPixels = 0;
+
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          var idx = (y * w + x) * 4;
+          if (data[idx + 3] > 30) {
+            foundPixels++;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      if (foundPixels < 100) {
+        resolve(null);
+        return;
+      }
+
+      var subjectW = maxX - minX;
+      var subjectH = maxY - minY;
+      var cx = (minX + maxX) / 2;
+      var cy = (minY + maxY) / 2;
+      var targetSize = Math.max(subjectW, subjectH);
+      var padding = Math.round(targetSize * 0.15);
+      var cropSize = targetSize + padding * 2;
+
+      var cropCanvas = new OffscreenCanvas(cropSize, cropSize);
+      var cropCtx = cropCanvas.getContext('2d');
+      var sx = Math.max(0, cx - cropSize / 2);
+      var sy = Math.max(0, cy - cropSize / 2);
+      cropCtx.drawImage(offscreenCanvas, sx, sy, cropSize, cropSize, 0, 0, cropSize, cropSize);
+
+      cropCanvas.convertToBlob({ type: 'image/png' }).then(function(blob) {
+        var reader = new FileReader();
+        reader.onload = function() { resolve(reader.result); };
+        reader.onerror = function() { reject(new Error('Failed to read crop blob')); };
+        reader.readAsDataURL(blob);
+      }).catch(function(err) { reject(err); });
+    };
+    img.onerror = function() { reject(new Error('Failed to load image in worker')); };
+    img.src = dataUrl;
+  });
+}
+
+function compressImage(dataUrl, maxDim, quality) {  return new Promise(function(resolve, reject) {
     if (typeof OffscreenCanvas === 'undefined') {
       reject(new Error('OffscreenCanvas not supported in worker'));
       return;
@@ -255,43 +339,6 @@ function handleWorkerMessage(e: MessageEvent<WorkerTaskResponse>) {
     task.resolve(result);
   } else {
     task.reject(new Error(error || 'Worker task failed'));
-  }
-
-  processQueue();
-}
-
-function getIdleWorker(): Worker | null {
-  return pool.find((w) => !pending.has(getWorkerTaskId(w))) || pool[0] || null;
-}
-
-function getWorkerTaskId(_worker: Worker): number {
-  // Workers don't have a task-id property; we track pending tasks globally.
-  // This helper is a no-op placeholder for the find() logic above.
-  return -1;
-}
-
-function processQueue(): void {
-  while (taskQueue.length > 0) {
-    const idle = pool.find((w) => {
-      // A worker is "idle" if no pending task is assigned to it.
-      // Since we assign tasks round-robin, we just check if there are
-      // fewer pending tasks than workers.
-      return pending.size < pool.length;
-    });
-    if (!idle) break;
-
-    const item = taskQueue.shift()!;
-    const worker = pool[pending.size % pool.length];
-    pending.set(item.request.id, {
-      resolve: () => {},
-      reject: () => {},
-    });
-
-    // We need to properly track the promise
-    // Re-create the pending entry with the actual promise handlers
-    // (This is handled in the dispatch function)
-    worker.postMessage(item.request, item.transferables || []);
-    return; // Process one at a time to avoid race conditions
   }
 }
 
@@ -466,6 +513,26 @@ export async function sampleLuminanceInWorker(
 }
 
 /**
+ * Crop an image to its subject's bounding box in a Web Worker.
+ * Scans alpha channel for non-transparent pixels, then crops and pads.
+ * Returns a PNG data URL, or null if the image has no detectable subject.
+ * Falls back to the main-thread implementation if workers aren't available.
+ */
+export async function cropToSubjectInWorker(
+  imageDataUrl: string,
+): Promise<string | null> {
+  if (!isWorkerPoolAvailable()) {
+    const { alignSubjectCenter } = await import('./aiSynthesisEngine');
+    return alignSubjectCenter(imageDataUrl);
+  }
+
+  const id = ++taskIdCounter;
+  return (await dispatch(
+    { id, type: 'subject-crop', dataUrl: imageDataUrl } as WorkerTaskRequest,
+  )) as string | null;
+}
+
+/**
  * Terminate all workers and revoke their Blob URLs. Each worker
  * is backed by a Blob URL that must be explicitly revoked — otherwise
  * the browser keeps the worker source in memory indefinitely.
@@ -478,6 +545,5 @@ export function terminateWorkerPool(): void {
   });
   workerBlobUrls = [];
   pending.clear();
-  taskQueue = [];
   initialized = false;
 }

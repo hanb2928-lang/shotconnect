@@ -16,6 +16,7 @@ import {
 import { ExternalLink, ShoppingBag, ChevronRight, Flame, Star, Globe, Lightbulb, ArrowUp, ArrowDown, Minus, Sparkles, Copy, Check, X, Youtube, Wand as Wand2, Send, Hop as Home, ShoppingBasket, TreePalm as Palmtree, Ticket } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { supabase, KEYWORD_TRENDS_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeInvoke, safeFetchJson } from '@/lib/apiClient';
 import * as Clipboard from 'expo-clipboard';
 import { useSubTabBarHeight } from '@/hooks/useSubTabBarHeight';
 import { useSafeTop } from '@/hooks/useSafeTop';
@@ -168,9 +169,9 @@ export default function TrendingScreen() {
     }
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke(`naver-trending?marketplace=${mp}`);
-
-      if (fnError) throw fnError;
+      const data = await safeInvoke<{ categories: TrendingCategory[] } | null>(
+        () => supabase.functions.invoke(`naver-trending?marketplace=${mp}`),
+      );
 
       const fetchedCategories: TrendingCategory[] = data?.categories || [];
       if (fetchedCategories.length === 0) throw new Error('인기 상품을 불러올 수 없습니다.');
@@ -194,15 +195,13 @@ export default function TrendingScreen() {
     setKeywordLoading(true);
     setKeywordError(null);
     try {
-      const resp = await fetch(KEYWORD_TRENDS_URL, {
+      const data = await safeFetchJson<{ groups: typeof keywordGroups }>(KEYWORD_TRENDS_URL, {
         headers: {
           Authorization: `Bearer ${supabaseAnonKey}`,
           apikey: supabaseAnonKey,
           'Content-Type': 'application/json',
         },
       });
-      if (!resp.ok) throw new Error('키워드 트렌드 로딩 실패');
-      const data = await resp.json();
       if (!mounted.current) return;
       setKeywordGroups(data.groups || []);
     } catch (err) {
@@ -293,15 +292,13 @@ export default function TrendingScreen() {
     setIdeasLoading(true);
     setIdeas([]);
     try {
-      const resp = await fetch(`${KEYWORD_TRENDS_URL}?ideas=${encodeURIComponent(keyword)}`, {
+      const data = await safeFetchJson<{ ideas: typeof ideas }>(`${KEYWORD_TRENDS_URL}?ideas=${encodeURIComponent(keyword)}`, {
         headers: {
           Authorization: `Bearer ${supabaseAnonKey}`,
           apikey: supabaseAnonKey,
           'Content-Type': 'application/json',
         },
       });
-      if (!resp.ok) throw new Error('아이디어 생성 실패');
-      const data = await resp.json();
       if (reqId !== ideaRequestIdRef.current) return;
       if (!mounted.current) return;
       setIdeas(data.ideas || []);

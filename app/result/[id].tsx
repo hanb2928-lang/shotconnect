@@ -146,6 +146,8 @@ import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { muxVideoWithAudio, probeUrlAccessible } from '@/lib/videoAudioMuxer';
 import { CachedImage } from '@/components/CachedImage';
+import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
+import { safeInvoke } from '@/lib/apiClient';
 
 type TargetPlatformKey = 'shorts' | 'tiktok' | 'reels' | 'naverclip' | 'instagramFeed' | 'naverBlog' | 'pinterest' | 'smartstore';
 
@@ -527,6 +529,15 @@ export default function ResultScreen() {
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
+
+  useBeforeUnloadGuard(
+    isGeneratingVideo ||
+    isMuxing ||
+    isGeneratingImage ||
+    videoStage === 'drafting' ||
+    videoStage === 'hd_upgrading',
+  );
+
   useEffect(() => {
     generatedVideoUrlRef.current = generatedVideoUrl;
   }, [generatedVideoUrl]);
@@ -629,15 +640,14 @@ export default function ResultScreen() {
         `훅: ${inlineEdit.hookEffect}`,
         viralPayload,
       ].filter(Boolean);
-      const { data, error } = await supabase.functions.invoke('generate-copy', {
+      const data = await safeInvoke(() => supabase.functions.invoke('generate-copy', {
         body: {
           scanId: scan.id,
           platform: activePlatform,
           productName: sanitizeVideoProductName(activeProductName || scan.product_name || '프리미엄 추천 상품'),
           extraPrompt: promptParts.join(' | '),
         },
-      });
-      if (error) throw error;
+      })).catch(() => null);
       if (mountedRef.current && data) {
         const result = data as { caption?: string; hook?: string; title?: string };
         if (result.caption) {
@@ -1085,8 +1095,9 @@ export default function ResultScreen() {
         }
       }
 
-      const invokeOne = async (idx: number) =>
-        supabase.functions.invoke('generate-image', {
+      type ImageGenResult = { image?: string; mimeType?: string; error?: string };
+      const invokeOne = async (idx: number): Promise<ImageGenResult> =>
+        safeInvoke<ImageGenResult>(() => supabase.functions.invoke('generate-image', {
           body: {
             output_type: 'image',
             mode: 'image',
@@ -1101,7 +1112,7 @@ export default function ResultScreen() {
             customPrompt: inlineEdit.aiPrompt || undefined,
             referenceImage: referenceImageBase64,
           },
-        });
+        }));
 
       const runWave = async (indices: number[]): Promise<PromiseSettledResult<Awaited<ReturnType<typeof invokeOne>>>[]> => {
         if (Platform.OS === 'web') {
@@ -1146,14 +1157,7 @@ export default function ResultScreen() {
 
       results.forEach((result, idx) => {
         if (result.status === 'fulfilled') {
-          const { data, error } = result.value;
-          if (error) {
-            const errMsg = typeof error === 'object' && error !== null && 'message' in error
-              ? String((error as { message: unknown }).message)
-              : `이미지 ${idx + 1}번 생성 실패`;
-            failedErrors.push(errMsg);
-            return;
-          }
+          const data = result.value;
           if (!data?.image) {
             const serverErr = data?.error as string | undefined;
             failedErrors.push(serverErr ?? `이미지 ${idx + 1}번: 응답 데이터 없음`);

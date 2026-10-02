@@ -7,6 +7,7 @@ import { safeFetch } from '@/lib/apiClient';
 import * as Clipboard from 'expo-clipboard';
 import type { PlatformKey } from '@/types/database';
 import { spinCaption, type CaptionVariation } from '@/lib/humanLikeEngine';
+import { sanitizeEncodedText } from '@/lib/textSanitizer';
 
 type CopyType = 'viral' | 'info' | 'deal';
 
@@ -118,9 +119,22 @@ export function CopyWriter({
       catch { throw new Error('서버 응답을 해석하지 못했습니다'); }
       if (data.error) throw new Error(data.error);
       if (data.groups && Array.isArray(data.groups)) {
-        if (mountedRef.current) setGroups(data.groups);
+        const sanitizedGroups = data.groups.map((g: CopyGroup) => ({
+          ...g,
+          copies: g.copies.map((c: CopyItem) => ({
+            hook: sanitizeEncodedText(c.hook || ''),
+            caption: sanitizeEncodedText(c.caption || ''),
+            hashtags: (c.hashtags || []).map((h: string) => sanitizeEncodedText(h)),
+          })),
+        }));
+        if (mountedRef.current) setGroups(sanitizedGroups);
       } else if (data.copies && Array.isArray(data.copies)) {
-        if (mountedRef.current) setGroups([{ type: 'viral', label: '감성형', copies: data.copies }]);
+        const sanitizedCopies = data.copies.map((c: CopyItem) => ({
+          hook: sanitizeEncodedText(c.hook || ''),
+          caption: sanitizeEncodedText(c.caption || ''),
+          hashtags: (c.hashtags || []).map((h: string) => sanitizeEncodedText(h)),
+        }));
+        if (mountedRef.current) setGroups([{ type: 'viral', label: '감성형', copies: sanitizedCopies }]);
       }
       if (mountedRef.current) setIsFallback(!!data.isFallback);
     } catch {

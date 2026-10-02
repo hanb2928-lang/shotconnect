@@ -8,6 +8,7 @@ import { isLowEndDevice } from '@/lib/devicePerformance';
 import { withFileLock } from '@/lib/fileLock';
 import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
+import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -370,6 +371,14 @@ export async function prepareImageForApi(
     assertNativeBase64Size(cleanBase64(normalizedDataUrl));
   }
   if (Platform.OS === 'web') {
+    // Mood filters need a 2D context for globalCompositeOperation; skip worker.
+    if (moodFilter === 'none' && isWorkerPoolAvailable()) {
+      try {
+        return await compressImageInWorker(normalizedDataUrl, maxDimension, quality);
+      } catch {
+        // Worker failed — fall through to main-thread canvas below
+      }
+    }
     try {
       const img = await loadImageElement(normalizedDataUrl);
       const scale = Math.min(1, maxDimension / Math.max(img.naturalWidth, img.naturalHeight));

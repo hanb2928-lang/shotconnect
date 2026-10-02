@@ -66,6 +66,7 @@ import { runSynthesis, getSynthesisSummary, type AngleInput } from '@/lib/aiSynt
 import { buildDirectingPlan, getDirectingSummary } from '@/lib/directingEngine';
 import { buildMultiPlatformPublishPlans, type PublishTarget } from '@/lib/publishManager';
 import { compressImage } from '@/lib/imageEdit';
+import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 
 type PlatformOption = {
   key: string;
@@ -160,6 +161,9 @@ export function PostCaptureWorkflow({
 
   const mountedRef = useRef(true);
   const prevVisibleRef = useRef(false);
+
+  useBeforeUnloadGuard(isUploading || savingToGallery);
+
   useEffect(() => {
     return () => { mountedRef.current = false; };
   }, []);

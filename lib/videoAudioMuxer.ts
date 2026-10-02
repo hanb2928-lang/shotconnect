@@ -28,6 +28,7 @@ const AUDIO_PROBE_BASE_DELAY_MS = 1000;
 
 import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { flushPostSynthesisMemory } from '@/lib/synthesisGc';
+import { getAdaptiveRenderParams, computeScaledDimensions } from '@/lib/devicePerformance';
 
 /**
  * Verify that a URL is actually reachable via HTTP before attempting
@@ -104,6 +105,17 @@ export async function muxVideoWithAudio(
   audio.crossOrigin = 'anonymous';
   audio.preload = 'auto';
 
+  function cleanupMediaElements() {
+    audio.pause();
+    video.pause();
+    audio.src = '';
+    video.src = '';
+    audio.removeAttribute('src');
+    video.removeAttribute('src');
+    audio.load();
+    video.load();
+  }
+
   // Wait for both to be fully ready (HAVE_ENOUGH_DATA) or fail
   try {
     await Promise.all([
@@ -111,20 +123,42 @@ export async function muxVideoWithAudio(
       waitForMediaReady(audio, 'audio'),
     ]);
   } catch {
-    // One or both media sources failed to load
+    cleanupMediaElements();
     return null;
   }
 
   // Validate that both media elements have usable dimensions/duration
-  if (!video.videoWidth || !video.videoHeight) return null;
-  if (!isFinite(video.duration) || video.duration <= 0) return null;
-  if (!isFinite(audio.duration) || audio.duration <= 0) return null;
+  if (!video.videoWidth || !video.videoHeight) {
+    cleanupMediaElements();
+    return null;
+  }
+  if (!isFinite(video.duration) || video.duration <= 0) {
+    cleanupMediaElements();
+    return null;
+  }
+  if (!isFinite(audio.duration) || audio.duration <= 0) {
+    cleanupMediaElements();
+    return null;
+  }
+
+  // Adaptive resolution: combine device tier with runtime memory/battery
+  // pressure to pick the safest render dimensions. On a low-end phone under
+  // memory pressure, this drops to 720p@20fps to avoid OOM kills. On a
+  // high-end device with no pressure, full source resolution is preserved.
+  const adaptive = getAdaptiveRenderParams();
+  const sourceW = video.videoWidth;
+  const sourceH = video.videoHeight;
+  const { width: canvasW, height: canvasH, scale: canvasScale } =
+    computeScaledDimensions(sourceW, sourceH, adaptive.maxDimension);
 
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width = canvasW;
+  canvas.height = canvasH;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
+  if (!ctx) {
+    cleanupMediaElements();
+    return null;
+  }
 
   // If OffscreenCanvas is supported, transfer the canvas's control to a
   // worker so the per-frame drawImage loop runs off the main thread.
@@ -181,7 +215,15 @@ export async function muxVideoWithAudio(
         }
       }
     } catch {
-      offscreenWorker = null;
+      if (offscreenWorker) {
+        try { offscreenWorker.terminate(); } catch {}
+        offscreenWorker = null;
+      }
+      if (workerBlobUrl) {
+        URL.revokeObjectURL(workerBlobUrl);
+        unregisterTempFile(workerBlobUrl);
+        workerBlobUrl = null;
+      }
       useOffscreenDraw = false;
     }
   }
@@ -193,9 +235,8 @@ export async function muxVideoWithAudio(
   try {
     sourceNode = audioCtx.createMediaElementSource(audio);
   } catch {
-    // If the audio element's source was already consumed or is invalid,
-    // createMediaElementSource throws — abort gracefully.
     audioCtx.close().catch(() => {});
+    cleanupMediaElements();
     return null;
   }
   const destination = audioCtx.createMediaStreamDestination();
@@ -203,12 +244,12 @@ export async function muxVideoWithAudio(
   sourceNode.connect(audioCtx.destination);
 
   // Combine canvas video stream + audio stream
-  const videoStream = canvas.captureStream(30);
+  const videoStream = canvas.captureStream(adaptive.fps);
   const audioStream = destination.stream;
   const audioTracks = audioStream.getAudioTracks();
   if (audioTracks.length === 0) {
-    // No audio track available — the TTS file may be empty or corrupted
     audioCtx.close().catch(() => {});
+    cleanupMediaElements();
     return null;
   }
 
@@ -224,19 +265,21 @@ export async function muxVideoWithAudio(
   // Some browsers report isTypeSupported=true but still throw when
   // constructing the recorder with that codec. Wrap in try/catch and
   // progressively degrade to safer codecs.
+  const videoBitrate = adaptive.videoBitrate;
+
   let recorder: MediaRecorder;
   try {
     recorder = new MediaRecorder(combinedStream, {
       mimeType,
-      videoBitsPerSecond: 6_000_000,
-      audioBitsPerSecond: 128_000,
+      videoBitsPerSecond: videoBitrate,
+      audioBitsPerSecond: adaptive.audioBitrate,
     });
   } catch {
     try {
       recorder = new MediaRecorder(combinedStream, {
         mimeType: 'video/webm;codecs=vp8,opus',
-        videoBitsPerSecond: 6_000_000,
-        audioBitsPerSecond: 128_000,
+        videoBitsPerSecond: videoBitrate,
+        audioBitsPerSecond: adaptive.audioBitrate,
       });
     } catch {
       try {
@@ -256,6 +299,7 @@ export async function muxVideoWithAudio(
   const durationSec = Math.max(video.duration, audio.duration) || 0;
   if (!isFinite(durationSec) || durationSec <= 0) {
     audioCtx.close().catch(() => {});
+    cleanupMediaElements();
     return null;
   }
 

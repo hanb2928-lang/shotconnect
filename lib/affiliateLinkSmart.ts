@@ -1,4 +1,5 @@
 import type { AffiliatePlatformKey } from '@/components/AffiliatePlatformSwitch';
+import { sanitizeEncodedText } from './textSanitizer';
 
 export interface DetectedAffiliate {
   platform: AffiliatePlatformKey;
@@ -136,7 +137,7 @@ function extractProductNameFromUrl(url: string): string {
 
 export function generateMarketingCopy(url: string, productName: string, priceLabel: string): DetectedAffiliate {
   const platform = detectAffiliatePlatform(url);
-  const name = extractProductNameFromUrl(url) || productName || '이 제품';
+  const name = sanitizeEncodedText(extractProductNameFromUrl(url) || productName || '이 제품');
   const price = priceLabel ? ` ${priceLabel}에` : '';
 
   if (platform === 'Coupang') {

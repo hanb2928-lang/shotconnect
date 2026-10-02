@@ -183,6 +183,12 @@ export async function alignSubjectCenter(
 ): Promise<string | null> {
   if (Platform.OS !== 'web') return null;
   try {
+    const { cropToSubjectInWorker } = await import('./workerPool');
+    return await cropToSubjectInWorker(imageDataUrl);
+  } catch {
+    // Worker unavailable — fall back to main-thread implementation below
+  }
+  try {
     const img = await loadImageElement(imageDataUrl);
     const maxDim = 1024;
     const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));

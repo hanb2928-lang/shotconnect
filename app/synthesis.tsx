@@ -38,6 +38,7 @@ import { useResultPolling } from '@/hooks/useResultPolling';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
 import { notifyVideoCompleted } from '@/lib/pushNotify';
+import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 
 export default function SynthesisScreen() {
   const router = useRouter();
@@ -68,6 +69,8 @@ export default function SynthesisScreen() {
   const genStartRef = useRef<number>(0);
   const progressMsgRef = useRef<string>('');
   const mountedRef = useRef(true);
+
+  useBeforeUnloadGuard(isGenerating || isExporting);
 
   useEffect(() => {
     return () => { mountedRef.current = false; };

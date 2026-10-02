@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { uint8ArrayToBase64 } from '@/lib/base64';
 import { encodeBase64InWorker } from '@/lib/workerPool';
+import { getDeviceTier, getAdaptiveRenderParams } from '@/lib/devicePerformance';
 
 export interface VideoRecordingOptions {
   maxDurationMs?: number;
@@ -15,7 +16,14 @@ export interface VideoRecordingResult {
   durationMs: number;
 }
 
-const DEFAULT_VIDEO_BITRATE = 4_000_000;
+// Bitrate scales with device tier and runtime memory pressure to reduce
+// OOM risk on low-end phones. The adaptive params function checks both
+// the static device tier and runtime conditions (JS heap usage, battery).
+function resolveDefaultBitrate(): number {
+  return getAdaptiveRenderParams().videoBitrate;
+}
+
+const DEFAULT_VIDEO_BITRATE = resolveDefaultBitrate();
 const DEFAULT_MAX_DURATION_MS = 30_000;
 
 function pickVideoMimeType(): string {

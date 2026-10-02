@@ -127,6 +127,7 @@ let queueState: QueueState = 'idle';
 const pendingClips: ClipMergeInput[] = [];
 let progressCallback: MergeQueueProgressCallback | null = null;
 let currentAbort: AbortController | null = null;
+let completedResults: ClipMergeResult[] = [];
 
 /**
  * Enqueue multiple clips for sequential merging.
@@ -148,6 +149,7 @@ export async function mergeClipsSequentially(
 
   queueState = 'running';
   progressCallback ??= onProgress ?? null;
+  completedResults = [];
 
   const results: ClipMergeResult[] = [];
 
@@ -253,6 +255,7 @@ export async function mergeClipsSequentially(
 
     if (clipResult) {
       results.push(clipResult);
+      completedResults.push(clipResult);
     } else {
       results.push({
         id: clip.id,
@@ -272,6 +275,7 @@ export async function mergeClipsSequentially(
 
   queueState = 'idle';
   progressCallback = null;
+  completedResults = [];
 
   return results;
 }
@@ -288,6 +292,17 @@ export function cancelMergeQueue(): void {
     currentAbort = null;
   }
   pendingClips.length = 0;
+  // Revoke Blob URLs from clips that already completed before the cancel.
+  // Without this, the muxed video blobs leak — the caller never receives
+  // the results to revoke them, and they persist in memory until tab close.
+  for (const result of completedResults) {
+    if (result.mux?.revoke) {
+      try { result.mux.revoke(); } catch {}
+    }
+  }
+  completedResults = [];
+  // Flush all transient synthesis resources (worker URLs, audio nodes).
+  flushPostSynthesisMemory().catch(() => {});
 }
 
 export function getMergeQueueState(): QueueState {

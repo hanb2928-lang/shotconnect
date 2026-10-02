@@ -103,14 +103,15 @@ void main() {
   frag = vec4(hsv2rgb(hsv), c.a);
 }`;
 
-let quadBuffer: WebGLBuffer | null = null;
+interface GLContextState {
+  programs: Map<string, WebGLProgram>;
+  quadBuffer: WebGLBuffer | null;
+}
+
 let contextLostCount = 0;
 let glContextLostGlobal = false;
+const contextState = new WeakMap<WebGL2RenderingContext, GLContextState>();
 
-/**
- * Check whether a WebGL2 context has been lost and cannot be used.
- * Returns true if the context is lost or in an unrecoverable state.
- */
 function isGLContextLost(gl: WebGL2RenderingContext): boolean {
   try {
     return typeof gl.isContextLost === 'function' && gl.isContextLost();
@@ -149,14 +150,25 @@ function createProgram(gl: WebGL2RenderingContext, fragSrc: string): WebGLProgra
   return program;
 }
 
+function getContextState(gl: WebGL2RenderingContext): GLContextState {
+  let state = contextState.get(gl);
+  if (!state) {
+    state = { programs: new Map(), quadBuffer: null };
+    contextState.set(gl, state);
+  }
+  return state;
+}
+
 function ensureQuad(gl: WebGL2RenderingContext): WebGLBuffer {
-  if (quadBuffer) return quadBuffer;
+  const state = getContextState(gl);
+  if (state.quadBuffer) return state.quadBuffer;
   if (isGLContextLost(gl)) throw new Error('WebGL context lost before buffer creation');
-  quadBuffer = gl.createBuffer();
-  if (!quadBuffer) throw new Error('WebGL context lost: createBuffer returned null');
-  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+  const buf = gl.createBuffer();
+  if (!buf) throw new Error('WebGL context lost: createBuffer returned null');
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-  return quadBuffer;
+  state.quadBuffer = buf;
+  return buf;
 }
 
 function createTexture(gl: WebGL2RenderingContext, source: TexImageSource, w: number, h: number): WebGLTexture {
@@ -193,8 +205,6 @@ function getGLCanvas(w: number, h: number): GLContext | null {
     canvas.height = h;
     const gl = canvas.getContext('webgl2', { premultipliedAlpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
-    // Immediately check for context loss — the driver may have crashed
-    // between creating the context and our first use of it.
     if (isGLContextLost(gl)) {
       try { const ext = gl.getExtension('WEBGL_lose_context'); ext?.loseContext(); } catch {}
       return null;
@@ -205,37 +215,19 @@ function getGLCanvas(w: number, h: number): GLContext | null {
   }
 }
 
-const programCache = new WeakMap<WebGL2RenderingContext, Map<string, WebGLProgram>>();
-
 function getProgram(gl: WebGL2RenderingContext, key: string, fragSrc: string): WebGLProgram {
   if (isGLContextLost(gl)) throw new Error('WebGL context lost before program creation');
-  let cache = programCache.get(gl);
-  if (!cache) {
-    cache = new Map();
-    programCache.set(gl, cache);
-  }
-  let program = cache.get(key);
+  const state = getContextState(gl);
+  let program = state.programs.get(key);
   if (!program) {
     program = createProgram(gl, fragSrc);
-    cache.set(key, program);
+    state.programs.set(key, program);
   }
   return program;
 }
 
-/**
- * Result type for safeGLRender — either a valid canvas or null to signal
- * the caller to fall back to the CPU path.
- */
 type GLRenderResult = { canvas: HTMLCanvasElement } | null;
 
-/**
- * Wrap a GL operation with full context-loss resilience.
- *
- * If the WebGL context is lost before, during, or after the operation,
- * this catches the failure and returns null so the caller falls back
- * to the CPU code path. After a context-loss event, the program cache
- * for that context is invalidated (the context is dead anyway).
- */
 function safeGLRender(
   ctx: GLContext | null,
   fn: (gl: WebGL2RenderingContext, canvas: HTMLCanvasElement) => void,
@@ -243,7 +235,6 @@ function safeGLRender(
   if (!ctx) return null;
   const { gl, canvas } = ctx;
 
-  // Pre-flight: context already lost (per-context or global)
   if (glContextLostGlobal || isGLContextLost(gl)) {
     invalidateContext(gl);
     return null;
@@ -252,7 +243,6 @@ function safeGLRender(
   try {
     fn(gl, canvas);
 
-    // Post-flight: context lost during the operation
     if (isGLContextLost(gl)) {
       invalidateContext(gl);
       return null;
@@ -260,8 +250,6 @@ function safeGLRender(
 
     return { canvas };
   } catch (err) {
-    // Context loss manifests as exceptions from GL calls, or null returns
-    // from createTexture/createShader/etc. Invalidate and fall back.
     invalidateContext(gl);
     contextLostCount++;
     if (contextLostCount <= 3) {
@@ -271,31 +259,21 @@ function safeGLRender(
   }
 }
 
-/**
- * Invalidate all cached programs for a dead context and attempt to
- * force-release resources. The context itself will be garbage-collected
- * when the canvas is dereferenced.
- */
 function invalidateContext(gl: WebGL2RenderingContext): void {
-  const cache = programCache.get(gl);
-  if (cache) {
-    for (const program of cache.values()) {
+  const state = contextState.get(gl);
+  if (state) {
+    for (const program of state.programs.values()) {
       try { gl.deleteProgram(program); } catch {}
     }
-    cache.clear();
-    programCache.delete(gl);
+    state.programs.clear();
+    if (state.quadBuffer) {
+      try { gl.deleteBuffer(state.quadBuffer); } catch {}
+      state.quadBuffer = null;
+    }
+    contextState.delete(gl);
   }
-  // Reset the shared quad buffer — it was created on the now-dead context
-  // and its handle is invalid. The next ensureQuad() call will recreate it
-  // on the new (restored) context.
-  quadBuffer = null;
 }
 
-/**
- * Build a mask texture from an image's alpha channel on the GPU.
- * Pixels with alpha >= threshold become white (keep), others black (remove).
- * Returns a canvas with the mask, or null if WebGL2 is unavailable.
- */
 export function glBuildMask(
   imageCanvas: HTMLCanvasElement,
   width: number,
@@ -317,10 +295,6 @@ export function glBuildMask(
   })?.canvas ?? null;
 }
 
-/**
- * Composite an overlay color onto removed areas (where mask is black).
- * Returns a canvas with the composited result, or null if WebGL2 is unavailable.
- */
 export function glOverlayComposite(
   imageCanvas: HTMLCanvasElement,
   maskCanvas: HTMLCanvasElement,
@@ -351,10 +325,6 @@ export function glOverlayComposite(
   })?.canvas ?? null;
 }
 
-/**
- * Apply a mask as alpha to an image: white mask = opaque, black mask = transparent.
- * Returns a canvas with the result, or null if WebGL2 is unavailable.
- */
 export function glApplyAlphaMask(
   imageCanvas: HTMLCanvasElement,
   maskCanvas: HTMLCanvasElement,
@@ -379,10 +349,6 @@ export function glApplyAlphaMask(
   })?.canvas ?? null;
 }
 
-/**
- * Generate a checker-alpha mask: white where the input mask is black (removed),
- * transparent elsewhere. Used to composite checkerboard only behind removed areas.
- */
 export function glCheckerAlphaMask(
   maskCanvas: HTMLCanvasElement,
   width: number,
@@ -402,10 +368,6 @@ export function glCheckerAlphaMask(
   })?.canvas ?? null;
 }
 
-/**
- * Apply hue/saturation/brightness shift to an image on the GPU.
- * Falls back to null if WebGL2 is unavailable (caller should use CPU path).
- */
 export function glColorFilter(
   imageCanvas: HTMLCanvasElement,
   width: number,
@@ -431,9 +393,6 @@ export function glColorFilter(
   })?.canvas ?? null;
 }
 
-/**
- * Check whether WebGL2 is available in the current environment.
- */
 export function isWebGL2Available(): boolean {
   if (Platform.OS !== 'web') return false;
   if (typeof document === 'undefined') return false;
@@ -451,32 +410,17 @@ export function isWebGL2Available(): boolean {
   }
 }
 
-/**
- * Global flag set when any WebGL context loss event fires.
- * Cleared on context restore. When true, all GL functions skip
- * the GPU path and return null immediately so callers use CPU fallback.
- */
-
 export function isGLContextLostGlobally(): boolean {
   return glContextLostGlobal;
 }
 
-/**
- * Attach WebGL context-loss event listeners to a persistent canvas
- * (e.g. the display canvas in BgRemoveEditor). When the GPU driver
- * crashes or the browser forcibly reclaims the context, this:
- *
- * 1. Prevents the default browser behavior
- * 2. Sets a global flag so all glRenderer functions fall back to CPU
- * 3. Calls onRestoreCallback when the browser auto-restores the context
- *
- * Returns a cleanup function that removes the listeners.
- */
 export function attachWebGLContextLossHandler(
   canvas: HTMLCanvasElement,
   onRestoreCallback: () => void,
 ): () => void {
   if (Platform.OS !== 'web') return () => {};
+
+  let restorationTimer: ReturnType<typeof setTimeout> | null = null;
 
   const handleContextLost = (event: Event) => {
     event.preventDefault();
@@ -488,10 +432,6 @@ export function attachWebGLContextLossHandler(
   };
 
   const handleContextRestored = () => {
-    // Reset all stale GL resources from the dead context.
-    // The quad buffer was created on the old context and its handle
-    // is no longer valid — null it out so ensureQuad recreates it.
-    quadBuffer = null;
     glContextLostGlobal = false;
     onRestoreCallback();
   };
@@ -499,7 +439,28 @@ export function attachWebGLContextLossHandler(
   canvas.addEventListener('webglcontextlost', handleContextLost, false);
   canvas.addEventListener('webglcontextrestored', handleContextRestored, false);
 
+  // If the browser does not auto-restore within 3 seconds, clear the global
+  // flag so new GL contexts can be created. The display canvas's own context
+  // is already dead and will be recreated by the caller's onRestoreCallback;
+  // blocking all GPU paths permanently (as on many mobile browsers that never
+  // fire webglcontextrestored) leaves the app stuck on the CPU path forever.
+  const lossListenerWithTimeout = (event: Event) => {
+    handleContextLost(event);
+    if (restorationTimer) clearTimeout(restorationTimer);
+    restorationTimer = setTimeout(() => {
+      if (glContextLostGlobal) {
+        glContextLostGlobal = false;
+        onRestoreCallback();
+      }
+    }, 3000);
+  };
+
+  canvas.removeEventListener('webglcontextlost', handleContextLost);
+  canvas.addEventListener('webglcontextlost', lossListenerWithTimeout, false);
+
   return () => {
+    if (restorationTimer) clearTimeout(restorationTimer);
+    canvas.removeEventListener('webglcontextlost', lossListenerWithTimeout);
     canvas.removeEventListener('webglcontextlost', handleContextLost);
     canvas.removeEventListener('webglcontextrestored', handleContextRestored);
   };
