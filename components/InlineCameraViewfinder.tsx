@@ -190,7 +190,6 @@ export const InlineCameraViewfinder = forwardRef<
       const result = await nativeCameraRef.current.takePictureAsync({
         base64: true,
         quality: 0.8,
-        skipProcessing: true,
       });
       if (!result?.base64) return null;
       return { base64: result.base64, mimeType: 'image/jpeg' };
@@ -357,14 +356,27 @@ export const InlineCameraViewfinder = forwardRef<
             style={StyleSheet.absoluteFillObject}
             facing={facing === 'environment' ? 'back' : 'front'}
             onCameraReady={() => setCameraReady(true)}
+            onMountError={(event) => {
+              setCameraReady(false);
+              setError(event.message || '카메라를 시작할 수 없습니다.');
+            }}
           />
         )}
-        {!cameraReady && (
+        {!cameraReady && !error && (
           <View style={[StyleSheet.absoluteFillObject as ViewStyle, { backgroundColor: '#000' }]}>
             <View style={styles.centerContent}>
               <Camera size={22} color={theme.colors.dark.textDim} strokeWidth={1.5} />
               <Text style={styles.loadingText}>카메라 시작 중...</Text>
             </View>
+          </View>
+        )}
+        {error && (
+          <View style={styles.errorOverlay}>
+            <ShieldAlert size={28} color={theme.colors.warning[400]} strokeWidth={1.5} />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={[styles.retrySmallBtn, { backgroundColor: accent }]} onPress={onPickFromGallery} activeOpacity={0.8}>
+              <Text style={styles.retrySmallText}>갤러리에서 선택</Text>
+            </TouchableOpacity>
           </View>
         )}
         <View style={styles.guideFrame} pointerEvents="none">

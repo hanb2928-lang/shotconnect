@@ -465,6 +465,7 @@ export default function ResultScreen() {
   const [videoGenError, setVideoGenError] = useState<string | null>(null);
   const [narrativeVariation, setNarrativeVariation] = useState(0);
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const generatedVideoUrlRef = useRef<string | null>(null);
   const [videoGenProgress, setVideoGenProgress] = useState<VideoGenProgress | null>(null);
   const [videoStage, setVideoStage] = useState<'idle' | 'drafting' | 'draft_ready' | 'hd_upgrading' | 'hd_ready' | 'failed'>('idle');
   const [draftVideoUrl, setDraftVideoUrl] = useState<string | null>(null);
@@ -522,6 +523,9 @@ export default function ResultScreen() {
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
+  useEffect(() => {
+    generatedVideoUrlRef.current = generatedVideoUrl;
+  }, [generatedVideoUrl]);
   const bgVideoChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const applyCombinedPreset = useCallback((platform: TargetPlatformKey, purpose: ContentPurpose) => {
@@ -1387,7 +1391,6 @@ export default function ResultScreen() {
 
     const autoSaveVideoToAssets = async (videoUrl: string) => {
       if (autoSavedVideoRef.current === videoUrl) return;
-      autoSavedVideoRef.current = videoUrl;
       try {
         const fileName = `shotconnect-video-${scan.id}-${Date.now()}.mp4`;
         let cloudUrl: string | null = null;
@@ -1399,7 +1402,7 @@ export default function ResultScreen() {
           cloudUrl = await uploadAssetFromFileUriWithProgress(videoUrl, fileName, 'video/mp4', () => {});
         }
         if (cloudUrl) {
-          await saveAssetRecord({
+          const saved = await saveAssetRecord({
             scan_id: scan.id,
             asset_type: 'video',
             title: scan.product_name || scan.title || 'AI 영상',
@@ -1408,6 +1411,7 @@ export default function ResultScreen() {
             mime_type: 'video/mp4',
             platform: activePlatform,
           });
+          if (saved) autoSavedVideoRef.current = videoUrl;
         }
       } catch {
         // Auto-save is best-effort; user can still manually save
@@ -1430,7 +1434,7 @@ export default function ResultScreen() {
             setBgJobNotice(null);
             autoSaveVideoToAssets(row.hd_video_url);
           } else if (row.status === 'SUCCESS' && row.video_url) {
-            if (!generatedVideoUrl) {
+            if (!generatedVideoUrlRef.current) {
               setGeneratedVideoUrl(row.video_url);
               setVideoStage('draft_ready');
               setIsGeneratingVideo(false);
@@ -1449,7 +1453,7 @@ export default function ResultScreen() {
       supabase.removeChannel(channel);
       bgVideoChannelRef.current = null;
     };
-  }, [scan, generatedVideoUrl, activePlatform]);
+  }, [scan, activePlatform]);
 
   // Mux TTS narration audio into the AI-generated video.
   // Triggers when both generatedVideoUrl and ttsUrl are available

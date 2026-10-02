@@ -1,4 +1,4 @@
-import { getItem, setItem } from '@/lib/storage';
+import { getItem, removeItem, setItem } from '@/lib/storage';
 
 export const ACTIVE_VIDEO_JOB_KEY = 'active_video_job';
 

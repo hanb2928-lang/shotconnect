@@ -66,6 +66,7 @@ export function determineWeatherAlert(
   weather: WeatherData,
   settings: WeatherAlertSettings,
 ): { type: WeatherAlert['alert_type']; title: string; body: string; hook_phrase: string; prompt_text: string } | null {
+  if (!settings.enabled) return null;
   const storeName = settings.store_name || '우리 매장';
 
   if (settings.rain_alert_enabled && weather.is_snowing) {
@@ -198,15 +199,28 @@ export async function fetchLiveWeather(
     },
   });
   if (!res.ok) throw new Error(`Weather API failed: ${res.status}`);
-  const data = await res.json();
+  const data: unknown = await res.json();
+  if (!data || typeof data !== 'object') throw new Error('Weather API returned an invalid response.');
+  const value = data as Record<string, unknown>;
+  if (
+    typeof value.temperature !== 'number' ||
+    typeof value.precipitation !== 'number' ||
+    typeof value.weather_code !== 'number' ||
+    typeof value.is_raining !== 'boolean' ||
+    typeof value.is_snowing !== 'boolean' ||
+    typeof value.is_cold !== 'boolean' ||
+    typeof value.is_hot !== 'boolean'
+  ) {
+    throw new Error('Weather API returned incomplete data.');
+  }
   return {
-    temperature: data.temperature,
-    precipitation: data.precipitation,
-    weather_code: data.weather_code,
-    is_raining: data.is_raining,
-    is_snowing: data.is_snowing,
-    is_cold: data.is_cold,
-    is_hot: data.is_hot,
+    temperature: value.temperature,
+    precipitation: value.precipitation,
+    weather_code: value.weather_code,
+    is_raining: value.is_raining,
+    is_snowing: value.is_snowing,
+    is_cold: value.is_cold,
+    is_hot: value.is_hot,
   };
 }
 

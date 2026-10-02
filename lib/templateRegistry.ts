@@ -94,6 +94,7 @@ const PLATFORM_ALIASES: Record<string, string> = {
 
 let cachedTemplates: TemplateRegistryEntry[] | null = null;
 let fetchPromise: Promise<TemplateRegistryEntry[]> | null = null;
+let fetchGeneration = 0;
 
 export function canonicalizeCategory(raw: string | undefined | null): string {
   if (!raw) return '_default';
@@ -111,28 +112,24 @@ async function fetchAllTemplates(): Promise<TemplateRegistryEntry[]> {
   if (cachedTemplates) return cachedTemplates;
   if (fetchPromise) return fetchPromise;
 
+  const generation = ++fetchGeneration;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
   fetchPromise = (async () => {
     try {
-      const queryPromise = supabase
+      const { data, error } = await supabase
         .from('template_registry')
-        .select('*');
+        .select('*')
+        .abortSignal(controller.signal);
 
-      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
-        setTimeout(() => resolve({ data: null, error: { message: 'template timeout' } }), 3000),
-      );
-
-      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
-
-      if (error || !data) {
-        fetchPromise = null;
-        return [];
-      }
-
+      if (error || !data || generation !== fetchGeneration) return [];
       cachedTemplates = data as TemplateRegistryEntry[];
       return cachedTemplates;
     } catch {
-      fetchPromise = null;
       return [];
+    } finally {
+      clearTimeout(timeoutId);
+      if (generation === fetchGeneration) fetchPromise = null;
     }
   })();
 
@@ -141,6 +138,7 @@ async function fetchAllTemplates(): Promise<TemplateRegistryEntry[]> {
 
 export function invalidateTemplateCache(): void {
   cachedTemplates = null;
+  fetchGeneration += 1;
   fetchPromise = null;
 }
 

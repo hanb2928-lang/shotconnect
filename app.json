@@ -10,7 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.shotconnect.app"
+      "bundleIdentifier": "com.shotconnect.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "제품 촬영과 AI 분석을 위해 카메라를 사용합니다.",
+        "NSMicrophoneUsageDescription": "영상 촬영 시 음성을 녹음하기 위해 마이크를 사용합니다."
+      }
     },
     "android": {
       "package": "com.shotconnect.app",

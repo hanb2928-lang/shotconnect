@@ -273,13 +273,17 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     if (!stream) return false;
     const hasAudio = stream.getAudioTracks().length > 0;
     if (!hasAudio) {
-      isRecordingRef.current = true;
       stopStream();
       await startStream(facing, true);
+      if (!mountedRef.current) {
+        stopStream();
+        return false;
+      }
       await new Promise((r) => setTimeout(r, 300));
     }
+    if (!mountedRef.current) return false;
     const currentStream = streamRef.current;
-    if (!currentStream) {
+    if (!currentStream || !mountedRef.current) {
       isRecordingRef.current = false;
       return false;
     }

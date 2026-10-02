@@ -24,12 +24,12 @@ Deno.serve(async (req: Request) => {
 
   try {
     const url = new URL(req.url);
-    const lat = url.searchParams.get("lat");
-    const lon = url.searchParams.get("lon");
-    const coldThreshold = parseFloat(url.searchParams.get("cold") || "0");
-    const hotThreshold = parseFloat(url.searchParams.get("hot") || "35");
+    const lat = Number(url.searchParams.get("lat"));
+    const lon = Number(url.searchParams.get("lon"));
+    const coldThreshold = Number(url.searchParams.get("cold") || "0");
+    const hotThreshold = Number(url.searchParams.get("hot") || "35");
 
-    if (!lat || !lon) {
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
       return new Response(
         JSON.stringify({ error: "Missing lat/lon parameters" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
