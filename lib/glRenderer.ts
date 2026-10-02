@@ -105,6 +105,7 @@ void main() {
 
 let quadBuffer: WebGLBuffer | null = null;
 let contextLostCount = 0;
+let glContextLostGlobal = false;
 
 /**
  * Check whether a WebGL2 context has been lost and cannot be used.
@@ -185,6 +186,7 @@ function drawQuad(gl: WebGL2RenderingContext, program: WebGLProgram) {
 function getGLCanvas(w: number, h: number): GLContext | null {
   if (Platform.OS !== 'web') return null;
   if (typeof document === 'undefined') return null;
+  if (glContextLostGlobal) return null;
   try {
     const canvas = document.createElement('canvas');
     canvas.width = w;
@@ -241,8 +243,8 @@ function safeGLRender(
   if (!ctx) return null;
   const { gl, canvas } = ctx;
 
-  // Pre-flight: context already lost
-  if (isGLContextLost(gl)) {
+  // Pre-flight: context already lost (per-context or global)
+  if (glContextLostGlobal || isGLContextLost(gl)) {
     invalidateContext(gl);
     return null;
   }
@@ -431,17 +433,66 @@ export function glColorFilter(
 export function isWebGL2Available(): boolean {
   if (Platform.OS !== 'web') return false;
   if (typeof document === 'undefined') return false;
+  if (glContextLostGlobal) return false;
   try {
     const test = document.createElement('canvas');
     const gl = test.getContext('webgl2');
     if (!gl) return false;
-    // Context may be lost globally (e.g. too many contexts open)
     if (isGLContextLost(gl)) return false;
-    // Release the test context immediately
     const loseExt = gl.getExtension('WEBGL_lose_context');
     loseExt?.loseContext();
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Global flag set when any WebGL context loss event fires.
+ * Cleared on context restore. When true, all GL functions skip
+ * the GPU path and return null immediately so callers use CPU fallback.
+ */
+
+export function isGLContextLostGlobally(): boolean {
+  return glContextLostGlobal;
+}
+
+/**
+ * Attach WebGL context-loss event listeners to a persistent canvas
+ * (e.g. the display canvas in BgRemoveEditor). When the GPU driver
+ * crashes or the browser forcibly reclaims the context, this:
+ *
+ * 1. Prevents the default browser behavior
+ * 2. Sets a global flag so all glRenderer functions fall back to CPU
+ * 3. Calls onRestoreCallback when the browser auto-restores the context
+ *
+ * Returns a cleanup function that removes the listeners.
+ */
+export function attachWebGLContextLossHandler(
+  canvas: HTMLCanvasElement,
+  onRestoreCallback: () => void,
+): () => void {
+  if (Platform.OS !== 'web') return () => {};
+
+  const handleContextLost = (event: Event) => {
+    event.preventDefault();
+    glContextLostGlobal = true;
+    contextLostCount++;
+    if (contextLostCount <= 3) {
+      console.warn('WebGL context lost — falling back to CPU rendering');
+    }
+  };
+
+  const handleContextRestored = () => {
+    glContextLostGlobal = false;
+    onRestoreCallback();
+  };
+
+  canvas.addEventListener('webglcontextlost', handleContextLost, false);
+  canvas.addEventListener('webglcontextrestored', handleContextRestored, false);
+
+  return () => {
+    canvas.removeEventListener('webglcontextlost', handleContextLost);
+    canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+  };
 }

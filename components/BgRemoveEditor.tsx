@@ -13,7 +13,7 @@ import {
 import { Eraser, RotateCcw, Undo2, Check, X, Loader } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
-import { glBuildMask, glOverlayComposite, glCheckerAlphaMask, glApplyAlphaMask, isWebGL2Available } from '@/lib/glRenderer';
+import { glBuildMask, glOverlayComposite, glCheckerAlphaMask, glApplyAlphaMask, isWebGL2Available, attachWebGLContextLossHandler, isGLContextLostGlobally } from '@/lib/glRenderer';
 
 type BrushMode = 'erase' | 'restore';
 
@@ -54,6 +54,7 @@ export function BgRemoveEditor({
   const undoStackRef = useRef<ImageData[]>([]);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const isDrawingRef = useRef(false);
+  const glLossCleanupRef = useRef<(() => void) | null>(null);
 
   // Compute display dimensions to fit screen while preserving aspect ratio
   useEffect(() => {
@@ -71,6 +72,10 @@ export function BgRemoveEditor({
   useEffect(() => {
     if (visible) return;
     if (Platform.OS !== 'web') return;
+    if (glLossCleanupRef.current) {
+      glLossCleanupRef.current();
+      glLossCleanupRef.current = null;
+    }
     [canvasRef, maskCanvasRef, overlayCanvasRef, checkerCanvasRef].forEach((r) => {
       if (r.current) {
         r.current.width = 0;
@@ -166,7 +171,7 @@ export function BgRemoveEditor({
     // GPU path: composite red overlay onto removed areas via a shader,
     // then draw checker only behind removed areas via a GPU alpha mask.
     // Falls back to the original CPU pixel loops if WebGL2 is unavailable.
-    if (isWebGL2Available()) {
+    if (isWebGL2Available() && !isGLContextLostGlobally()) {
       const overlayResult = glOverlayComposite(
         canvasRef.current, maskCanvas, imageWidth, imageHeight,
         [220 / 255, 50 / 255, 50 / 255], 140 / 255,
@@ -550,6 +555,10 @@ export function BgRemoveEditor({
                     el.width = displaySize.w;
                     el.height = displaySize.h;
                     displayCanvasRef.current = el;
+                    if (glLossCleanupRef.current) {
+                      glLossCleanupRef.current();
+                    }
+                    glLossCleanupRef.current = attachWebGLContextLossHandler(el, renderDisplay);
                     renderDisplay();
                   }
                 }}
