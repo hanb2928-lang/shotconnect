@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { Platform, AppState, type AppStateStatus } from 'react-native';
 import { supabaseUrl } from '@/lib/supabase';
 
 export type NetworkStatus = 'online' | 'offline' | 'unknown';
@@ -9,6 +9,7 @@ let initialized = false;
 const listeners = new Set<(status: NetworkStatus) => void>();
 let probeTimer: ReturnType<typeof setInterval> | null = null;
 let probing = false;
+let activeProbeController: AbortController | null = null;
 
 const PROBE_INTERVAL_MS = 15000;
 const PROBE_TIMEOUT_MS = 8000;
@@ -25,8 +26,18 @@ function notify(status: NetworkStatus) {
 const onlineHandler = () => notify('online');
 const offlineHandler = () => notify('offline');
 
+function abortActiveProbe() {
+  if (activeProbeController) {
+    activeProbeController.abort();
+    activeProbeController = null;
+  }
+  probing = false;
+}
+
 async function probeConnectivity(): Promise<boolean> {
+  abortActiveProbe();
   const controller = new AbortController();
+  activeProbeController = controller;
   const timeoutId = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
     const res = await fetch(`${supabaseUrl}/functions/v1/analyze-photo`, {
@@ -38,6 +49,10 @@ async function probeConnectivity(): Promise<boolean> {
   } catch {
     clearTimeout(timeoutId);
     return false;
+  } finally {
+    if (activeProbeController === controller) {
+      activeProbeController = null;
+    }
   }
 }
 
@@ -60,6 +75,15 @@ function stopProbing() {
     clearInterval(probeTimer);
     probeTimer = null;
   }
+  abortActiveProbe();
+}
+
+function handleAppStateChange(nextState: AppStateStatus) {
+  if (nextState === 'background' || nextState === 'inactive') {
+    stopProbing();
+  } else if (nextState === 'active') {
+    startProbing();
+  }
 }
 
 function init() {
@@ -74,6 +98,8 @@ function init() {
       window.addEventListener('online', onlineHandler);
       window.addEventListener('offline', offlineHandler);
     }
+  } else {
+    AppState.addEventListener('change', handleAppStateChange);
   }
   startProbing();
 }
