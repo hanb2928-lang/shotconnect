@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform } from 'r
 import { Star, Save, RotateCcw, MessageSquare, Check, Sparkles, Loader as Loader2 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { REVIEW_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 import { friendlyError } from '@/lib/errors';
 import type { CustomReview } from '@/types/database';
 
@@ -80,14 +81,14 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
     setGenError(false);
     setReviewIsFallback(false);
     try {
-      const response = await fetch(REVIEW_FUNCTION_URL, {
+      const response = await safeFetch(REVIEW_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${supabaseAnonKey}`,
-          apikey: supabaseAnonKey,
         },
         body: JSON.stringify({ ...productData, brandPersona: brandPersona || undefined }),
+        timeoutMs: 30000,
       });
       if (!response.ok) throw new Error('generation failed');
       const data = await response.json();

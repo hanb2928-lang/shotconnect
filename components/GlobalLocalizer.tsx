@@ -11,6 +11,7 @@ import {
 import { Globe, Zap, CircleAlert as AlertCircle, Volume2, Check, ShoppingBag, ChevronDown, ChevronUp, Info, Play, Pause, Copy, Globe as Globe2, Sparkles, ShieldCheck, Download } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { LOCALIZE_FUNCTION_URL, TTS_FUNCTION_URL, BATCH_TTS_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 import { TARGET_LANGUAGES } from '@/lib/globalAffiliate';
 import { getMultilingualVoice } from '@/lib/ttsVoices';
 import { getLocalizedDisclosure } from '@/lib/disclosure';
@@ -113,9 +114,7 @@ export function GlobalLocalizer({
     setLocalizations([]);
     setTtsResults({});
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-      const response = await fetch(LOCALIZE_FUNCTION_URL, {
+      const response = await safeFetch(LOCALIZE_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -132,9 +131,8 @@ export function GlobalLocalizer({
           targetLanguages: selectedLangs,
           affiliateUrl,
         }),
-        signal: controller.signal,
+        timeoutMs: 30000,
       });
-      clearTimeout(timeoutId);
       if (response.ok) {
         const data = await response.json();
         if (data.localizations && Array.isArray(data.localizations)) {
@@ -185,18 +183,15 @@ export function GlobalLocalizer({
       const multilingualVoice = getMultilingualVoice(langCode);
       const ttsVoice = multilingualVoice?.openaiVoice || voice;
       const instructions = multilingualVoice?.instructions;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-      const response = await fetch(TTS_FUNCTION_URL, {
+      const response = await safeFetch(TTS_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0, instructions }),
-        signal: controller.signal,
+        timeoutMs: 15000,
       });
-      clearTimeout(timeoutId);
       if (response.ok) {
         const data = await response.json();
         if (data.audioBase64) {
@@ -225,18 +220,15 @@ export function GlobalLocalizer({
         };
       }).filter(item => item.text);
       if (items.length === 0) { setBatchTtsLoading(false); return; }
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
-      const response = await fetch(BATCH_TTS_FUNCTION_URL, {
+      const response = await safeFetch(BATCH_TTS_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({ items }),
-        signal: controller.signal,
+        timeoutMs: 60000,
       });
-      clearTimeout(timeoutId);
       if (response.ok) {
         const data = await response.json();
         if (data.results && Array.isArray(data.results)) {

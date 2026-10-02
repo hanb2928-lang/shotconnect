@@ -11,6 +11,7 @@ import { Music2, Clapperboard, Type, Zap, Copy, Check, ChevronDown, ChevronUp, T
 import { theme } from '@/lib/theme';
 import { friendlyError } from '@/lib/errors';
 import { TREND_MATCH_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 import * as Clipboard from 'expo-clipboard';
 import { useMountedRef } from '@/hooks/useMountedRef';
 
@@ -77,15 +78,15 @@ export function TrendMatchCard({ productCategory, productName, platform, onApply
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
     try {
-      const resp = await fetch(TREND_MATCH_URL, {
+      const resp = await safeFetch(TREND_MATCH_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${supabaseAnonKey}`,
-          apikey: supabaseAnonKey,
         },
         body: JSON.stringify({ productCategory, productName, platform }),
-        signal: controller.signal,
+        timeoutMs: 15000,
+        retries: 2,
       });
       if (!mounted.current) return;
       if (!resp.ok) {

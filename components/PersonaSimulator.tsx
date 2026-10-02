@@ -11,6 +11,7 @@ import { Users, Zap, MessageCircle, ShoppingCart, TrendingUp, CircleAlert as Ale
 import { theme } from '@/lib/theme';
 import { friendlyError } from '@/lib/errors';
 import { PERSONA_SIMULATOR_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 import { useMountedRef } from '@/hooks/useMountedRef';
 
 interface PersonaReaction {
@@ -60,9 +61,7 @@ export function PersonaSimulator({
     setError(null);
     setSimulation(null);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-      const response = await fetch(PERSONA_SIMULATOR_URL, {
+      const response = await safeFetch(PERSONA_SIMULATOR_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -76,9 +75,8 @@ export function PersonaSimulator({
           productAdvantages,
           hook,
         }),
-        signal: controller.signal,
+        timeoutMs: 30000,
       });
-      clearTimeout(timeoutId);
       if (!mounted.current) return;
       if (!response.ok) throw new Error('시뮬레이션 실패');
       const data = await response.json();

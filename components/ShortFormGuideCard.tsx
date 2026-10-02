@@ -11,6 +11,7 @@ import { Lightbulb, Zap, Wand as Wand2, Check, ChevronDown, ChevronUp } from 'lu
 import { theme } from '@/lib/theme';
 import { friendlyError } from '@/lib/errors';
 import { SHORTFORM_GUIDE_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 import { useMountedRef } from '@/hooks/useMountedRef';
 
 export interface GuideTip {
@@ -58,14 +59,13 @@ export function ShortFormGuideCard({
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch(
+      const resp = await safeFetch(
         SHORTFORM_GUIDE_URL,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${supabaseAnonKey}`,
-            apikey: supabaseAnonKey,
           },
           body: JSON.stringify({
             productName,
@@ -74,6 +74,7 @@ export function ShortFormGuideCard({
             oneLiner,
             productAdvantages,
           }),
+          timeoutMs: 30000,
         },
       );
       if (!mounted.current) return;

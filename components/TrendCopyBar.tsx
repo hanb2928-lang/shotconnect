@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import { Flame, Zap, Check, ChevronDown, ChevronUp, TrendingUp } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { TREND_COPY_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 import * as Clipboard from 'expo-clipboard';
 import type { PlatformKey } from '@/types/database';
 
@@ -40,12 +41,12 @@ export function TrendCopyBar({ productName, productCategory, tags, platform, onA
       if (tags.length > 0) params.set('tags', tags.join(','));
       if (platform) params.set('platform', platform);
 
-      const resp = await fetch(`${TREND_COPY_FUNCTION_URL}?${params.toString()}`, {
+      const resp = await safeFetch(`${TREND_COPY_FUNCTION_URL}?${params.toString()}`, {
         headers: {
           Authorization: `Bearer ${supabaseAnonKey}`,
-          apikey: supabaseAnonKey,
           'Content-Type': 'application/json',
         },
+        timeoutMs: 15000,
       });
       if (resp.ok) {
         const data = await resp.json();

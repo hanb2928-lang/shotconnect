@@ -9,6 +9,7 @@ import {
 import { TrendingUp, Zap, Sparkles, CircleAlert as AlertCircle, ChevronDown, ChevronUp, Lightbulb, Info } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { VIRAL_PREDICT_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 import { useMountedRef } from '@/hooks/useMountedRef';
 
 interface ViralFactor {
@@ -70,9 +71,7 @@ export function ViralPredictor({
     setError(null);
     setPrediction(null);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
-      const response = await fetch(VIRAL_PREDICT_FUNCTION_URL, {
+      const response = await safeFetch(VIRAL_PREDICT_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -90,9 +89,8 @@ export function ViralPredictor({
           episodeMode,
           trendingKeywords,
         }),
-        signal: controller.signal,
+        timeoutMs: 20000,
       });
-      clearTimeout(timeoutId);
       if (!mounted.current) return;
       if (response.ok) {
         const data = await response.json();
