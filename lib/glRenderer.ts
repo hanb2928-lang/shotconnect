@@ -104,9 +104,24 @@ void main() {
 }`;
 
 let quadBuffer: WebGLBuffer | null = null;
+let contextLostCount = 0;
+
+/**
+ * Check whether a WebGL2 context has been lost and cannot be used.
+ * Returns true if the context is lost or in an unrecoverable state.
+ */
+function isGLContextLost(gl: WebGL2RenderingContext): boolean {
+  try {
+    return typeof gl.isContextLost === 'function' && gl.isContextLost();
+  } catch {
+    return true;
+  }
+}
 
 function compileShader(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
+  if (isGLContextLost(gl)) throw new Error('WebGL context lost before shader compile');
   const shader = gl.createShader(type)!;
+  if (!shader) throw new Error('WebGL context lost: createShader returned null');
   gl.shaderSource(shader, src);
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
@@ -120,7 +135,8 @@ function compileShader(gl: WebGL2RenderingContext, type: number, src: string): W
 function createProgram(gl: WebGL2RenderingContext, fragSrc: string): WebGLProgram {
   const vert = compileShader(gl, gl.VERTEX_SHADER, VERT_SRC);
   const frag = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
-  const program = gl.createProgram()!;
+  const program = gl.createProgram();
+  if (!program) throw new Error('WebGL context lost: createProgram returned null');
   gl.attachShader(program, vert);
   gl.attachShader(program, frag);
   gl.linkProgram(program);
@@ -134,14 +150,18 @@ function createProgram(gl: WebGL2RenderingContext, fragSrc: string): WebGLProgra
 
 function ensureQuad(gl: WebGL2RenderingContext): WebGLBuffer {
   if (quadBuffer) return quadBuffer;
-  quadBuffer = gl.createBuffer()!;
+  if (isGLContextLost(gl)) throw new Error('WebGL context lost before buffer creation');
+  quadBuffer = gl.createBuffer();
+  if (!quadBuffer) throw new Error('WebGL context lost: createBuffer returned null');
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
   return quadBuffer;
 }
 
 function createTexture(gl: WebGL2RenderingContext, source: TexImageSource, w: number, h: number): WebGLTexture {
-  const tex = gl.createTexture()!;
+  if (isGLContextLost(gl)) throw new Error('WebGL context lost before texture creation');
+  const tex = gl.createTexture();
+  if (!tex) throw new Error('WebGL context lost: createTexture returned null');
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -164,17 +184,29 @@ function drawQuad(gl: WebGL2RenderingContext, program: WebGLProgram) {
 
 function getGLCanvas(w: number, h: number): GLContext | null {
   if (Platform.OS !== 'web') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const gl = canvas.getContext('webgl2', { premultipliedAlpha: false, preserveDrawingBuffer: true });
-  if (!gl) return null;
-  return { gl, canvas };
+  if (typeof document === 'undefined') return null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const gl = canvas.getContext('webgl2', { premultipliedAlpha: false, preserveDrawingBuffer: true });
+    if (!gl) return null;
+    // Immediately check for context loss — the driver may have crashed
+    // between creating the context and our first use of it.
+    if (isGLContextLost(gl)) {
+      try { const ext = gl.getExtension('WEBGL_lose_context'); ext?.loseContext(); } catch {}
+      return null;
+    }
+    return { gl, canvas };
+  } catch {
+    return null;
+  }
 }
 
 const programCache = new WeakMap<WebGL2RenderingContext, Map<string, WebGLProgram>>();
 
 function getProgram(gl: WebGL2RenderingContext, key: string, fragSrc: string): WebGLProgram {
+  if (isGLContextLost(gl)) throw new Error('WebGL context lost before program creation');
   let cache = programCache.get(gl);
   if (!cache) {
     cache = new Map();
@@ -189,6 +221,71 @@ function getProgram(gl: WebGL2RenderingContext, key: string, fragSrc: string): W
 }
 
 /**
+ * Result type for safeGLRender — either a valid canvas or null to signal
+ * the caller to fall back to the CPU path.
+ */
+type GLRenderResult = { canvas: HTMLCanvasElement } | null;
+
+/**
+ * Wrap a GL operation with full context-loss resilience.
+ *
+ * If the WebGL context is lost before, during, or after the operation,
+ * this catches the failure and returns null so the caller falls back
+ * to the CPU code path. After a context-loss event, the program cache
+ * for that context is invalidated (the context is dead anyway).
+ */
+function safeGLRender(
+  ctx: GLContext | null,
+  fn: (gl: WebGL2RenderingContext, canvas: HTMLCanvasElement) => void,
+): GLRenderResult {
+  if (!ctx) return null;
+  const { gl, canvas } = ctx;
+
+  // Pre-flight: context already lost
+  if (isGLContextLost(gl)) {
+    invalidateContext(gl);
+    return null;
+  }
+
+  try {
+    fn(gl, canvas);
+
+    // Post-flight: context lost during the operation
+    if (isGLContextLost(gl)) {
+      invalidateContext(gl);
+      return null;
+    }
+
+    return { canvas };
+  } catch (err) {
+    // Context loss manifests as exceptions from GL calls, or null returns
+    // from createTexture/createShader/etc. Invalidate and fall back.
+    invalidateContext(gl);
+    contextLostCount++;
+    if (contextLostCount <= 3) {
+      console.warn('WebGL context lost, falling back to CPU path:', err);
+    }
+    return null;
+  }
+}
+
+/**
+ * Invalidate all cached programs for a dead context and attempt to
+ * force-release resources. The context itself will be garbage-collected
+ * when the canvas is dereferenced.
+ */
+function invalidateContext(gl: WebGL2RenderingContext): void {
+  const cache = programCache.get(gl);
+  if (cache) {
+    for (const program of cache.values()) {
+      try { gl.deleteProgram(program); } catch {}
+    }
+    cache.clear();
+    programCache.delete(gl);
+  }
+}
+
+/**
  * Build a mask texture from an image's alpha channel on the GPU.
  * Pixels with alpha >= threshold become white (keep), others black (remove).
  * Returns a canvas with the mask, or null if WebGL2 is unavailable.
@@ -200,21 +297,18 @@ export function glBuildMask(
   threshold = 0.5,
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
-  if (!ctx) return null;
-  const { gl, canvas } = ctx;
+  return safeGLRender(ctx, (gl, canvas) => {
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
-  gl.viewport(0, 0, width, height);
-  gl.clearColor(0, 0, 0, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
-  const program = getProgram(gl, 'mask', MASK_THRESHOLD_FRAG);
-  const tex = createTexture(gl, imageCanvas, width, height);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_threshold'), threshold);
-  drawQuad(gl, program);
-  gl.deleteTexture(tex);
-
-  return canvas;
+    const program = getProgram(gl, 'mask', MASK_THRESHOLD_FRAG);
+    const tex = createTexture(gl, imageCanvas, width, height);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_threshold'), threshold);
+    drawQuad(gl, program);
+    gl.deleteTexture(tex);
+  })?.canvas ?? null;
 }
 
 /**
@@ -230,28 +324,25 @@ export function glOverlayComposite(
   overlayAlpha: number,
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
-  if (!ctx) return null;
-  const { gl, canvas } = ctx;
+  return safeGLRender(ctx, (gl, canvas) => {
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-  gl.viewport(0, 0, width, height);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-  const program = getProgram(gl, 'overlay', OVERLAY_FRAG);
-  const imgTex = createTexture(gl, imageCanvas, width, height);
-  gl.activeTexture(gl.TEXTURE1);
-  const maskTex = createTexture(gl, maskCanvas, width, height);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 1);
-  gl.uniform3f(gl.getUniformLocation(program, 'u_overlayColor'), ...overlayColor);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_overlayAlpha'), overlayAlpha);
-  drawQuad(gl, program);
-  gl.deleteTexture(imgTex);
-  gl.deleteTexture(maskTex);
-
-  return canvas;
+    const program = getProgram(gl, 'overlay', OVERLAY_FRAG);
+    const imgTex = createTexture(gl, imageCanvas, width, height);
+    gl.activeTexture(gl.TEXTURE1);
+    const maskTex = createTexture(gl, maskCanvas, width, height);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 1);
+    gl.uniform3f(gl.getUniformLocation(program, 'u_overlayColor'), ...overlayColor);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_overlayAlpha'), overlayAlpha);
+    drawQuad(gl, program);
+    gl.deleteTexture(imgTex);
+    gl.deleteTexture(maskTex);
+  })?.canvas ?? null;
 }
 
 /**
@@ -265,24 +356,21 @@ export function glApplyAlphaMask(
   height: number,
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
-  if (!ctx) return null;
-  const { gl, canvas } = ctx;
+  return safeGLRender(ctx, (gl, canvas) => {
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
-  gl.viewport(0, 0, width, height);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
-  const program = getProgram(gl, 'alpha', ALPHA_APPLY_FRAG);
-  const imgTex = createTexture(gl, imageCanvas, width, height);
-  gl.activeTexture(gl.TEXTURE1);
-  const maskTex = createTexture(gl, maskCanvas, width, height);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 1);
-  drawQuad(gl, program);
-  gl.deleteTexture(imgTex);
-  gl.deleteTexture(maskTex);
-
-  return canvas;
+    const program = getProgram(gl, 'alpha', ALPHA_APPLY_FRAG);
+    const imgTex = createTexture(gl, imageCanvas, width, height);
+    gl.activeTexture(gl.TEXTURE1);
+    const maskTex = createTexture(gl, maskCanvas, width, height);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 1);
+    drawQuad(gl, program);
+    gl.deleteTexture(imgTex);
+    gl.deleteTexture(maskTex);
+  })?.canvas ?? null;
 }
 
 /**
@@ -295,20 +383,17 @@ export function glCheckerAlphaMask(
   height: number,
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
-  if (!ctx) return null;
-  const { gl, canvas } = ctx;
+  return safeGLRender(ctx, (gl, canvas) => {
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
-  gl.viewport(0, 0, width, height);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
-  const program = getProgram(gl, 'checkerAlpha', CHECKER_ALPHA_FRAG);
-  const maskTex = createTexture(gl, maskCanvas, width, height);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 0);
-  drawQuad(gl, program);
-  gl.deleteTexture(maskTex);
-
-  return canvas;
+    const program = getProgram(gl, 'checkerAlpha', CHECKER_ALPHA_FRAG);
+    const maskTex = createTexture(gl, maskCanvas, width, height);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 0);
+    drawQuad(gl, program);
+    gl.deleteTexture(maskTex);
+  })?.canvas ?? null;
 }
 
 /**
@@ -324,23 +409,20 @@ export function glColorFilter(
   brightnessShift: number,
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
-  if (!ctx) return null;
-  const { gl, canvas } = ctx;
+  return safeGLRender(ctx, (gl, canvas) => {
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
-  gl.viewport(0, 0, width, height);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
-  const program = getProgram(gl, 'colorFilter', COLOR_FILTER_FRAG);
-  const tex = createTexture(gl, imageCanvas, width, height);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_hueShift'), hueShift);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_satShift'), satShift);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_brightnessShift'), brightnessShift);
-  drawQuad(gl, program);
-  gl.deleteTexture(tex);
-
-  return canvas;
+    const program = getProgram(gl, 'colorFilter', COLOR_FILTER_FRAG);
+    const tex = createTexture(gl, imageCanvas, width, height);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_hueShift'), hueShift);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_satShift'), satShift);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_brightnessShift'), brightnessShift);
+    drawQuad(gl, program);
+    gl.deleteTexture(tex);
+  })?.canvas ?? null;
 }
 
 /**
@@ -351,7 +433,14 @@ export function isWebGL2Available(): boolean {
   if (typeof document === 'undefined') return false;
   try {
     const test = document.createElement('canvas');
-    return !!test.getContext('webgl2');
+    const gl = test.getContext('webgl2');
+    if (!gl) return false;
+    // Context may be lost globally (e.g. too many contexts open)
+    if (isGLContextLost(gl)) return false;
+    // Release the test context immediately
+    const loseExt = gl.getExtension('WEBGL_lose_context');
+    loseExt?.loseContext();
+    return true;
   } catch {
     return false;
   }
