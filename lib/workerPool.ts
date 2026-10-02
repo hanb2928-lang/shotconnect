@@ -35,6 +35,7 @@ type PendingTask = {
 
 const MAX_POOL_SIZE = 3;
 let pool: Worker[] = [];
+let workerBlobUrls: string[] = [];
 let taskQueue: { request: WorkerTaskRequest; transferables?: Transferable[] }[] = [];
 let pending = new Map<number, PendingTask>();
 let taskIdCounter = 0;
@@ -233,6 +234,7 @@ function createWorkerFromSource(source: string): Worker | null {
     const blob = new Blob([source], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
     const worker = new Worker(url);
+    workerBlobUrls.push(url);
     worker.onmessage = handleWorkerMessage;
     worker.onerror = (err) => {
       console.warn('Worker pool error:', err.message);
@@ -464,11 +466,17 @@ export async function sampleLuminanceInWorker(
 }
 
 /**
- * Terminate all workers and clean up. Primarily for testing.
+ * Terminate all workers and revoke their Blob URLs. Each worker
+ * is backed by a Blob URL that must be explicitly revoked — otherwise
+ * the browser keeps the worker source in memory indefinitely.
  */
 export function terminateWorkerPool(): void {
   pool.forEach((w) => w.terminate());
   pool = [];
+  workerBlobUrls.forEach((url) => {
+    try { URL.revokeObjectURL(url); } catch {}
+  });
+  workerBlobUrls = [];
   pending.clear();
   taskQueue = [];
   initialized = false;
