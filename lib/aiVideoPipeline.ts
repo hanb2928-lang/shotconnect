@@ -75,6 +75,7 @@ const POLL_MIN_INTERVAL_MS = 2000;
 const POLL_MAX_INTERVAL_MS = 12000;
 const POLL_BACKOFF_FACTOR = 1.5;
 const CHANNEL_RECONNECT_DELAY_MS = 3000;
+const JITTER = () => 0.8 + Math.random() * 0.4;
 const CHANNEL_MAX_RECONNECT_ATTEMPTS = 5;
 
 enum ChannelHealth {
@@ -561,7 +562,7 @@ function waitForVideoCompletion(
     const scheduleReconnect = () => {
       if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts);
+      const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts) * JITTER();
       reconnectAttempts++;
       report('generating', 0.12, `실시간 연결이 불안정합니다. 재연결 시도 중 (${reconnectAttempts}/${CHANNEL_MAX_RECONNECT_ATTEMPTS})...`);
       reconnectTimer = setTimeout(() => {

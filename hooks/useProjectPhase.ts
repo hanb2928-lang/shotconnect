@@ -15,7 +15,7 @@ interface VideoJobRow {
 export function useProjectPhase(jobId: string | null) {
   const [step, setStep] = useState<ProjectStep>('idle');
   const [data, setData] = useState<VideoJobRow | null>(null);
-  const channelRef = useRef<ReturnType<ReturnType<typeof supabase.channel>['subscribe']> | null>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -77,7 +77,7 @@ export function useProjectPhase(jobId: string | null) {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
       if (channelRef.current) {
-        channelRef.current.unsubscribe();
+        try { supabase.removeChannel(channelRef.current); } catch { /* ignore */ }
         channelRef.current = null;
       }
     };

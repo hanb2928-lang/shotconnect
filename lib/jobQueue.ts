@@ -173,7 +173,7 @@ export async function waitForJob<T = Record<string, unknown>>(
           },
         )
         .subscribe((status) => {
-          if (status === 'CHANNEL_ERROR' && !settled) {
+          if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && !settled) {
             if (channel) {
               try { supabase.removeChannel(channel); } catch { /* channel already closed */ }
               channel = undefined;
@@ -182,7 +182,7 @@ export async function waitForJob<T = Record<string, unknown>>(
             if (channelRetryCount > MAX_WAIT_CHANNEL_RETRIES) {
               finish({ success: false, error: '실시간 연결이 끊겼습니다. 네트워크를 확인해주세요.' });
             } else {
-              setTimeout(connectChannel, 3000);
+              setTimeout(connectChannel, 3000 * (0.8 + Math.random() * 0.4));
             }
           }
         });
@@ -225,6 +225,7 @@ export async function waitForJob<T = Record<string, unknown>>(
 
 const MAX_CHANNEL_RETRIES = 5;
 const CHANNEL_RETRY_DELAY_MS = 3000;
+const JITTER = () => 0.8 + Math.random() * 0.4;
 
 export function subscribeToJob(
   jobId: string,
@@ -245,6 +246,7 @@ export function subscribeToJob(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'render_jobs', filter: `id=eq.${jobId}` },
         (payload) => {
+          if (disposed) return;
           if (payload.new) {
             retryCount = 0;
             onUpdate(payload.new as RenderJob);
@@ -253,7 +255,7 @@ export function subscribeToJob(
       )
       .subscribe((status) => {
         if (disposed) return;
-        if (status === 'CHANNEL_ERROR') {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           if (currentChannel) {
             try { supabase.removeChannel(currentChannel); } catch { /* channel already closed */ }
             currentChannel = null;
@@ -262,7 +264,7 @@ export function subscribeToJob(
           if (retryCount > MAX_CHANNEL_RETRIES) {
             if (onError) onError();
           } else {
-            retryTimer = setTimeout(connect, CHANNEL_RETRY_DELAY_MS);
+            retryTimer = setTimeout(connect, CHANNEL_RETRY_DELAY_MS * JITTER());
           }
         }
       });

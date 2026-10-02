@@ -54,8 +54,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // Use processedText (with silence markers) if provided, otherwise raw text
-    const rawText = body.text.slice(0, 800);
-    const text = (body.processedText?.trim() || rawText).slice(0, 800);
+    const rawText = safeSlice(body.text, 800);
+    const text = safeSlice(body.processedText?.trim() || rawText, 800);
     const voice = body.voice || "alloy";
     const baseSpeed = Math.min(Math.max(body.speed || 1.0, 0.5), 2.0);
 
@@ -220,6 +220,15 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+function safeSlice(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let cut = s.slice(0, max);
+  if (cut.charCodeAt(cut.length - 1) >= 0xD800 && cut.charCodeAt(cut.length - 1) <= 0xDBFF) {
+    cut = cut.slice(0, -1);
+  }
+  return cut;
+}
 
 function estimateDuration(text: string, speed: number): number {
   const charsPerSecond = 12 * speed;

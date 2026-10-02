@@ -25,6 +25,7 @@ export function useVideoJobRecovery() {
   const [info, setInfo] = useState<VideoJobRecoveryInfo>(INITIAL);
   const checkingRef = useRef(false);
   const mountedRef = useRef(true);
+  const dismissedJobIdRef = useRef<string | null>(null);
 
   const safeSetInfo = useCallback((updater: VideoJobRecoveryInfo | ((prev: VideoJobRecoveryInfo) => VideoJobRecoveryInfo)) => {
     if (mountedRef.current) setInfo(updater);
@@ -95,12 +96,14 @@ export function useVideoJobRecovery() {
   const runRecovery = useCallback(async () => {
     const activeJob = await getActiveVideoJob();
     if (!activeJob || !activeJob.jobId) return;
+    if (dismissedJobIdRef.current === activeJob.jobId) return;
     await checkJob(activeJob.jobId);
   }, [checkJob]);
 
   const dismiss = useCallback(() => {
+    if (info.jobId) dismissedJobIdRef.current = info.jobId;
     setInfo(INITIAL);
-  }, []);
+  }, [info.jobId]);
 
   useEffect(() => {
     mountedRef.current = true;

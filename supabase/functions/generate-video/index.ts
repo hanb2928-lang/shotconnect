@@ -1172,7 +1172,7 @@ async function submitRunwayTask(
     const endpoint = hasImage ? "image_to_video" : "text_to_video";
     const model = "gen4.5";
     const ratioValue = ratioMap[aspectRatio] ?? "720:1280";
-    const safePrompt = prompt.trim().slice(0, 1000);
+    const safePrompt = safeSlice(prompt.trim(), 1000);
 
     const payload: Record<string, unknown> = {
       model,
@@ -1421,7 +1421,7 @@ function buildAutoPrompt(
   }
 
   if (captionText && captionText.trim()) {
-    parts.push(`caption context: "${captionText.slice(0, 100)}"`);
+    parts.push(`caption context: "${safeSlice(captionText, 100)}"`);
   }
 
   parts.push(buildOpeningHookSequenceTag(false, vision));
@@ -1778,13 +1778,13 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   // Prompt strength: 1-10 scale, default 7. Higher = more literal prompt adherence.
   const strength = p.promptStrength ?? 7;
   const strengthTag = strength >= 8 ? "strict prompt adherence, literal interpretation" : strength <= 4 ? "creative interpretation, loose prompt guidance, artistic freedom" : "balanced prompt adherence";
-  const userDirective = p.userPrompt.trim().replace(/\s+/g, " ").slice(0, 600);
+  const userDirective = safeSlice(p.userPrompt.trim().replace(/\s+/g, " "), 600);
   const userDirectiveTag = userDirective
     ? `USER DIRECTIVE — follow this visual instruction: "${userDirective}"`
     : "";
 
   // Negative prompt: user-specified elements to exclude
-  const negTag = p.negativePrompt && p.negativePrompt.trim() ? `neg=[${p.negativePrompt.trim().slice(0, 80)}]` : "";
+  const negTag = p.negativePrompt && p.negativePrompt.trim() ? `neg=[${safeSlice(p.negativePrompt.trim(), 80)}]` : "";
 
   // Background style
   const bgTag = p.bgStyle && BG_STYLE_MAP[p.bgStyle] ? `bg=${BG_STYLE_MAP[p.bgStyle]}` : "";
@@ -1857,7 +1857,7 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
     tokens.push("no text, no captions, no hooks, no CTA, pure luxury product cinematography, top-tier quality");
     tokens.push(`tier=${p.qualityTier}, res=${p.resolution}, fps=${p.fps}`);
     if (negTag) tokens.push(negTag);
-    return tokens.join(" ").slice(0, 1000);
+    return safeSlice(tokens.join(" "), 1000);
   }
 
   const style = PLATFORM_STYLE[p.platform] ?? PLATFORM_STYLE.shorts;
@@ -1895,7 +1895,7 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   }
 
   if (p.captionText && p.captionText.trim()) {
-    tokens.push(`ctx="${p.captionText.slice(0, 40)}"`);
+    tokens.push(`ctx="${safeSlice(p.captionText, 40)}"`);
   }
 
   if (bgTag) tokens.push(bgTag);
@@ -1922,7 +1922,7 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   tokens.push("3phase:hook→contrast→cta, raw unboxing vibe, smartphone aesthetic, no polished production");
   tokens.push(`tier=${p.qualityTier}, res=${p.resolution}, fps=${p.fps}`);
 
-  return tokens.join(" ").slice(0, 1000);
+  return safeSlice(tokens.join(" "), 1000);
 }
 
 function parseRunwayError(errText: string): string {
@@ -2050,6 +2050,15 @@ async function sendVideoCompletePush(scanId: string): Promise<void> {
   } catch {
     // non-fatal — push is best-effort
   }
+}
+
+function safeSlice(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let cut = s.slice(0, max);
+  if (cut.charCodeAt(cut.length - 1) >= 0xD800 && cut.charCodeAt(cut.length - 1) <= 0xDBFF) {
+    cut = cut.slice(0, -1);
+  }
+  return cut;
 }
 
 function delay(ms: number): Promise<void> {

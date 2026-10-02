@@ -196,8 +196,8 @@ Deno.serve(async (req: Request) => {
       })(),
       count: Math.min(Math.max(Number(raw?.count) || 3, 1), 5),
       localStoreInfo: raw?.localStoreInfo ?? null,
-      brandPersona: raw?.brandPersona ? String(raw.brandPersona).slice(0, 1000) : null,
-      contentTone: raw?.contentTone ? String(raw.contentTone).slice(0, 50) : null,
+      brandPersona: raw?.brandPersona ? safeSlice(String(raw.brandPersona), 1000) : null,
+      contentTone: raw?.contentTone ? safeSlice(String(raw.contentTone), 50) : null,
     };
 
     if (!body.productName) {
@@ -422,6 +422,15 @@ async function resolveOpenAIKey(): Promise<string | null> {
   return null;
 }
 
+function safeSlice(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let cut = s.slice(0, max);
+  if (cut.charCodeAt(cut.length - 1) >= 0xD800 && cut.charCodeAt(cut.length - 1) <= 0xDBFF) {
+    cut = cut.slice(0, -1);
+  }
+  return cut;
+}
+
 function typeLabel(copyType: CopyType): string {
   if (copyType === "deal") return "파격할인형 (할인/한정/가치 강조)";
   if (copyType === "info") return "정보형 (꿀팁/비교/리뷰 형식)";
@@ -577,8 +586,8 @@ async function generateWithOpenAI(
   const rawCopies = Array.isArray(parsed.copies) ? parsed.copies : [];
 
   return rawCopies.slice(0, count).map((c: any) => ({
-    hook: String(c.hook || "").slice(0, 80),
-    caption: String(c.caption || "").slice(0, 500),
+    hook: safeSlice(String(c.hook || ""), 80),
+    caption: safeSlice(String(c.caption || ""), 500),
     hashtags: Array.isArray(c.hashtags)
       ? c.hashtags.map((h: any) => String(h).replace(/^#/, "")).slice(0, 15)
       : [],

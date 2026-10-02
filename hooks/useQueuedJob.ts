@@ -25,6 +25,7 @@ export function useQueuedJob() {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onlineCleanupRef = useRef<(() => void) | null>(null);
   const submitIdRef = useRef(0);
+  const mountedRef = useRef(true);
 
   const clearAll = useCallback(() => {
     if (subRef.current) {
@@ -68,7 +69,7 @@ export function useQueuedJob() {
       return '';
     }
 
-    if (mySubmitId !== submitIdRef.current) return jobId;
+    if (mySubmitId !== submitIdRef.current || !mountedRef.current) return jobId;
 
     setState((prev) => ({ ...prev, jobId }));
 
@@ -214,7 +215,9 @@ export function useQueuedJob() {
   }, [clearAll]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       submitIdRef.current++;
       clearAll();
     };

@@ -17,6 +17,7 @@ const POLL_INTERVAL_MS = 5000;
 const TIMEOUT_MS = 300_000;
 const MAX_CHANNEL_RETRIES = 5;
 const CHANNEL_RETRY_DELAY_MS = 3000;
+const JITTER = () => 0.8 + Math.random() * 0.4;
 
 export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJobRealtimeOptions) {
   const [status, setStatus] = useState<VideoJobStatus>('idle');
@@ -137,7 +138,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
             if (retryCount > MAX_CHANNEL_RETRIES) {
               handleResult('failed', undefined, '실시간 연결이 끊겼습니다. 네트워크를 확인 후 다시 시도해주세요.');
             } else {
-              reconnectTimer = setTimeout(connectChannel, CHANNEL_RETRY_DELAY_MS);
+              reconnectTimer = setTimeout(connectChannel, CHANNEL_RETRY_DELAY_MS * JITTER());
             }
           }
         });

@@ -571,10 +571,18 @@ export default function ResultScreen() {
     applyCombinedPreset(targetPlatform, key);
   }, [targetPlatform, applyCombinedPreset]);
 
+  const userTouchedCaptionRef = useRef(false);
+  const userTouchedTitleRef = useRef(false);
   const handleInlineEdit = useCallback((patch: Partial<InlineEditState>) => {
     setInlineEdit((prev) => ({ ...prev, ...patch }));
     if (patch.aiPrompt !== undefined) {
       userCustomPrompt.current = patch.aiPrompt;
+    }
+    if (patch.captionText !== undefined) {
+      userTouchedCaptionRef.current = true;
+    }
+    if (patch.titleText !== undefined) {
+      userTouchedTitleRef.current = true;
     }
   }, []);
 
@@ -633,10 +641,11 @@ export default function ResultScreen() {
         const result = data as { caption?: string; hook?: string; title?: string };
         if (result.caption) {
           setAutoMarketingCopy(result.caption);
+          userTouchedCaptionRef.current = false;
           setInlineEdit((prev) => ({ ...prev, captionText: result.caption! }));
         }
         if (result.hook) setHookOverride(result.hook);
-        if (result.title) setInlineEdit((prev) => ({ ...prev, titleText: result.title! }));
+        if (result.title) { userTouchedTitleRef.current = false; setInlineEdit((prev) => ({ ...prev, titleText: result.title! })); }
       }
     } catch {
       // copy regeneration failed — keep current content
@@ -1526,39 +1535,65 @@ export default function ResultScreen() {
       }
     };
 
-    const channel = supabase
-      .channel(`bg-video-watch:${scan.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scan.id}` },
-        (payload) => {
-          if (!mountedRef.current || !payload.new) return;
-          const row = payload.new as { status: string; video_url: string | null; hd_status?: string | null; hd_video_url?: string | null };
-          if (row.hd_status === 'SUCCESS' && row.hd_video_url) {
-            setGeneratedVideoUrl(row.hd_video_url);
-            setVideoStage('hd_ready');
-            setIsGeneratingVideo(false);
-            setVideoGenProgress(null);
-            setBgJobNotice(null);
-            autoSaveVideoToAssets(row.hd_video_url);
-          } else if (row.status === 'SUCCESS' && row.video_url) {
-            if (!generatedVideoUrlRef.current) {
-              setGeneratedVideoUrl(row.video_url);
-              setVideoStage('draft_ready');
-              setIsGeneratingVideo(false);
-              setVideoGenProgress(null);
-              setBgJobNotice(null);
-              autoSaveVideoToAssets(row.video_url);
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+
+    const onPayload = (payload: { new: Record<string, unknown> | null }) => {
+      if (!mountedRef.current || !payload.new) return;
+      const row = payload.new as { status: string; video_url: string | null; hd_status?: string | null; hd_video_url?: string | null };
+      if (row.hd_status === 'SUCCESS' && row.hd_video_url) {
+        setGeneratedVideoUrl(row.hd_video_url);
+        setVideoStage('hd_ready');
+        setIsGeneratingVideo(false);
+        setVideoGenProgress(null);
+        setBgJobNotice(null);
+        autoSaveVideoToAssets(row.hd_video_url);
+      } else if (row.status === 'SUCCESS' && row.video_url) {
+        if (!generatedVideoUrlRef.current) {
+          setGeneratedVideoUrl(row.video_url);
+          setVideoStage('draft_ready');
+          setIsGeneratingVideo(false);
+          setVideoGenProgress(null);
+          setBgJobNotice(null);
+          autoSaveVideoToAssets(row.video_url);
+        }
+      }
+    };
+
+    const connectChannel = () => {
+      if (!mountedRef.current) return;
+      channel = supabase
+        .channel(`bg-video-watch:${scan.id}${retryCount > 0 ? `:r${retryCount}` : ''}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scan.id}` },
+          onPayload,
+        )
+        .subscribe((status: string) => {
+          if (!mountedRef.current) return;
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            if (channel) {
+              try { supabase.removeChannel(channel); } catch { /* ignore */ }
+              channel = null;
+            }
+            retryCount++;
+            if (retryCount <= MAX_RETRIES) {
+              reconnectTimer = setTimeout(connectChannel, 3000 * Math.pow(2, Math.min(retryCount - 1, 4)) * (0.8 + Math.random() * 0.4));
             }
           }
-        },
-      )
-      .subscribe();
+        });
+      bgVideoChannelRef.current = channel;
+    };
 
-    bgVideoChannelRef.current = channel;
+    connectChannel();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      }
       bgVideoChannelRef.current = null;
     };
   }, [scan, activePlatform]);
@@ -1669,34 +1704,61 @@ export default function ResultScreen() {
   useEffect(() => {
     if (!scan) return;
     let skipInitial = true;
-    const channel = supabase
-      .channel(`scan-row-watch:${scan.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scan.id}` },
-        () => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+
+    const onPayload = () => {
+      if (!mountedRef.current) return;
+      if (skipInitial) {
+        skipInitial = false;
+        return;
+      }
+      Promise.resolve(
+        supabase
+          .from('scans')
+          .select('*')
+          .eq('id', scan.id)
+          .maybeSingle(),
+      ).then(({ data }) => {
+        if (mountedRef.current && data) {
+          setScan(data as Scan);
+        }
+      }).catch(() => {});
+    };
+
+    const connectChannel = () => {
+      if (!mountedRef.current) return;
+      channel = supabase
+        .channel(`scan-row-watch:${scan.id}${retryCount > 0 ? `:r${retryCount}` : ''}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scan.id}` },
+          onPayload,
+        )
+        .subscribe((status: string) => {
           if (!mountedRef.current) return;
-          if (skipInitial) {
-            skipInitial = false;
-            return;
-          }
-          Promise.resolve(
-            supabase
-              .from('scans')
-              .select('*')
-              .eq('id', scan.id)
-              .maybeSingle(),
-          ).then(({ data }) => {
-            if (mountedRef.current && data) {
-              setScan(data as Scan);
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            if (channel) {
+              try { supabase.removeChannel(channel); } catch { /* ignore */ }
+              channel = null;
             }
-          }).catch(() => {});
-        },
-      )
-      .subscribe();
+            retryCount++;
+            if (retryCount <= MAX_RETRIES) {
+              reconnectTimer = setTimeout(connectChannel, 3000 * Math.pow(2, Math.min(retryCount - 1, 4)) * (0.8 + Math.random() * 0.4));
+            }
+          }
+        });
+    };
+
+    connectChannel();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      }
     };
   }, [scan?.id]);
 
@@ -1998,12 +2060,12 @@ export default function ResultScreen() {
     if (!scan) return;
     const aiCaption = platformVariant?.caption || td?.caption || '';
     const baseCaption = aiCaption || scan?.one_liner || scan?.summary || '';
-    // Only auto-set if user hasn't manually edited AND AI caption is now available
-    const userEdited = inlineEdit.captionText && !autoMarketingCopy && inlineEdit.captionText !== (scan?.one_liner || scan?.summary || '');
-    if (!userEdited && baseCaption) {
+    // Only auto-populate if the user hasn't manually edited the field.
+    // This prevents realtime scan-row updates from clobbering in-progress edits.
+    if (!userTouchedCaptionRef.current && !autoMarketingCopy && baseCaption) {
       setInlineEdit((prev) => ({ ...prev, captionText: baseCaption }));
     }
-    if (!inlineEdit.titleText) {
+    if (!userTouchedTitleRef.current && !inlineEdit.titleText) {
       const baseTitle = sanitizeVideoText(scan.title) || activeProductName || td?.hook || '프리미엄 추천 상품';
       if (baseTitle) setInlineEdit((prev) => ({ ...prev, titleText: baseTitle }));
     }
