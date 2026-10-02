@@ -93,6 +93,35 @@ function hasSurrogateOrControlIssues(text: string): boolean {
 }
 
 /**
+ * Truncate a string without splitting a surrogate pair (4-byte emoji).
+ * If the cut point lands on a high surrogate (D800–DBFF), backs up one
+ * code unit so the emoji isn't severed.
+ */
+export function safeTruncate(str: string, maxLength: number): string {
+  if (!str || str.length <= maxLength) return str;
+  let sub = str.slice(0, maxLength);
+  const lastCode = sub.charCodeAt(sub.length - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
+    sub = sub.slice(0, sub.length - 1);
+  }
+  return sub;
+}
+
+/**
+ * Final sanitization guard for AI-generated text before database insert
+ * or export. Strips control characters, applies length limiting with
+ * surrogate-safe truncation, then repairs any remaining orphaned
+ * surrogates via sanitizeEncodedText.
+ */
+export function sanitizeForDatabaseAndExport(rawText: string, maxLength = 500): string {
+  if (!rawText) return '';
+  let cleaned = rawText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  cleaned = safeTruncate(cleaned, maxLength);
+  cleaned = sanitizeEncodedText(cleaned);
+  return cleaned.trim();
+}
+
+/**
  * Sanitize all string values in a plain object (one level deep).
  * Useful for sanitizing an entire AI response before it reaches the DB.
  */
