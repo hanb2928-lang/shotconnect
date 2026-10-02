@@ -16,8 +16,13 @@ let initAttempted = false;
 
 // In-memory fallback used when both localStorage and AsyncStorage are
 // unavailable (private browsing, sandboxed iframe, native bridge failure).
-// Values are lost on reload but prevent crashes from undefined storage.
 const memoryStore = new Map<string, string>();
+
+// Write-through read cache: every successful read or write populates this
+// map so subsequent reads are O(1) synchronous lookups with no I/O.
+// This eliminates the async round-trip that caused perceptible delays
+// on app boot when multiple consumers read settings sequentially.
+const readCache = new Map<string, string>();
 
 export function isStorageReady(): boolean {
   return initDone;
@@ -26,7 +31,6 @@ export function isStorageReady(): boolean {
 const STORAGE_INIT_TIMEOUT_MS = 3000;
 
 // Lazy-load AsyncStorage so module-eval never touches the native binding.
-// On native, the native module may not be registered yet at boot.
 async function loadAsyncStorage(): Promise<typeof import('@react-native-async-storage/async-storage') | null> {
   try {
     const timeout = new Promise<null>((resolve) =>
@@ -50,6 +54,16 @@ export function initStorage(): Promise<void> {
       try {
         if (typeof window !== 'undefined' && window.localStorage) {
           webStorage = window.localStorage;
+          // Warm the read cache with all existing localStorage entries.
+          // This makes the first read of any previously-stored key instant.
+          for (let i = 0; i < webStorage.length; i++) {
+            const k = webStorage.key(i);
+            if (!k) continue;
+            try {
+              const v = webStorage.getItem(k);
+              if (v !== null) readCache.set(k, v);
+            } catch {}
+          }
         }
       } catch {
         // localStorage access can throw in private browsing or restricted contexts
@@ -67,6 +81,23 @@ export function initStorage(): Promise<void> {
         if (typeof impl.setItem === 'function') nativeSetItem = (key: string, value: string) => impl.setItem(key, value);
         if (typeof impl.removeItem === 'function') nativeRemoveItem = (key: string) => impl.removeItem(key);
         if (typeof impl.getAllKeys === 'function') nativeGetAllKeys = () => impl.getAllKeys();
+
+        // Warm the read cache by bulk-reading all persisted keys.
+        // AsyncStorage.multiGet is a single native bridge call — much
+        // faster than N sequential getItem calls for boot-time hydration.
+        if (typeof impl.multiGet === 'function') {
+          try {
+            const allKeys = await impl.getAllKeys();
+            if (allKeys && allKeys.length > 0) {
+              const pairs = await impl.multiGet(allKeys as readonly string[]);
+              for (const [k, v] of pairs) {
+                if (v !== null) readCache.set(k, v);
+              }
+            }
+          } catch {
+            // multiGet failed — reads will populate cache lazily
+          }
+        }
       }
     } catch {
       // AsyncStorage not available — getItem/setItem will return null/no-op
@@ -74,13 +105,10 @@ export function initStorage(): Promise<void> {
     initDone = true;
     initAttempted = true;
   })().catch(() => {
-    // Ensure initPromise never rejects — callers depend on this
     initDone = true;
     initAttempted = true;
   });
 
-  // Safety net: if the init promise itself hangs (e.g. native module deadlock),
-  // force initDone so getItem/setItem don't block forever waiting on it.
   setTimeout(() => {
     if (!initDone) {
       initDone = true;
@@ -91,7 +119,21 @@ export function initStorage(): Promise<void> {
   return initPromise;
 }
 
+/**
+ * Synchronous read from the in-memory read cache.
+ * Returns null if the key is not cached or storage hasn't initialized yet.
+ * Use this for hot-path consumers (theme, language, mascot settings) that
+ * need values during the first render frame without awaiting a Promise.
+ */
+export function getItemSync(key: string): string | null {
+  return readCache.get(key) ?? null;
+}
+
 export async function getItem(key: string): Promise<string | null> {
+  // Fast path: value already in read cache — no I/O needed.
+  const cached = readCache.get(key);
+  if (cached !== undefined) return cached;
+
   try {
     if (initPromise) {
       await Promise.race([
@@ -102,27 +144,45 @@ export async function getItem(key: string): Promise<string | null> {
       await initStorage();
     }
   } catch {
-    // init failed or timed out — proceed with no-op fallback
+    // init failed or timed out — proceed with fallback
   }
+
+  // Check cache again after init (init may have warmed it).
+  const cachedAfterInit = readCache.get(key);
+  if (cachedAfterInit !== undefined) return cachedAfterInit;
 
   if (webStorage) {
     try {
-      return webStorage.getItem(key);
+      const val = webStorage.getItem(key);
+      if (val !== null) readCache.set(key, val);
+      return val;
     } catch {
       return memoryStore.get(key) ?? null;
     }
   }
   if (nativeGetItem) {
     try {
-      return await nativeGetItem(key);
+      const val = await nativeGetItem(key);
+      if (val !== null) readCache.set(key, val);
+      return val;
     } catch {
       return memoryStore.get(key) ?? null;
     }
   }
-  return memoryStore.get(key) ?? null;
+
+  const memVal = memoryStore.get(key);
+  if (memVal !== undefined) {
+    readCache.set(key, memVal);
+    return memVal;
+  }
+  return null;
 }
 
 export async function setItem(key: string, value: string): Promise<void> {
+  // Write-through: update the read cache immediately so the next
+  // sync or async read sees the new value without I/O.
+  readCache.set(key, value);
+
   try {
     if (initPromise) {
       await Promise.race([
@@ -133,7 +193,7 @@ export async function setItem(key: string, value: string): Promise<void> {
       await initStorage();
     }
   } catch {
-    // init failed or timed out — proceed with no-op fallback
+    // init failed or timed out — proceed with fallback
   }
 
   if (webStorage) {
@@ -166,6 +226,8 @@ export async function setItem(key: string, value: string): Promise<void> {
 }
 
 export async function removeItem(key: string): Promise<void> {
+  readCache.delete(key);
+
   try {
     if (initPromise) {
       await Promise.race([
@@ -176,7 +238,7 @@ export async function removeItem(key: string): Promise<void> {
       await initStorage();
     }
   } catch {
-    // init failed or timed out — proceed with no-op fallback
+    // init failed or timed out — proceed with fallback
   }
 
   if (webStorage) {
@@ -216,7 +278,10 @@ function evictOldestCacheEntries(): void {
     entries.sort((a, b) => a.timestamp - b.timestamp);
     const toRemove = Math.max(1, Math.ceil(entries.length / 4));
     for (let i = 0; i < toRemove && i < entries.length; i++) {
-      try { webStorage.removeItem(entries[i].key); } catch {}
+      try {
+        webStorage.removeItem(entries[i].key);
+        readCache.delete(entries[i].key);
+      } catch {}
     }
   }
 }
@@ -240,7 +305,10 @@ async function evictOldestCacheEntriesNative(): Promise<void> {
     entries.sort((a, b) => a.timestamp - b.timestamp);
     const toRemove = Math.max(1, Math.ceil(entries.length / 4));
     for (let i = 0; i < toRemove && i < entries.length; i++) {
-      try { await nativeRemoveItem(entries[i].key); } catch {}
+      try {
+        await nativeRemoveItem(entries[i].key);
+        readCache.delete(entries[i].key);
+      } catch {}
     }
   } catch {}
 }

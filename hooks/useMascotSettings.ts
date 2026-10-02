@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getItem, setItem } from '@/lib/storage';
+import { getItem, getItemSync, setItem } from '@/lib/storage';
 import { getUserSettings } from '@/lib/settings';
 
 export type MascotStyle = 'cute-crawler' | 'minimal-dot' | 'none';
@@ -21,7 +21,20 @@ export function useMascotSettings(): MascotConfig & {
   updateEnabled: (enabled: boolean) => Promise<void>;
   updateStyle: (style: MascotStyle) => Promise<void>;
 } {
-  const [config, setConfig] = useState<MascotConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<MascotConfig>(() => {
+    const cached = getItemSync(STORAGE_KEY);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        return {
+          enabled: parsed.enabled ?? true,
+          style: (parsed.style as MascotStyle) || 'cute-crawler',
+          loading: false,
+        };
+      } catch {}
+    }
+    return DEFAULT_CONFIG;
+  });
 
   useEffect(() => {
     let mounted = true;

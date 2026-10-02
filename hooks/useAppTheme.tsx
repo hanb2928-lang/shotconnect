@@ -1,6 +1,5 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Platform } from 'react-native';
-import { getItem, setItem } from '@/lib/storage';
+import { getItem, getItemSync, setItem } from '@/lib/storage';
 import {
   theme as baseTheme,
   resolveThemePreset,
@@ -62,30 +61,18 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   // On web, localStorage is synchronous; on native, AsyncStorage is async
   // so we accept a brief flash there (native doesn't have the flicker issue).
   const [mode, setModeState] = useState<ThemeMode>(() => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      try {
-        const cached = window.localStorage.getItem('theme_mode');
-        if (cached === 'dark' || cached === 'light') return cached;
-      } catch {}
-    }
+    const cached = getItemSync('theme_mode');
+    if (cached === 'dark' || cached === 'light') return cached;
     return 'light';
   });
   const [density, setDensityState] = useState<DisplayDensity>(() => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      try {
-        const cached = window.localStorage.getItem('display_density');
-        if (cached === 'compact' || cached === 'standard' || cached === 'wide') return cached as DisplayDensity;
-      } catch {}
-    }
+    const cached = getItemSync('display_density');
+    if (cached === 'compact' || cached === 'standard' || cached === 'wide') return cached as DisplayDensity;
     return 'standard';
   });
   const [preset, setPresetState] = useState<ThemePreset>(() => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      try {
-        const cached = window.localStorage.getItem('theme_preset');
-        if (cached && VALID_PRESETS.includes(cached as ThemePreset)) return cached as ThemePreset;
-      } catch {}
-    }
+    const cached = getItemSync('theme_preset');
+    if (cached && VALID_PRESETS.includes(cached as ThemePreset)) return cached as ThemePreset;
     return 'studio-light';
   });
 

@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useMemo, t
 import { I18nManager, Platform } from 'react-native';
 import type { AppLanguage } from '@/lib/i18n';
 import { translations, detectSystemLanguage, translate, RTL_LANGUAGES } from '@/lib/i18n';
-import { getItem, setItem } from '@/lib/storage';
+import { getItem, getItemSync, isStorageReady, setItem } from '@/lib/storage';
 
 const STORAGE_KEY = 'app_language';
 
@@ -23,8 +23,12 @@ const I18nContext = createContext<I18nContextValue>({
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<AppLanguage>('ko');
-  const [isReady, setIsReady] = useState(false);
+  const [language, setLanguageState] = useState<AppLanguage>(() => {
+    const stored = getItemSync(STORAGE_KEY);
+    if (stored && stored in translations) return stored as AppLanguage;
+    return detectSystemLanguage();
+  });
+  const [isReady, setIsReady] = useState(() => isStorageReady());
 
   const isRTL = RTL_LANGUAGES.includes(language);
 
