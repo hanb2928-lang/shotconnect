@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useRef, useState, useCallback, useEffect, lazy } from 'react';
 import {
   View,
   Text,
@@ -69,6 +69,7 @@ async function getStereoMod() {
   return _stereoMod;
 }
 import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -172,9 +173,9 @@ type PanelMode = 'auto-3d' | 'ai-blend' | null;
 
 export default function CameraScreen() {
   return (
-    <Suspense fallback={null}>
+    <SafeLazyLoad>
       <CameraScreenInner />
-    </Suspense>
+    </SafeLazyLoad>
   );
 }
 
