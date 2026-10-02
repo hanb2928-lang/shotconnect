@@ -421,6 +421,7 @@ export default function AffiliateScreen() {
       } else {
         await Clipboard.setStringAsync(url);
       }
+      if (!mounted.current) return;
       setCopiedPlatform(platform);
       setTimeout(() => { if (mounted.current) setCopiedPlatform(null); }, 2000);
     } catch {
@@ -443,6 +444,7 @@ export default function AffiliateScreen() {
       if (isWebPlatform()) {
         const images = await pickImageWeb(false, 1);
         if (images.length === 0) {
+          if (!mounted.current) return;
           setMediaLoading(false);
           return;
         }
@@ -458,6 +460,7 @@ export default function AffiliateScreen() {
           return;
         }
         const { base64, mimeType } = await compressImageToBase64(result.assets[0].uri, 1280, 0.7);
+        if (!mounted.current) return;
         setPreviewCapture({ base64, mimeType });
       }
     } catch {
@@ -542,6 +545,7 @@ export default function AffiliateScreen() {
         // Fallback: try browser-side fetch (may fail due to CORS)
         try {
           const dataUrl = await urlToDataUrl(newMeta.image);
+          if (!mounted.current) return;
           setSelectedImage(cleanBase64(dataUrl));
           setSelectedImageMime('image/jpeg');
           setMediaType('photo');
@@ -594,6 +598,7 @@ export default function AffiliateScreen() {
       if (isWebPlatform()) {
         const images = await pickImageWeb(true, 4);
         if (images.length === 0) {
+          if (!mounted.current) return;
           setMediaLoading(false);
           return;
         }
@@ -929,11 +934,12 @@ export default function AffiliateScreen() {
       } else {
         await Clipboard.setStringAsync(script);
       }
+      if (!mounted.current) return;
       setCopyFeedback(key);
       const platformLabel = UPLOAD_PLATFORMS.find((p) => p.key === key)?.label ?? '플랫폼';
       setCopyToast(`링크와 홍보 문구가 복사되었습니다! ${platformLabel} 앱을 열어 붙여넣으세요`);
-      setTimeout(() => setCopyFeedback(null), 2000);
-      setTimeout(() => setCopyToast(null), 4000);
+      setTimeout(() => { if (mounted.current) setCopyFeedback(null); }, 2000);
+      setTimeout(() => { if (mounted.current) setCopyToast(null); }, 4000);
     } catch {
       // clipboard failed
     }
@@ -952,7 +958,7 @@ export default function AffiliateScreen() {
     setShowUploadConfirm(null);
     setPendingUploadPlatform(null);
     setCopyToast(`${platformLabel} 발행 완료! 수고하셨습니다. 제휴 링크를 통해 수익이 발생하면 여기에 표시됩니다.`);
-    setTimeout(() => setCopyToast(null), 5000);
+    setTimeout(() => { if (mounted.current) setCopyToast(null); }, 5000);
     markCompleted('publish');
   };
 
@@ -1118,10 +1124,10 @@ export default function AffiliateScreen() {
     setRenderError(null);
     setVideoRenderComplete(false);
     setOneClickHint(true);
-    setTimeout(() => setOneClickHint(false), 3500);
+    setTimeout(() => { if (mounted.current) setOneClickHint(false); }, 3500);
 
     const timeoutId = setTimeout(() => {
-      if (autoEditingRef.current) {
+      if (autoEditingRef.current && mounted.current) {
         setRenderError('AI 생성이 시간 초과로 중단되었습니다. 다시 시도해주세요.');
         autoEditingRef.current = false;
         setAutoEditing(false);
@@ -1168,6 +1174,7 @@ export default function AffiliateScreen() {
           appliedSniperNames: nanoResult.analysisReport.appliedSniperNames,
         });
         const stats = await getLearningStats();
+        if (!mounted.current) return;
         setLearningStats(stats);
       } else {
         analysis = generatePsychAnalysis(
@@ -1192,10 +1199,13 @@ export default function AffiliateScreen() {
       videoPreviewProgress.value = 0;
       videoPreviewProgress.value = withTiming(1, { duration: 2200, easing: Easing.inOut(Easing.ease) });
       await new Promise<void>((resolve) => setTimeout(resolve, 700));
+      if (!mounted.current) return;
       setAutoEditStep('스마트 조명과 배경을 연출하고 있어요...');
       await new Promise<void>((resolve) => setTimeout(resolve, 800));
+      if (!mounted.current) return;
       setAutoEditStep('컷별 대사와 자막을 배치하고 있어요...');
       await new Promise<void>((resolve) => setTimeout(resolve, 700));
+      if (!mounted.current) return;
       setVideoPreviewScenes(analysis.scenes);
 
       // Step 3: Render high-quality video

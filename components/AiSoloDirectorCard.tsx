@@ -9,6 +9,7 @@ import {
   LayoutAnimation,
   Platform,
 } from 'react-native';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   Film,
   Sparkles,
@@ -43,6 +44,7 @@ export function AiSoloDirectorCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const mounted = useMountedRef();
 
   const handleRun = useCallback(async () => {
     setLoading(true);
@@ -55,18 +57,20 @@ export function AiSoloDirectorCard({
         customPrompt,
       };
       const res = await runSoloDirector(input);
+      if (!mounted.current) return;
       setResult(res);
       if (Platform.OS !== 'web') {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       }
       onResult?.(res);
     } catch (err) {
+      if (!mounted.current) return;
       const msg = err instanceof Error ? err.message : 'AI 연출가 분석 실패';
       setError(msg);
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
-  }, [productName, platform, scanId, customPrompt, onResult]);
+  }, [productName, platform, scanId, customPrompt, onResult, mounted]);
 
   const toggleExpanded = () => {
     if (Platform.OS !== 'web') {

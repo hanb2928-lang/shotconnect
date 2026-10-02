@@ -12,6 +12,7 @@ import { theme } from '@/lib/theme';
 import { friendlyError } from '@/lib/errors';
 import { TREND_MATCH_URL, supabaseAnonKey } from '@/lib/supabase';
 import * as Clipboard from 'expo-clipboard';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 export interface TrendTemplate {
   name: string;
@@ -68,6 +69,7 @@ export function TrendMatchCard({ productCategory, productName, platform, onApply
   const [expanded, setExpanded] = useState(true);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [appliedHashtagIdx, setAppliedHashtagIdx] = useState<number | null>(null);
+  const mounted = useMountedRef();
 
   const fetchTrends = useCallback(async () => {
     setLoading(true);
@@ -85,6 +87,7 @@ export function TrendMatchCard({ productCategory, productName, platform, onApply
         body: JSON.stringify({ productCategory, productName, platform }),
         signal: controller.signal,
       });
+      if (!mounted.current) return;
       if (!resp.ok) {
         let errDetail = '';
         try {
@@ -96,6 +99,7 @@ export function TrendMatchCard({ productCategory, productName, platform, onApply
         throw new Error(errDetail || `트렌드 분석에 실패했습니다 (${resp.status})`);
       }
       const data = await resp.json();
+      if (!mounted.current) return;
       if (data.error) throw new Error(data.error);
       const nextTemplates: TrendTemplate[] = Array.isArray(data.templates)
         ? data.templates.slice(0, 3).map((template: Partial<TrendTemplate>) => ({
@@ -113,6 +117,7 @@ export function TrendMatchCard({ productCategory, productName, platform, onApply
       setTemplates(nextTemplates.length > 0 ? nextTemplates : DEFAULT_TEMPLATES);
       setInsight(typeof data.categoryInsight === 'string' ? data.categoryInsight : '제품의 핵심 장점을 빠르게 보여주는 구성이 효과적이에요.');
     } catch (err) {
+      if (!mounted.current) return;
       setTemplates(DEFAULT_TEMPLATES);
       setInsight('기본 트렌드 템플릿을 표시하고 있어요.');
       const isTimeout = err instanceof Error && (err.name === 'AbortError' || (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError'));
@@ -121,9 +126,9 @@ export function TrendMatchCard({ productCategory, productName, platform, onApply
         : friendlyError(err, '트렌드 분석에 실패했습니다. 잠시 후 다시 시도해주세요.'));
     } finally {
       clearTimeout(timeoutId);
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
-  }, [productCategory, productName, platform]);
+  }, [productCategory, productName, platform, mounted]);
 
   useEffect(() => {
     if (!productCategory) return;

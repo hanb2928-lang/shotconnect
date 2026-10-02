@@ -303,6 +303,7 @@ export default function TrendingScreen() {
       if (!resp.ok) throw new Error('아이디어 생성 실패');
       const data = await resp.json();
       if (reqId !== ideaRequestIdRef.current) return;
+      if (!mounted.current) return;
       setIdeas(data.ideas || []);
     } catch {
       if (reqId !== ideaRequestIdRef.current) return;
@@ -319,8 +320,9 @@ export default function TrendingScreen() {
       } else {
         await Clipboard.setStringAsync(text);
       }
+      if (!mounted.current) return;
       setCopiedIdea(index);
-      setTimeout(() => setCopiedIdea(null), 2000);
+      setTimeout(() => { if (mounted.current) setCopiedIdea(null); }, 2000);
     } catch {
       // clipboard failed
     }

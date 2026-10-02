@@ -120,6 +120,7 @@ export function SmartScheduler({
   const requestNotificationPermission = useCallback(async (): Promise<boolean> => {
     if (Platform.OS !== 'web' || !('Notification' in window)) return false;
     const result = await Notification.requestPermission();
+    if (!mounted.current) return false;
     setNotificationPermission(result as NotificationPermission);
     return result === 'granted';
   }, []);
@@ -247,6 +248,7 @@ export function SmartScheduler({
 
   const handleDelete = useCallback(async (id: string) => {
     await supabase.from('upload_schedules').delete().eq('id', id);
+    if (!mounted.current) return;
     setSchedules((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
@@ -276,8 +278,9 @@ export function SmartScheduler({
     } else {
       await Clipboard.setStringAsync(text);
     }
+    if (!mounted.current) return;
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => { if (mounted.current) setCopied(false); }, 2000);
   }, []);
 
   const pendingSchedules = useMemo(() => schedules.filter((s) => s.status === 'pending'), [schedules]);

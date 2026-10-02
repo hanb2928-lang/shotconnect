@@ -103,6 +103,7 @@ export function HashtagCopyBar({ hashtags, productCategory, platform }: HashtagC
       } else {
         await Clipboard.setStringAsync(text);
       }
+      if (!mounted.current) return;
       setCopied(true);
       setTimeout(() => { if (mounted.current) setCopied(false); }, 2500);
     } catch {

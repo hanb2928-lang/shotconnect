@@ -127,8 +127,9 @@ export function ShoppingMatchCard({
       } else {
         await Clipboard.setStringAsync(effectiveShortUrl);
       }
+      if (!mountedRef.current) return;
       setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
+      setTimeout(() => { if (mountedRef.current) setLinkCopied(false); }, 2000);
     } catch {
       // clipboard copy failed silently
     }
@@ -306,6 +307,7 @@ export function ShoppingMatchCard({
       : (inputLabel.trim() || detected.platformLabel);
     const result = await onSaveCustomLink?.(trimmed, finalLabel, selectedProductIndex);
     if (result && !result.success) {
+      if (!mountedRef.current) return;
       setError(result.error || '링크 저장 중 오류가 발생했어요');
       return;
     }
@@ -316,6 +318,7 @@ export function ShoppingMatchCard({
       setGeneratingShortUrl(true);
       try {
         const short = await createShortLink(trimmed, scanId);
+        if (!mountedRef.current) return;
         setLocalShortUrl(short);
       } catch {
         setError('단축 링크 생성에 실패했어요. 나중에 다시 시도해주세요.');
@@ -339,6 +342,7 @@ export function ShoppingMatchCard({
   const handleRemoveLink = async () => {
     const result = await onRemoveCustomLink?.(selectedProductIndex);
     if (result && !result.success) {
+      if (!mountedRef.current) return;
       setError(result.error || '링크 삭제 중 오류가 발생했어요');
     }
   };

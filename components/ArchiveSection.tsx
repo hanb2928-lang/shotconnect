@@ -79,6 +79,7 @@ export function ArchiveSection() {
     try {
       const next = page + 1;
       const result = await fetchArchiveList(next, sort);
+      if (!mounted.current) return;
       setItems((prev) => [...prev, ...result.items]);
       setHasMore(result.hasMore);
       setPage(next);

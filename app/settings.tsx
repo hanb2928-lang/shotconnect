@@ -283,6 +283,7 @@ export default function SettingsScreen() {
   const handleTogglePlatform = async (id: string, enabled: boolean) => {
     try {
       await togglePlatformEnabled(id, enabled);
+      if (!mounted.current) return;
       setManagedPlatforms((prev) => prev.map((p) => p.id === id ? { ...p, isEnabled: enabled } : p));
     } catch {
       Alert.alert(t('common.error'), t('settings.platformToggleFail'));
@@ -297,6 +298,7 @@ export default function SettingsScreen() {
     setAddingPlatform(true);
     try {
       await addCustomPlatform({ label: newPlatformName.trim(), ratio: newPlatformRatio });
+      if (!mounted.current) return;
       setNewPlatformName('');
       setNewPlatformRatio('9:16');
       setShowAddPlatform(false);
@@ -335,6 +337,7 @@ export default function SettingsScreen() {
   const handleSaveAffiliateId = async (id: string) => {
     try {
       await updateAffiliatePlatformId(id, editingAffiliateValue);
+      if (!mounted.current) return;
       setEditingAffiliateId(null);
       await loadAffiliatePlatforms();
     } catch {
@@ -345,6 +348,7 @@ export default function SettingsScreen() {
   const handleToggleAffiliate = async (id: string, enabled: boolean) => {
     try {
       await toggleAffiliatePlatformEnabled(id, enabled);
+      if (!mounted.current) return;
       setAffiliatePlatforms((prev) => prev.map((p) => p.id === id ? { ...p, is_enabled: enabled } : p));
     } catch {
       Alert.alert(t('common.error'), t('settings.platformToggleFail'));
@@ -413,10 +417,12 @@ export default function SettingsScreen() {
         const fileUrl = await uploadAssetBlob(file, fileName, file.type || 'image/png');
         if (!fileUrl) {
           Alert.alert('업로드 실패', '이미지 업로드에 실패했어요. 다시 시도해주세요');
+          if (!mounted.current) return;
           setLogoUploading(false);
           return;
         }
         await updateUserSettings({ logo_url: fileUrl });
+        if (!mounted.current) return;
         setLogoUrl(fileUrl);
         clearLogoCache();
       } catch {
@@ -436,6 +442,7 @@ export default function SettingsScreen() {
         onPress: async () => {
           try {
             await updateUserSettings({ logo_url: null });
+            if (!mounted.current) return;
             setLogoUrl(null);
             clearLogoCache();
           } catch {
@@ -455,6 +462,7 @@ export default function SettingsScreen() {
     setRevSaving(true);
     try {
       await addRevenueRecord(revPlatform, amount, revMonth, revNote || undefined);
+      if (!mounted.current) return;
       setRevModalVisible(false);
       setRevAmount('');
       setRevNote('');
@@ -494,7 +502,7 @@ export default function SettingsScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
     <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24, paddingTop: 16 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -2108,6 +2116,7 @@ export default function SettingsScreen() {
             setSavedKey(false);
             try {
               await updateUserSettings({ openai_api_key: openaiKey || null, pexels_api_key: pexelsKey || null, tts_api_key: ttsKey || null, runway_api_key: runwayKey || null });
+              if (!mounted.current) return;
               setSavedKey(true);
               setTimeout(() => setSavedKey(false), 2500);
             } catch (err) {
@@ -2264,7 +2273,7 @@ export default function SettingsScreen() {
       >
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
             style={{ width: '100%' }}
           >
           <View style={styles.modalContainer}>
@@ -2352,6 +2361,7 @@ export default function SettingsScreen() {
             setErrorLogsVisible(true);
             try {
               const logs = await fetchRecentLogs(50);
+              if (!mounted.current) return;
               setErrorLogs(logs);
             } catch {
               setErrorLogs([]);
@@ -4084,6 +4094,7 @@ const styles = StyleSheet.create({
 function PushNotificationToggle() {
   const { supported, isSubscribed, subscribe, unsubscribe, error } = useWebPush();
   const [toggling, setToggling] = useState(false);
+  const mounted = useMountedRef();
 
   if (!supported) {
     return (
@@ -4100,6 +4111,7 @@ function PushNotificationToggle() {
     } else {
       await subscribe();
     }
+    if (!mounted.current) return;
     setToggling(false);
   };
 
@@ -4121,6 +4133,7 @@ function PushTestButton() {
   const { supported, isSubscribed, sendTestNotification } = useWebPush();
   const [testing, setTesting] = useState(false);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
+  const mounted = useMountedRef();
 
   if (!supported || !isSubscribed) return null;
 
@@ -4128,6 +4141,7 @@ function PushTestButton() {
     setTesting(true);
     setResultMsg(null);
     const result = await sendTestNotification();
+    if (!mounted.current) return;
     setTesting(false);
     if (result.sent > 0) {
       setResultMsg('알림이 전송되었습니다. 브라우저 알림을 확인하세요.');

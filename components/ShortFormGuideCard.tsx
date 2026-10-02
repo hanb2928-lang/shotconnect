@@ -11,6 +11,7 @@ import { Lightbulb, Zap, Wand as Wand2, Check, ChevronDown, ChevronUp } from 'lu
 import { theme } from '@/lib/theme';
 import { friendlyError } from '@/lib/errors';
 import { SHORTFORM_GUIDE_URL, supabaseAnonKey } from '@/lib/supabase';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 export interface GuideTip {
   title: string;
@@ -51,6 +52,7 @@ export function ShortFormGuideCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
+  const mounted = useMountedRef();
 
   const fetchGuide = useCallback(async () => {
     setLoading(true);
@@ -74,17 +76,19 @@ export function ShortFormGuideCard({
           }),
         },
       );
+      if (!mounted.current) return;
       if (!resp.ok) throw new Error('가이드 생성에 실패했습니다');
       const data = await resp.json();
+      if (!mounted.current) return;
       if (data.error) throw new Error(data.error);
       if (!data.tips || !Array.isArray(data.tips)) throw new Error('가이드 응답 형식이 올바르지 않습니다');
       setGuide(data as ShortFormGuide);
     } catch (err) {
-      setError(friendlyError(err, '가이드를 불러오지 못했습니다.'));
+      if (mounted.current) setError(friendlyError(err, '가이드를 불러오지 못했습니다.'));
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
-  }, [productName, productCategory, priceEstimate, oneLiner, productAdvantages]);
+  }, [productName, productCategory, priceEstimate, oneLiner, productAdvantages, mounted]);
 
   useEffect(() => {
     if (!productName) return;

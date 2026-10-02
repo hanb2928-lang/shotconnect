@@ -85,6 +85,7 @@ export default function AssetsScreen() {
       } else {
         await Clipboard.setStringAsync(snippet.content);
       }
+      if (!mounted.current) return;
       setCopiedId(snippet.id);
       setTimeout(() => { if (mounted.current) setCopiedId(null); }, 2000);
     } catch {
@@ -95,6 +96,7 @@ export default function AssetsScreen() {
   const handleDelete = async (id: string) => {
     try {
       await deleteSnippet(id);
+      if (!mounted.current) return;
       setSnippets((prev) => prev.filter((s) => s.id !== id));
     } catch {
       // ignore
@@ -127,6 +129,7 @@ export default function AssetsScreen() {
     try {
       const result = await addSnippet(title.trim(), content.trim(), snippetType);
       if (result) {
+        if (!mounted.current) return;
         setSnippets((prev) => [result, ...prev]);
         setShowAdd(false);
         setTitle('');

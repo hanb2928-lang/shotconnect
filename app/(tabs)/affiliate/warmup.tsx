@@ -104,7 +104,7 @@ export default function WarmupScreen() {
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToastMsg(null), 3000);
+    toastTimerRef.current = setTimeout(() => { if (mounted.current) setToastMsg(null); }, 3000);
   }, []);
 
   const selectedScheduleIdRef = useRef<string | null>(null);
@@ -574,7 +574,7 @@ export default function WarmupScreen() {
       >
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
             style={{ width: '100%' }}
           >
           <View style={styles.modalContent}>

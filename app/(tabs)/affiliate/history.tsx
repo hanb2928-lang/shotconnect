@@ -107,6 +107,7 @@ export default function HistoryScreen() {
     try {
       const { error: err } = await supabase.from('scans').delete().eq('id', id);
       if (err) {
+        if (!mounted.current) return;
         setError(err.message);
       } else {
         setScans((prev) => prev.filter((s) => s.id !== id));

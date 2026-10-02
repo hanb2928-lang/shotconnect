@@ -11,6 +11,7 @@ import { FlaskConical, Check, Youtube, Instagram, Music2, Info, Sparkles } from 
 import { theme } from '@/lib/theme';
 import { VARIANT_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
 import { safeFetch } from '@/lib/apiClient';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 export type VariantTone = 'informative' | 'humor' | 'emotional';
 
@@ -71,6 +72,7 @@ export function VariantGenerator({
   const [error, setError] = useState<string | null>(null);
   const [generated, setGenerated] = useState(false);
   const [localSelectedTone, setLocalSelectedTone] = useState<VariantTone | null>(selectedTone ?? null);
+  const mounted = useMountedRef();
 
   const canGenerate = useMemo(() => !!productName, [productName]);
 
@@ -96,8 +98,10 @@ export function VariantGenerator({
         }),
         timeoutMs: 30000,
       });
+      if (!mounted.current) return;
       if (response.ok) {
         const data = await response.json();
+        if (!mounted.current) return;
         if (data.variants && Array.isArray(data.variants) && data.variants.length > 0) {
           setVariants(data.variants);
           setGenerated(true);
@@ -111,10 +115,10 @@ export function VariantGenerator({
         setError('변형 생성 중 오류가 발생했어요.');
       }
     } catch {
-      setError('네트워크 오류가 발생했어요. 다시 시도해주세요.');
+      if (mounted.current) setError('네트워크 오류가 발생했어요. 다시 시도해주세요.');
     }
-    setLoading(false);
-  }, [canGenerate, loading, productName, productCategory, priceEstimate, oneLiner, productAdvantages, hook, brandPersona, onSelectVariant]);
+    if (mounted.current) setLoading(false);
+  }, [canGenerate, loading, productName, productCategory, priceEstimate, oneLiner, productAdvantages, hook, brandPersona, onSelectVariant, mounted]);
 
   const handleSelect = useCallback((variant: Variant) => {
     setLocalSelectedTone(variant.tone);

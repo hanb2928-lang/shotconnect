@@ -227,6 +227,7 @@ export function PostCaptureWorkflow({
       try {
         const rec = await fetchBgmRecommendation(imageUri);
         if (cancelled) return;
+        if (!mountedRef.current) return;
         setBgmRecommendation(rec);
       } catch {
         // fallback to keyword-based recommendation
@@ -373,6 +374,7 @@ export function PostCaptureWorkflow({
           await MediaLibrary.saveToLibraryAsync(uri);
         }
       }
+      if (!mountedRef.current) return;
       setGallerySaved(true);
     } catch {
       // ignore — user can retry

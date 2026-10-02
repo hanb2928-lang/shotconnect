@@ -33,6 +33,7 @@ export function CreditPurchaseModal({ visible, onClose, onPurchased }: CreditPur
 
   const loadData = useCallback(async () => {
     const [bal, hist] = await Promise.all([getCreditBalance(), getCreditHistory(10)]);
+    if (!mounted.current) return;
     setBalance(bal);
     setHistory(hist);
   }, []);
@@ -52,6 +53,7 @@ export function CreditPurchaseModal({ visible, onClose, onPurchased }: CreditPur
     try {
       await addCredits(credits, 'purchase', `${name} 구매`, packageId);
       await loadData();
+      if (!mounted.current) return;
       setSuccess(true);
       onPurchased?.();
       setTimeout(() => { if (mounted.current) setSuccess(false); }, 2500);
@@ -65,7 +67,7 @@ export function CreditPurchaseModal({ visible, onClose, onPurchased }: CreditPur
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
       >
         <View style={[styles.modalContainer, { marginBottom: insets.bottom > 0 ? insets.bottom : 0 }]}>
           <View style={styles.header}>

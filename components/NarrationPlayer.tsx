@@ -192,6 +192,7 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
           if (audioRef.current) {
             audioRef.current.muted = true;
             await audioRef.current.play();
+            if (!mountedRef.current) return;
             notifyPlayState(true);
             setNeedsTouchRetry(true);
             setPlayError('브라우저 정책으로 인해 일시적으로 무음 재생됩니다. 다시 한 번 재생 버튼을 눌러주세요.');

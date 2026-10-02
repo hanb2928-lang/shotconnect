@@ -183,6 +183,7 @@ export default function AssetsScreen() {
     try {
       const success = await deleteSavedAsset(asset);
       if (success) {
+        if (!mounted.current) return;
         setAssets((prev) => prev.filter((a) => a.id !== asset.id));
         setPinnedIds((prev) => { const n = new Set(prev); n.delete(asset.id); return n; });
       }
@@ -228,6 +229,7 @@ export default function AssetsScreen() {
     setReexporting(true);
     setReexportDone(null);
     setTimeout(() => {
+      if (!mounted.current) return;
       setReexporting(false);
       setReexportDone(formatKey);
     }, 1500);
@@ -239,6 +241,7 @@ export default function AssetsScreen() {
     try {
       const success = await updateAssetUploadStatus(statusPickerAsset.id, status, shareUrl);
       if (success) {
+        if (!mounted.current) return;
         setAssets((prev) =>
           prev.map((a) =>
             a.id === statusPickerAsset.id
@@ -307,18 +310,20 @@ export default function AssetsScreen() {
     // 3. Copy caption to clipboard
     const captionCopied = await handleCopyText(built.fullText);
     if (captionCopied) {
+      if (!mounted.current) return;
       setSnsCopiedCaption(platformKey);
       setSnsStep('caption_copied');
-      setTimeout(() => setSnsCopiedCaption(null), 2500);
+      setTimeout(() => { if (mounted.current) setSnsCopiedCaption(null); }, 2500);
     }
 
     // 4. Copy hashtags to clipboard (sequential)
     await new Promise((r) => setTimeout(r, 400));
     const tagsCopied = await handleCopyText(fullHashtags);
     if (tagsCopied) {
+      if (!mounted.current) return;
       setSnsCopiedHashtags(platformKey);
       setSnsStep('hashtag_copied');
-      setTimeout(() => setSnsCopiedHashtags(null), 2500);
+      setTimeout(() => { if (mounted.current) setSnsCopiedHashtags(null); }, 2500);
     }
 
     // 5. Open SNS app via deep link
@@ -328,7 +333,7 @@ export default function AssetsScreen() {
     Linking.openURL(dl.appUrl).catch(() => {
       Linking.openURL(dl.webUrl).catch(() => {});
     });
-    setTimeout(() => setSnsStep('idle'), 2000);
+    setTimeout(() => { if (mounted.current) setSnsStep('idle'); }, 2000);
   };
 
   const handlePin = (assetId: string) => {
@@ -346,6 +351,7 @@ export default function AssetsScreen() {
     setRemixDone(false);
     if (remixTimerRef.current) clearTimeout(remixTimerRef.current);
     remixTimerRef.current = setTimeout(() => {
+      if (!mounted.current) return;
       setRemixing(false);
       setRemixDone(true);
     }, 2000);

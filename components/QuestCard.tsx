@@ -26,6 +26,7 @@ export function QuestCard() {
     setClaiming(questId);
     const reward = await claimQuestReward(questId);
     if (reward > 0) {
+      if (!mounted.current) return;
       setQuests((prev) => prev.filter((q) => q.id !== questId));
     }
     setClaiming(null);

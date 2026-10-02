@@ -11,6 +11,7 @@ import { Users, Zap, MessageCircle, ShoppingCart, TrendingUp, CircleAlert as Ale
 import { theme } from '@/lib/theme';
 import { friendlyError } from '@/lib/errors';
 import { PERSONA_SIMULATOR_URL, supabaseAnonKey } from '@/lib/supabase';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 interface PersonaReaction {
   persona: string;
@@ -52,6 +53,7 @@ export function PersonaSimulator({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedPersona, setExpandedPersona] = useState<number | null>(null);
+  const mounted = useMountedRef();
 
   const handleSimulate = useCallback(async () => {
     setLoading(true);
@@ -77,17 +79,19 @@ export function PersonaSimulator({
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
+      if (!mounted.current) return;
       if (!response.ok) throw new Error('시뮬레이션 실패');
       const data = await response.json();
+      if (!mounted.current) return;
       if (data.error) throw new Error(data.error);
       if (!data.personas || !Array.isArray(data.personas)) throw new Error('시뮬레이션 응답 형식이 올바르지 않습니다');
       setSimulation(data as SimulationResult);
     } catch (err) {
-      setError(friendlyError(err, '시뮬레이션을 실행하지 못했습니다.'));
+      if (mounted.current) setError(friendlyError(err, '시뮬레이션을 실행하지 못했습니다.'));
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
-  }, [productName, productCategory, priceEstimate, oneLiner, productAdvantages, hook]);
+  }, [productName, productCategory, priceEstimate, oneLiner, productAdvantages, hook, mounted]);
 
   const scoreColor = (score: number) => {
     if (score >= 80) return theme.colors.success[400];

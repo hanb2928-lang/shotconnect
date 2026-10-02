@@ -200,6 +200,7 @@ export function GlobalLocalizer({
       if (response.ok) {
         const data = await response.json();
         if (data.audioBase64) {
+          if (!mountedRef.current) return;
           setTtsResults(prev => ({ ...prev, [langCode]: `data:audio/mpeg;base64,${data.audioBase64}` }));
         }
       }

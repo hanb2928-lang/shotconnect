@@ -96,8 +96,9 @@ export default function LinksScreen() {
       } else {
         await Clipboard.setStringAsync(copyText);
       }
+      if (!mounted.current) return;
       setCopiedId(bookmark.id);
-      setTimeout(() => setCopiedId(null), 2000);
+      setTimeout(() => { if (mounted.current) setCopiedId(null); }, 2000);
     } catch {
       // clipboard failed
     }
@@ -106,6 +107,7 @@ export default function LinksScreen() {
   const handleDelete = async (id: string) => {
     try {
       await deleteLinkBookmark(id);
+      if (!mounted.current) return;
       setBookmarks((prev) => prev.filter((b) => b.id !== id));
     } catch {
       // ignore
@@ -129,6 +131,7 @@ export default function LinksScreen() {
     try {
       const result = await addLinkBookmark(label.trim(), url.trim(), platform);
       if (result) {
+        if (!mounted.current) return;
         setBookmarks((prev) => [result, ...prev]);
         setShowAdd(false);
         setLabel('');

@@ -137,8 +137,9 @@ export function CopyWriter({
       } else {
         await Clipboard.setStringAsync(text);
       }
+      if (!mountedRef.current) return;
       setCopiedKey(cardKey);
-      setTimeout(() => setCopiedKey(null), 2000);
+      setTimeout(() => { if (mountedRef.current) setCopiedKey(null); }, 2000);
     } catch {
       // clipboard failed silently
     }
@@ -253,8 +254,9 @@ export function CopyWriter({
                     } else {
                       await Clipboard.setStringAsync(displayItem.hook);
                     }
+                    if (!mountedRef.current) return;
                     setCopiedKey(cardKey);
-                    setTimeout(() => setCopiedKey(null), 2000);
+                    setTimeout(() => { if (mountedRef.current) setCopiedKey(null); }, 2000);
                   } catch {
                     // clipboard failed silently
                   }

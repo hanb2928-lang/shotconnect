@@ -446,6 +446,7 @@ export default function EditorScreen() {
           const base64 = cleanBase64(dataUrl);
           newUri = await uploadEditedImage(base64, 'image/png');
         }
+        if (!mountedRef.current) return;
         updateImage(newUri);
         setBgPickerVisible(true);
       } catch (err) {
@@ -671,7 +672,7 @@ export default function EditorScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? safeTop : 0}
     >
     <View style={styles.container}>

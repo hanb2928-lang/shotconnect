@@ -89,6 +89,13 @@ async function uploadAngleShotsConcurrently(
         results.push({ url, shot });
         const p = extractStoragePath(url);
         if (p) uploadedPaths.push(p);
+        // Release the base64 reference from the shot after a successful upload
+        // so the multi-MB string can be GC'd before the next shot's base64
+        // is loaded into the worker's closure.
+        (shot as { base64?: string }).base64 = undefined;
+        // Yield between uploads on native to let the JS engine reclaim memory
+        // from the Blob allocation before the next iteration.
+        await nativeHeapCooldownGuard();
       } catch {
         failures++;
       }

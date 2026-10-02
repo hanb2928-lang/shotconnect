@@ -138,8 +138,9 @@ export function StockVideoPicker({
     try {
       if (Platform.OS === 'web') {
         window.open(selectedClip.videoUrl, '_blank');
+        if (!mounted.current) return;
         setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 3000);
+        setTimeout(() => { if (mounted.current) setSaveSuccess(false); }, 3000);
         return;
       }
       const { status } = await MediaLibrary.requestPermissionsAsync();
@@ -158,12 +159,13 @@ export function StockVideoPicker({
       }
       const asset = await MediaLibrary.createAssetAsync(downloadRes.uri);
       await MediaLibrary.createAlbumAsync('ShotConnect', asset, false);
+      if (!mounted.current) return;
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setTimeout(() => { if (mounted.current) setSaveSuccess(false); }, 3000);
     } catch (err) {
       Alert.alert('저장 실패', err instanceof Error ? err.message : '갤러리 저장 중 오류가 발생했습니다.');
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   }, [selectedClip]);
 
@@ -234,7 +236,7 @@ export function StockVideoPicker({
 
   const handleOpenCamera = useCallback(() => {
     setCapturedDataUrl(null);
-    setShowCamera(true);
+    if (mounted.current) setShowCamera(true);
     if (cameraOpenTimerRef.current) clearTimeout(cameraOpenTimerRef.current);
     cameraOpenTimerRef.current = setTimeout(() => {
       cameraOpenTimerRef.current = null;
@@ -393,8 +395,9 @@ export function StockVideoPicker({
       }
       const asset = await MediaLibrary.createAssetAsync(mobileCapturedUri);
       await MediaLibrary.createAlbumAsync('ShotConnect', asset, false);
+      if (!mounted.current) return;
       setMobileSaveSuccess(true);
-      setTimeout(() => setMobileSaveSuccess(false), 3000);
+      setTimeout(() => { if (mounted.current) setMobileSaveSuccess(false); }, 3000);
     } catch {
       Alert.alert('저장 실패', '갤러리 저장 중 오류가 발생했습니다.');
     }

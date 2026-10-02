@@ -13,6 +13,7 @@ import { theme } from '@/lib/theme';
 import { useRouter } from 'expo-router';
 import { fetchDashboardSummary, formatKRW, type DashboardSummary } from '@/lib/dashboard';
 import { getStaleCached, setCached } from '@/lib/offlineCache';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 type RangeKey = '7d' | '14d' | '30d';
 
@@ -40,20 +41,25 @@ export function PerformanceReportCard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [range, setRange] = useState<RangeKey>('14d');
+  const mounted = useMountedRef();
 
   const loadData = useCallback(async () => {
     try {
       const d = await fetchDashboardSummary();
+      if (!mounted.current) return;
       setData(d);
       await setCached('perf_report', d);
     } catch {
+      if (!mounted.current) return;
       const stale = await getStaleCached<DashboardSummary>('perf_report');
-      if (stale) setData(stale);
+      if (stale && mounted.current) setData(stale);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [mounted]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

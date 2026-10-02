@@ -83,6 +83,7 @@ export function OcrTextExtractor({ imageUrl, onSearchTermSelected }: OcrTextExtr
       if (response.ok) {
         const data: OcrResult = await response.json();
         if (data.rawTexts && data.rawTexts.length > 0) {
+          if (!mounted.current) return;
           setResult(data);
           setExtracted(true);
         } else if (data.searchTerms && data.searchTerms.length > 0) {
@@ -110,6 +111,7 @@ export function OcrTextExtractor({ imageUrl, onSearchTermSelected }: OcrTextExtr
     } else {
       await Clipboard.setStringAsync(text);
     }
+    if (!mounted.current) return;
     setCopiedTerm(text);
     setTimeout(() => { if (mounted.current) setCopiedTerm(null); }, 2000);
   }, []);

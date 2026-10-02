@@ -29,6 +29,7 @@ import {
 import { buildBeatSync, formatBeatSyncSummary, getBeatSyncAccuracyLabel } from '@/lib/audioSyncEngine';
 import * as Clipboard from 'expo-clipboard';
 import { theme } from '@/lib/theme';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   EditPlan,
   CopyVariant,
@@ -74,6 +75,7 @@ export function VideoEditPlanCard({
   const [shuffling, setShuffling] = useState(false);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mounted = useMountedRef();
 
   const startProgress = useCallback(() => {
     setProgress(0);
@@ -125,16 +127,20 @@ export function VideoEditPlanCard({
         oneLiner,
         psychologyPreset: psychPreset,
       });
+      if (!mounted.current) return;
       setPlan(result);
       setCopyIndex(0);
       onPlanGenerated?.(result);
     } catch (err) {
+      if (!mounted.current) return;
       setError(err instanceof Error ? err.message : '편집 계획 생성에 실패했습니다.');
     } finally {
-      finishProgress();
-      setLoading(false);
+      if (mounted.current) {
+        finishProgress();
+        setLoading(false);
+      }
     }
-  }, [duration, psychPreset, productName, productCategory, platform, accentColor, hook, oneLiner, startProgress, finishProgress, onPlanGenerated]);
+  }, [duration, psychPreset, productName, productCategory, platform, accentColor, hook, oneLiner, startProgress, finishProgress, onPlanGenerated, mounted]);
 
   const copyToClipboard = useCallback(async (text: string, fieldKey: string) => {
     try {

@@ -4,6 +4,7 @@ import { Trophy, Crown, TrendingUp } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { TIER_CONFIG, type TierLevel } from '@/lib/creatorTier';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 interface LeaderboardEntry {
   id: string;
@@ -23,6 +24,7 @@ function formatKRW(amount: number): string {
 export function LeaderboardCard() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const mounted = useMountedRef();
 
   const loadLeaderboard = useCallback(async () => {
     try {
@@ -36,17 +38,17 @@ export function LeaderboardCard() {
         .order('rank', { ascending: true })
         .limit(10);
 
+      if (!mounted.current) return;
       if (data && data.length > 0) {
         setEntries(data as LeaderboardEntry[]);
       } else {
-        // Show sample leaderboard for initial state
         setEntries(generateSampleLeaderboard(period));
       }
     } catch {
-      setEntries(generateSampleLeaderboard(''));
+      if (mounted.current) setEntries(generateSampleLeaderboard(''));
     }
-    setLoading(false);
-  }, []);
+    if (mounted.current) setLoading(false);
+  }, [mounted]);
 
   useEffect(() => {
     loadLeaderboard();

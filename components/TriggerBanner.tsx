@@ -33,6 +33,7 @@ import {
   type PushAlert,
 } from '@/lib/reviewAutomation';
 import { setItem } from '@/lib/storage';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 type AlertSource = 'weather' | 'inventory';
 type AlertKind = 'rain' | 'snow' | 'cold_snap' | 'heat_wave' | 'low_stock' | 'breaktime' | 'closing_soon';
@@ -114,6 +115,7 @@ export function TriggerBanner() {
   const dismissedRef = useRef<Set<string>>(new Set());
   const slideAnim = useRef(new Animated.Value(-200)).current;
   const checkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mounted = useMountedRef();
 
   const checkAll = useCallback(async () => {
     try {
@@ -121,6 +123,8 @@ export function TriggerBanner() {
         checkWeatherAlerts(),
         fetchUnreadAlerts(),
       ]);
+
+      if (!mounted.current) return;
 
       const candidates: UnifiedAlert[] = [];
 

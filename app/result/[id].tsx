@@ -1092,20 +1092,38 @@ export default function ResultScreen() {
           },
         });
 
-      const runWave = async (indices: number[]) =>
-        Promise.allSettled(indices.map((idx) => invokeOne(idx)));
+      const runWave = async (indices: number[]): Promise<PromiseSettledResult<Awaited<ReturnType<typeof invokeOne>>>[]> => {
+        if (Platform.OS === 'web') {
+          return Promise.allSettled(indices.map((idx) => invokeOne(idx)));
+        }
+        const settled: PromiseSettledResult<Awaited<ReturnType<typeof invokeOne>>>[] = [];
+        for (const idx of indices) {
+          if (!mountedRef.current) return settled;
+          try {
+            const value = await invokeOne(idx);
+            settled.push({ status: 'fulfilled', value });
+          } catch (reason) {
+            settled.push({ status: 'rejected', reason });
+          }
+          await new Promise<void>((r) => setTimeout(r, 0));
+        }
+        return settled;
+      };
 
       const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-      setImageGenProgress({ phase: 'generating', progress: 0.1, message: '1~2번 이미지 병렬 생성 중...', completedCount: 0, totalCount: 5 });
+      const isNative = Platform.OS !== 'web';
+      const interWaveDelay = isNative ? 2000 : 12000;
+
+      setImageGenProgress({ phase: 'generating', progress: 0.1, message: isNative ? '1~2번 이미지 생성 중...' : '1~2번 이미지 병렬 생성 중...', completedCount: 0, totalCount: 5 });
       const r1 = await runWave(wave1);
       if (!mountedRef.current) return;
-      setImageGenProgress({ phase: 'generating', progress: 0.35, message: '3~4번 이미지 병렬 생성 중...', completedCount: 2, totalCount: 5 });
-      await delay(12000);
+      setImageGenProgress({ phase: 'generating', progress: 0.35, message: isNative ? '3~4번 이미지 생성 중...' : '3~4번 이미지 병렬 생성 중...', completedCount: 2, totalCount: 5 });
+      await delay(interWaveDelay);
       const r2 = await runWave(wave2);
       if (!mountedRef.current) return;
       setImageGenProgress({ phase: 'generating', progress: 0.65, message: '5번 이미지 생성 중...', completedCount: 4, totalCount: 5 });
-      await delay(12000);
+      await delay(interWaveDelay);
       const r3 = await runWave(wave3);
       if (!mountedRef.current) return;
       setImageGenProgress({ phase: 'generating', progress: 0.85, message: '생성 결과 수집 중...', completedCount: 5, totalCount: 5 });
@@ -1251,7 +1269,10 @@ export default function ResultScreen() {
 
   useEffect(() => {
     if (!scan || scan.tts_url || ttsUrl) return;
+    let ttsAbort: AbortController | null = null;
     const interval = setInterval(() => {
+      ttsAbort?.abort();
+      ttsAbort = new AbortController();
       Promise.resolve(
         supabase
           .from('scans')
@@ -1259,12 +1280,16 @@ export default function ResultScreen() {
           .eq('id', scan.id)
           .maybeSingle()
       ).then(({ data }: { data: { tts_url: string } | null }) => {
+        if (ttsAbort?.signal.aborted) return;
         if (data?.tts_url && mountedRef.current) {
           setTtsUrl(data.tts_url);
         }
       }).catch(() => {});
     }, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      ttsAbort?.abort();
+    };
   }, [scan, ttsUrl]);
 
 
@@ -1272,9 +1297,12 @@ export default function ResultScreen() {
   useEffect(() => {
     if (!scan || scan.tts_url || ttsUrl) return;
     let subscription: { remove: () => void } | null = null;
+    let ttsFgAbort: AbortController | null = null;
     if (typeof AppState.addEventListener === 'function') {
       subscription = AppState.addEventListener('change', (nextAppState: string) => {
         if (nextAppState === 'active' && mountedRef.current) {
+          ttsFgAbort?.abort();
+          ttsFgAbort = new AbortController();
           Promise.resolve(
             supabase
               .from('scans')
@@ -1282,6 +1310,7 @@ export default function ResultScreen() {
               .eq('id', scan.id)
               .maybeSingle()
           ).then(({ data }) => {
+            if (ttsFgAbort?.signal.aborted) return;
             if (data?.tts_url && mountedRef.current) {
               setTtsUrl(data.tts_url);
             }
@@ -1289,7 +1318,10 @@ export default function ResultScreen() {
         }
       });
     }
-    return () => subscription?.remove();
+    return () => {
+      ttsFgAbort?.abort();
+      subscription?.remove();
+    };
   }, [scan, ttsUrl]);
 
   // Resume polling for in-progress video generation jobs on mount
@@ -1297,6 +1329,7 @@ export default function ResultScreen() {
     if (!scan || generatedVideoUrl || isGeneratingVideo) return;
     let cancelled = false;
     let intervalId: ReturnType<typeof setTimeout> | null = null;
+    let pollAbort: AbortController | null = null;
 
     (async () => {
       try {
@@ -1362,6 +1395,8 @@ export default function ResultScreen() {
 
           const pollOnce = async () => {
             if (cancelled) return;
+            pollAbort?.abort();
+            pollAbort = new AbortController();
             if (Date.now() - startTime > POLL_TIMEOUT_MS) {
               if (mountedRef.current) {
                 setVideoGenError('영상 생성 시간이 초과되었습니다. 다시 시도해주세요.');
@@ -1375,6 +1410,7 @@ export default function ResultScreen() {
                 body: { mode: 'poll', taskId, scanId: scan.id },
               });
 
+              if (pollAbort.signal.aborted || cancelled) return;
               if (pollError) {
                 consecutiveErrors++;
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
@@ -1445,6 +1481,7 @@ export default function ResultScreen() {
 
     return () => {
       cancelled = true;
+      pollAbort?.abort();
       if (intervalId) clearTimeout(intervalId);
     };
   }, [scan, generatedVideoUrl, isGeneratingVideo]);
@@ -1706,6 +1743,7 @@ export default function ResultScreen() {
     const MAX_POLL_ERRORS = 10;
     const ANALYSIS_TIMEOUT_MS = 300000;
     const analysisStartTime = Date.now();
+    let analysisPollAbort: AbortController | null = null;
     const pollInterval = setInterval(async () => {
       if (!mountedRef.current) return;
       if (Date.now() - analysisStartTime > ANALYSIS_TIMEOUT_MS) {
@@ -1716,18 +1754,22 @@ export default function ResultScreen() {
         }
         return;
       }
+      analysisPollAbort?.abort();
+      analysisPollAbort = new AbortController();
       try {
         const { data: jobRow } = await supabase
           .from('render_jobs')
           .select('*')
           .eq('id', scan.analysis_job_id)
           .maybeSingle();
+        if (analysisPollAbort.signal.aborted) return;
         if (jobRow && (jobRow.status === 'done' || jobRow.status === 'error')) {
           clearInterval(pollInterval);
           handleJobUpdate(jobRow as RenderJob);
         }
         pollErrorCount = 0;
       } catch {
+        if (analysisPollAbort.signal.aborted) return;
         pollErrorCount++;
         if (pollErrorCount >= MAX_POLL_ERRORS) {
           clearInterval(pollInterval);
@@ -1742,6 +1784,7 @@ export default function ResultScreen() {
     return () => {
       sub.unsubscribe();
       clearInterval(pollInterval);
+      analysisPollAbort?.abort();
       handleJobUpdateRef.current = null;
     };
   }, [scan?.analysis_job_id, retryCount]);
@@ -1751,9 +1794,12 @@ export default function ResultScreen() {
     if (analysisStatus !== 'processing') return;
 
     let subscription: { remove: () => void } | null = null;
+    let fgAbort: AbortController | null = null;
     if (typeof AppState.addEventListener === 'function') {
       subscription = AppState.addEventListener('change', (nextAppState: string) => {
         if (nextAppState === 'active' && mountedRef.current) {
+          fgAbort?.abort();
+          fgAbort = new AbortController();
           Promise.resolve(
             supabase
               .from('render_jobs')
@@ -1761,6 +1807,7 @@ export default function ResultScreen() {
               .eq('id', scan.analysis_job_id!)
               .maybeSingle()
           ).then(({ data }) => {
+            if (fgAbort?.signal.aborted) return;
             if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
               handleJobUpdateRef.current?.(data as RenderJob);
             }
@@ -1769,7 +1816,10 @@ export default function ResultScreen() {
       });
     }
 
-    return () => subscription?.remove();
+    return () => {
+      fgAbort?.abort();
+      subscription?.remove();
+    };
   }, [scan?.analysis_job_id, analysisStatus]);
 
   useEffect(() => {
@@ -1804,6 +1854,7 @@ export default function ResultScreen() {
         const dataUrl = await urlToDataUrl(url);
         const compressed = await prepareImageForApi(dataUrl, 1024, 0.8);
         if (!cancelled) {
+          if (!mountedRef.current) return;
           setCaptureImageUrl(compressed);
         }
       } catch {
@@ -1811,6 +1862,7 @@ export default function ResultScreen() {
           try {
             const fallbackDataUrl = await urlToDataUrl(url);
             if (!cancelled) {
+              if (!mountedRef.current) return;
               setCaptureImageUrl(fallbackDataUrl);
             }
           } catch {
@@ -1825,6 +1877,7 @@ export default function ResultScreen() {
       try {
         const size = await getImageSize(url);
         if (!cancelled && size.width && size.height) {
+          if (!mountedRef.current) return;
           setHeroAspect(size.width / size.height);
         }
       } catch {
@@ -3216,7 +3269,7 @@ export default function ResultScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? safeTop : 0}
       >
       <ScrollView ref={scrollViewRef} contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 + insets.bottom }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

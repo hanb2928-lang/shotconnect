@@ -9,6 +9,7 @@ import {
 import { TrendingUp, Zap, Sparkles, CircleAlert as AlertCircle, ChevronDown, ChevronUp, Lightbulb, Info } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { VIRAL_PREDICT_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
+import { useMountedRef } from '@/hooks/useMountedRef';
 
 interface ViralFactor {
   label: string;
@@ -62,6 +63,7 @@ export function ViralPredictor({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [guideExpanded, setGuideExpanded] = useState(false);
+  const mounted = useMountedRef();
 
   const handlePredict = useCallback(async () => {
     setLoading(true);
@@ -91,8 +93,10 @@ export function ViralPredictor({
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
+      if (!mounted.current) return;
       if (response.ok) {
         const data = await response.json();
+        if (!mounted.current) return;
         if (data.error) { setError(data.error); setLoading(false); return; }
         if (typeof data.score !== 'number' || !data.factors || !Array.isArray(data.factors)) { setError('예측 응답 형식이 올바르지 않습니다'); setLoading(false); return; }
         setPrediction(data);
@@ -100,10 +104,10 @@ export function ViralPredictor({
         setError('예측에 실패했어요. 다시 시도해주세요');
       }
     } catch {
-      setError('네트워크 오류로 예측에 실패했어요');
+      if (mounted.current) setError('네트워크 오류로 예측에 실패했어요');
     }
-    setLoading(false);
-  }, [hook, title, productName, productCategory, hashtags, comicStyle, panelCount, hasTTS, episodeMode, trendingKeywords]);
+    if (mounted.current) setLoading(false);
+  }, [hook, title, productName, productCategory, hashtags, comicStyle, panelCount, hasTTS, episodeMode, trendingKeywords, mounted]);
 
   const gradeColor = (grade: string) => {
     if (grade === 'S') return theme.colors.accent[400];

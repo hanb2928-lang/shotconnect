@@ -99,6 +99,7 @@ export function VariabilityEngineCard() {
   const handleCopy = useCallback(async (text: string, idx: number) => {
     try {
       await Clipboard.setStringAsync(text);
+      if (!mounted.current) return;
       setCopiedIdx(idx);
       setTimeout(() => { if (mounted.current) setCopiedIdx(null); }, 2000);
     } catch {

@@ -85,8 +85,9 @@ export function TrendCopyBar({ productName, productCategory, tags, platform, onA
       } else {
         await Clipboard.setStringAsync(phrase);
       }
+      if (!mounted.current) return;
       setCopiedIndex(index);
-      setTimeout(() => setCopiedIndex(null), 2000);
+      setTimeout(() => { if (mounted.current) setCopiedIndex(null); }, 2000);
     } catch {
       // clipboard failed silently
     }

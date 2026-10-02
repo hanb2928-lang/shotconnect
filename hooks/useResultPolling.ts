@@ -81,6 +81,8 @@ export function useResultPolling(
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
     let softWarnTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollAbort: AbortController | null = null;
+    let forceSyncAbort: AbortController | null = null;
     const pollErrorWindow: number[] = [];
 
     const cleanup = () => {
@@ -88,17 +90,21 @@ export function useResultPolling(
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
+      pollAbort?.abort();
+      forceSyncAbort?.abort();
     };
 
     // Direct DB force-sync: query video_jobs table as a fallback.
     const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null } | null> => {
+      forceSyncAbort?.abort();
+      forceSyncAbort = new AbortController();
       try {
         const { data, error: dbError } = await supabase
           .from('video_jobs')
           .select('status, video_url')
           .eq('task_id', jobId)
           .maybeSingle();
-        if (dbError || !data) return null;
+        if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null };
         return { status: row.status, videoUrl: row.video_url };
       } catch {
@@ -109,6 +115,8 @@ export function useResultPolling(
     // Also check by scan_id if the task_id lookup fails.
     const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null } | null> => {
       if (!scanId) return null;
+      forceSyncAbort?.abort();
+      forceSyncAbort = new AbortController();
       try {
         const { data, error: dbError } = await supabase
           .from('video_jobs')
@@ -117,7 +125,7 @@ export function useResultPolling(
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (dbError || !data) return null;
+        if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null };
         return { status: row.status, videoUrl: row.video_url };
       } catch {
@@ -137,6 +145,10 @@ export function useResultPolling(
     const pollOnce = async () => {
       if (cancelled || settledRef.current) return;
 
+      // Abort any previous in-flight poll before starting a new one.
+      pollAbort?.abort();
+      pollAbort = new AbortController();
+
       const elapsed = Date.now() - startTime;
       if (elapsed > HARD_TIMEOUT_MS) {
         settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
@@ -151,7 +163,8 @@ export function useResultPolling(
           body: { mode: 'poll', taskId: jobId, scanId: scanId ?? undefined },
         });
 
-        if (!cancelled && pollData && typeof pollData === 'object') {
+        if (pollAbort.signal.aborted || cancelled) return;
+        if (pollData && typeof pollData === 'object') {
           // Do NOT reset the error window on a successful edge function response.
           // On a flaky network, sporadic successes would keep the count below
           // the threshold, trapping the user in an infinite loading state.
@@ -199,6 +212,7 @@ export function useResultPolling(
       // the poll failed (but hasn't hit the threshold yet).
       if (!cancelled && !settledRef.current && pollErrorWindow.length > 0) {
         const dbResult = await forceSyncDb();
+        if (cancelled) return;
         if (dbResult) {
           handleResult(dbResult.status, dbResult.videoUrl);
           if (settledRef.current) return;
