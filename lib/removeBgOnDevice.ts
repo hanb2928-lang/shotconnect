@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 
 export type RemoveBgResult =
   | { ok: true; dataUrl: string }
@@ -13,6 +14,10 @@ export async function removeBackgroundOnDevice(
   }
 
   try {
+    const cacheKey = mediaCacheKey('removeBgOnDevice', { imageDataUrl });
+    const cached = await mediaCacheGet(cacheKey);
+    if (cached) return { ok: true, dataUrl: cached };
+
     const img = await loadImage(imageDataUrl);
     const maxDim = 1024;
     const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
@@ -79,6 +84,7 @@ export async function removeBackgroundOnDevice(
     const resultDataUrl = canvas.toDataURL('image/png');
     canvas.width = 0;
     canvas.height = 0;
+    await mediaCacheSet(cacheKey, resultDataUrl);
     return { ok: true, dataUrl: resultDataUrl };
   } catch (err) {
     return {

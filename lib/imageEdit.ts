@@ -6,6 +6,7 @@ import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
 import { isLowEndDevice } from '@/lib/devicePerformance';
 import { withFileLock } from '@/lib/fileLock';
+import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -254,13 +255,18 @@ export async function compositeOnBackground(
   bgStyle: 'studio' | 'retail' | 'natural' | 'gradient' | 'none',
 ): Promise<string> {
   if (bgStyle === 'none') return productDataUrl;
+
+  const cacheKey = mediaCacheKey('compositeBg', { bgStyle, productDataUrl });
+  const cached = await mediaCacheGet(cacheKey);
+  if (cached) return cached;
+
   const bgUrl = `/bg-${bgStyle}.webp`;
+  const result = Platform.OS === 'web' && typeof document !== 'undefined'
+    ? await compositeOnBackgroundWeb(productDataUrl, bgUrl)
+    : await compositeOnBackgroundNative(productDataUrl, bgUrl);
 
-  if (Platform.OS === 'web' && typeof document !== 'undefined') {
-    return compositeOnBackgroundWeb(productDataUrl, bgUrl);
-  }
-
-  return compositeOnBackgroundNative(productDataUrl, bgUrl);
+  await mediaCacheSet(cacheKey, result);
+  return result;
 }
 
 async function compositeOnBackgroundWeb(productDataUrl: string, bgUrl: string): Promise<string> {
