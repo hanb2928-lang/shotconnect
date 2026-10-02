@@ -298,12 +298,21 @@ function dispatch(
   transferables?: Transferable[],
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    if (pool.length === 0) {
+      reject(new Error('No workers available'));
+      return;
+    }
     pending.set(request.id, { resolve, reject, transferables });
 
     // Find a worker with the fewest pending tasks (simplified: round-robin)
     const worker = pool[request.id % pool.length];
     if (worker) {
-      worker.postMessage(request, transferables || []);
+      try {
+        worker.postMessage(request, transferables || []);
+      } catch (err) {
+        pending.delete(request.id);
+        reject(err instanceof Error ? err : new Error('Worker dispatch failed'));
+      }
     } else {
       // No workers available — reject
       pending.delete(request.id);
@@ -319,17 +328,34 @@ function ensureInitialized(): void {
   if (Platform.OS !== 'web') return;
   if (typeof Worker === 'undefined') return;
 
-  const numWorkers = Math.min(MAX_POOL_SIZE, navigator.hardwareConcurrency || 2);
-  for (let i = 0; i < numWorkers; i++) {
-    const worker = createWorkerFromSource(WORKER_SOURCE);
-    if (worker) pool.push(worker);
+  let numWorkers = 2;
+  try {
+    numWorkers = Math.min(MAX_POOL_SIZE, navigator.hardwareConcurrency || 2);
+  } catch {
+    // navigator.hardwareConcurrency can throw in some embedded / restricted contexts
   }
+
+  for (let i = 0; i < numWorkers; i++) {
+    try {
+      const worker = createWorkerFromSource(WORKER_SOURCE);
+      if (worker) pool.push(worker);
+    } catch {
+      // Individual worker creation failure — skip this slot
+    }
+  }
+  // If no workers were created, callers will fall back to main-thread
+  // execution via isWorkerPoolAvailable() returning false.
 }
 
 export function isWorkerPoolAvailable(): boolean {
   if (Platform.OS !== 'web') return false;
   if (typeof Worker === 'undefined') return false;
-  ensureInitialized();
+  try {
+    ensureInitialized();
+  } catch {
+    // If initialization throws for any reason, treat as unavailable
+    return false;
+  }
   return pool.length > 0;
 }
 

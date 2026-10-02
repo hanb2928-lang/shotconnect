@@ -16,6 +16,65 @@ import { muxVideoWithAudio, type MuxResult, type MuxProgressCallback } from '@/l
 import { flushPostSynthesisMemory } from '@/lib/synthesisGc';
 import { withFileLock } from '@/lib/fileLock';
 
+const MEDIA_METADATA_TIMEOUT_MS = 10_000;
+
+/**
+ * Wait until a video URL's metadata is fully loaded (loadedmetadata event)
+ * before attempting to mux it. This prevents the preview freeze that occurs
+ * when muxVideoWithAudio is called on a video whose dimensions and duration
+ * are not yet known — the canvas would be created at 0x0 and the recorder
+ * would hang indefinitely waiting for frames that never arrive.
+ */
+function waitForVideoMetadata(url: string): Promise<boolean> {
+  if (typeof document === 'undefined') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const probe = document.createElement('video');
+    probe.src = url;
+    probe.muted = true;
+    probe.preload = 'metadata';
+    let settled = false;
+
+    const cleanup = () => {
+      probe.removeAttribute('src');
+      probe.load();
+    };
+
+    const onLoaded = () => {
+      if (settled) return;
+      if (probe.readyState >= 1 && probe.videoWidth > 0 && isFinite(probe.duration)) {
+        settled = true;
+        clearTimeout(timer);
+        probe.removeEventListener('loadedmetadata', onLoaded);
+        probe.removeEventListener('error', onError);
+        cleanup();
+        resolve(true);
+      }
+    };
+
+    const onError = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      probe.removeEventListener('loadedmetadata', onLoaded);
+      probe.removeEventListener('error', onError);
+      cleanup();
+      resolve(false);
+    };
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      probe.removeEventListener('loadedmetadata', onLoaded);
+      probe.removeEventListener('error', onError);
+      cleanup();
+      resolve(false);
+    }, MEDIA_METADATA_TIMEOUT_MS);
+
+    probe.addEventListener('loadedmetadata', onLoaded);
+    probe.addEventListener('error', onError, { once: true });
+  });
+}
+
 export interface ClipMergeInput {
   id: string;
   videoUrl: string;
@@ -123,6 +182,14 @@ export async function mergeClipsSequentially(
       if (queueState !== 'running') break;
 
       try {
+        // Guard: wait for the video URL's metadata to load before
+        // attempting to mux. Without this, muxVideoWithAudio may
+        // create a 0x0 canvas and hang the recorder indefinitely.
+        const metaReady = await waitForVideoMetadata(clip.videoUrl);
+        if (!metaReady) {
+          throw new Error('비디오 메타데이터 로딩 실패 (timeout)');
+        }
+
         const mux = await muxVideoWithAudio(clip.videoUrl, clip.audioUrl, clipProgress);
 
         if (mux) {

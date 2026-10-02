@@ -216,18 +216,36 @@ export async function muxVideoWithAudio(
     ...audioTracks,
   ]);
 
-  // Pick the best supported mime type
+  // Pick the best supported mime type (always returns a value, falling
+  // back to 'video/webm' if no hardware codec is supported)
   const mimeType = pickMimeType();
-  if (!mimeType) {
-    audioCtx.close().catch(() => {});
-    return null;
-  }
 
-  const recorder = new MediaRecorder(combinedStream, {
-    mimeType,
-    videoBitsPerSecond: 6_000_000,
-    audioBitsPerSecond: 128_000,
-  });
+  // Some browsers report isTypeSupported=true but still throw when
+  // constructing the recorder with that codec. Wrap in try/catch and
+  // progressively degrade to safer codecs.
+  let recorder: MediaRecorder;
+  try {
+    recorder = new MediaRecorder(combinedStream, {
+      mimeType,
+      videoBitsPerSecond: 6_000_000,
+      audioBitsPerSecond: 128_000,
+    });
+  } catch {
+    try {
+      recorder = new MediaRecorder(combinedStream, {
+        mimeType: 'video/webm;codecs=vp8,opus',
+        videoBitsPerSecond: 6_000_000,
+        audioBitsPerSecond: 128_000,
+      });
+    } catch {
+      try {
+        recorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
+      } catch {
+        audioCtx.close().catch(() => {});
+        return null;
+      }
+    }
+  }
 
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => {
@@ -465,13 +483,18 @@ const HW_CODEC_CANDIDATES = [
   'video/webm',
 ];
 
-function pickMimeType(): string | null {
-  for (const type of HW_CODEC_CANDIDATES) {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
-      return type;
+function pickMimeType(): string {
+  if (typeof MediaRecorder !== 'undefined') {
+    for (const type of HW_CODEC_CANDIDATES) {
+      try {
+        if (MediaRecorder.isTypeSupported(type)) return type;
+      } catch {
+        // isTypeSupported can throw on malformed codec strings in some browsers
+      }
     }
   }
-  return null;
+  // Absolute last-resort fallback — always valid per spec
+  return 'video/webm';
 }
 
 /**
