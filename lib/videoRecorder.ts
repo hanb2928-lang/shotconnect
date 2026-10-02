@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { uint8ArrayToBase64 } from '@/lib/base64';
+import { encodeBase64InWorker } from '@/lib/workerPool';
 
 export interface VideoRecordingOptions {
   maxDurationMs?: number;
@@ -116,26 +117,35 @@ export function getRecordingTimeMs(_recorder: MediaRecorder | null): number {
 }
 
 export async function blobToBase64(blob: Blob): Promise<{ base64: string; mimeType: string }> {
+  const mimeType = blob.type || 'video/webm';
   if (Platform.OS === 'web') {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const commaIdx = result.indexOf(',');
-        const header = result.slice(5, commaIdx);
-        const mimeType = header.split(';')[0] || 'video/webm';
-        const base64 = result.slice(commaIdx + 1);
-        resolve({ base64, mimeType });
-      };
-      reader.onerror = () => reject(new Error('비디오 변환 실패'));
-      reader.readAsDataURL(blob);
-    });
+    // On web, try to offload base64 encoding to a Web Worker to avoid
+    // blocking the main thread. The ArrayBuffer is transferred (zero-copy)
+    // to the worker. Falls back to FileReader if workers aren't available.
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const base64 = await encodeBase64InWorker(arrayBuffer);
+      return { base64, mimeType };
+    } catch {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const commaIdx = result.indexOf(',');
+          const header = result.slice(5, commaIdx);
+          const detectedType = header.split(';')[0] || 'video/webm';
+          const base64 = result.slice(commaIdx + 1);
+          resolve({ base64, mimeType: detectedType });
+        };
+        reader.onerror = () => reject(new Error('비디오 변환 실패'));
+        reader.readAsDataURL(blob);
+      });
+    }
   }
-  // Native: FileReader doesn't exist on Hermes/JSC.
-  // Encode in chunks with yields between them so the UI thread can process
-  // bridge messages and React Native timers between chunks. Without this,
-  // encoding a 15MB+ video blob synchronously can block for seconds and
-  // trigger an ANR / WebView bridge timeout.
+  // Native: no Web Worker support. Encode in chunks with yields between
+  // them so the UI thread can process bridge messages and React Native
+  // timers between chunks. Without this, encoding a 15MB+ video blob
+  // synchronously can block for seconds and trigger an ANR.
   const arrayBuffer = await blob.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
   const CHUNK_SIZE = 49_152; // 48KB → 64KB base64 output per chunk
@@ -149,7 +159,5 @@ export async function blobToBase64(blob: Blob): Promise<{ base64: string; mimeTy
       await new Promise<void>((r) => setTimeout(r, 0));
     }
   }
-  const base64 = parts.join('');
-  const mimeType = blob.type || 'video/webm';
-  return { base64, mimeType };
+  return { base64: parts.join(''), mimeType };
 }

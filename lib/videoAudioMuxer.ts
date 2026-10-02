@@ -122,6 +122,59 @@ export async function muxVideoWithAudio(
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
+  // If OffscreenCanvas is supported, transfer the canvas's control to a
+  // worker so the per-frame drawImage loop runs off the main thread.
+  // This keeps the UI responsive during the real-time muxing capture.
+  let offscreenWorker: Worker | null = null;
+  let useOffscreenDraw = false;
+  if (typeof OffscreenCanvas !== 'undefined' && canvas.transferControlToOffscreen) {
+    try {
+      const offscreen = canvas.transferControlToOffscreen();
+      const workerSource = `
+        let canvas = null;
+        let ctx = null;
+        self.onmessage = function(e) {
+          if (e.data.type === 'init') {
+            canvas = e.data.canvas;
+            ctx = canvas.getContext('2d');
+            self.postMessage({ type: 'ready' });
+          } else if (e.data.type === 'draw') {
+            // Worker can't drawImage(video) directly — the video element
+            // lives on the main thread. We use ImageBitmap transfer instead.
+            if (ctx && e.data.bitmap) {
+              ctx.drawImage(e.data.bitmap, 0, 0, canvas.width, canvas.height);
+              e.data.bitmap.close();
+            }
+          } else if (e.data.type === 'done') {
+            self.postMessage({ type: 'done' });
+          }
+        };
+      `;
+      const blob = new Blob([workerSource], { type: 'application/javascript' });
+      const workerUrl = URL.createObjectURL(blob);
+      offscreenWorker = new Worker(workerUrl);
+      offscreenWorker.postMessage({ type: 'init', canvas: offscreen }, [offscreen]);
+      useOffscreenDraw = await new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => resolve(false), 2000);
+        offscreenWorker!.onmessage = () => {
+          clearTimeout(timeout);
+          resolve(true);
+        };
+        offscreenWorker!.onerror = () => {
+          clearTimeout(timeout);
+          resolve(false);
+        };
+      });
+      if (!useOffscreenDraw) {
+        offscreenWorker.terminate();
+        offscreenWorker = null;
+      }
+    } catch {
+      offscreenWorker = null;
+      useOffscreenDraw = false;
+    }
+  }
+
   // Set up audio graph for capture
   const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const audioCtx = new AudioCtx();
@@ -184,6 +237,11 @@ export async function muxVideoWithAudio(
 
     const cleanup = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
+      if (offscreenWorker) {
+        offscreenWorker.postMessage({ type: 'done' });
+        offscreenWorker.terminate();
+        offscreenWorker = null;
+      }
       audio.pause();
       video.pause();
       audio.src = '';
@@ -226,8 +284,23 @@ export async function muxVideoWithAudio(
     // Start playback and recording
     startTime = performance.now();
 
-    const drawFrame = () => {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const drawFrame = async () => {
+      if (useOffscreenDraw && offscreenWorker) {
+        // Offscreen path: transfer the video frame as an ImageBitmap
+        // to the worker, which draws it to the OffscreenCanvas. This
+        // keeps the per-frame drawImage work off the main thread.
+        try {
+          const bitmap = await createImageBitmap(video);
+          offscreenWorker.postMessage({ type: 'draw', bitmap }, [bitmap]);
+        } catch {
+          // createImageBitmap can fail on some browsers — fall back
+          // to synchronous main-thread draw for this frame.
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
+      } else {
+        // Main-thread path: draw video frame directly to canvas.
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
 
       if (onProgress && durationSec > 0) {
         const elapsed = (performance.now() - startTime) / 1000;

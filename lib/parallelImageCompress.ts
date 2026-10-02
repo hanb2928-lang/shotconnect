@@ -1,11 +1,10 @@
 import { Platform } from 'react-native';
 import { prepareImageForApi } from './imageEdit';
 import { cleanBase64, getMimeTypeFromDataUrl, buildDataUrl } from './base64';
+import { compressImageInWorker, isWorkerPoolAvailable } from './workerPool';
 
 const EDGE_FN_MAX_DIMENSION = 1080;
 const EDGE_FN_QUALITY = 0.72;
-// Native has limited memory and native thread pool for image manipulation;
-// 5 concurrent ImageManipulator calls can OOM on low-end Android devices.
 const PARALLEL_BATCH_SIZE = Platform.OS === 'web' ? 5 : 1;
 
 export interface CompressedImage {
@@ -20,7 +19,19 @@ export async function compressForEdgeFunction(
   quality = EDGE_FN_QUALITY,
 ): Promise<CompressedImage> {
   try {
-    const compressed = await prepareImageForApi(dataUrl, maxDimension, quality);
+    // On web, try to offload image compression to a Web Worker with
+    // OffscreenCanvas. This keeps canvas resize/encode work off the
+    // main thread so UI stays responsive during batch processing.
+    let compressed: string;
+    if (isWorkerPoolAvailable()) {
+      try {
+        compressed = await compressImageInWorker(dataUrl, maxDimension, quality);
+      } catch {
+        compressed = await prepareImageForApi(dataUrl, maxDimension, quality);
+      }
+    } else {
+      compressed = await prepareImageForApi(dataUrl, maxDimension, quality);
+    }
     const mimeType = getMimeTypeFromDataUrl(compressed);
     return {
       base64: cleanBase64(compressed),
