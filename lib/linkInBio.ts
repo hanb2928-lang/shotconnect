@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { sanitizeForDatabaseAndExport } from '@/lib/textSanitizer';
 
 export interface LinkInBioPage {
   id: string;
@@ -61,9 +62,16 @@ export async function updateLinkInBio(
   updates: Partial<Pick<LinkInBioPage, 'title' | 'bio' | 'scan_ids'>>,
 ): Promise<LinkInBioPage | null> {
   try {
+    const sanitized: Record<string, unknown> = { ...updates, updated_at: new Date().toISOString() };
+    if (typeof updates.title === 'string') {
+      sanitized.title = sanitizeForDatabaseAndExport(updates.title, 200);
+    }
+    if (typeof updates.bio === 'string') {
+      sanitized.bio = sanitizeForDatabaseAndExport(updates.bio, 1000);
+    }
     const { data, error } = await supabase
       .from('link_in_bio')
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update(sanitized)
       .eq('id', id)
       .select()
       .single();

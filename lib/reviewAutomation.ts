@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { sanitizeForDatabaseAndExport } from '@/lib/textSanitizer';
 
 export interface CustomerReview {
   id: string;
@@ -72,8 +73,8 @@ export async function createReview(
   const { data, error } = await supabase
     .from('customer_reviews')
     .insert({
-      review_text: review.review_text,
-      reviewer_name: review.reviewer_name ?? null,
+      review_text: sanitizeForDatabaseAndExport(review.review_text, 2000),
+      reviewer_name: review.reviewer_name ? sanitizeForDatabaseAndExport(review.reviewer_name, 100) : null,
       rating: review.rating ?? 5,
       table_number: review.table_number ?? null,
       store_photo_url: review.store_photo_url ?? null,
@@ -124,11 +125,11 @@ export async function createInventoryItem(
   const { data, error } = await supabase
     .from('inventory_items')
     .insert({
-      name: item.name,
+      name: sanitizeForDatabaseAndExport(item.name, 200),
       quantity: item.quantity ?? 0,
       unit: item.unit ?? '개',
       low_stock_threshold: item.low_stock_threshold ?? 3,
-      category: item.category ?? null,
+      category: item.category ? sanitizeForDatabaseAndExport(item.category, 100) : null,
       is_active: true,
       last_updated: new Date().toISOString(),
     })
@@ -200,7 +201,13 @@ export async function createPushAlert(
 ): Promise<PushAlert | null> {
   const { data, error } = await supabase
     .from('push_alerts')
-    .insert(alert)
+    .insert({
+      ...alert,
+      title: sanitizeForDatabaseAndExport(alert.title, 200),
+      body: sanitizeForDatabaseAndExport(alert.body, 1000),
+      hook_phrase: alert.hook_phrase ? sanitizeForDatabaseAndExport(alert.hook_phrase, 100) : null,
+      prompt_text: alert.prompt_text ? sanitizeForDatabaseAndExport(alert.prompt_text, 500) : null,
+    })
     .select('*')
     .maybeSingle();
   if (error) throw new Error(error.message);
