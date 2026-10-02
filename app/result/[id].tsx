@@ -675,7 +675,11 @@ export default function ResultScreen() {
     // Before submitting a new job, check if a previous one already completed
     // (e.g. after a client-side timeout the server may have finished rendering)
     try {
-      const recovered = await recoverVideoJob(scan.id);
+      const RECOVER_TIMEOUT_MS = 10_000;
+      const recovered = await Promise.race([
+        recoverVideoJob(scan.id),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), RECOVER_TIMEOUT_MS)),
+      ]);
       if (recovered?.status === 'SUCCESS' && recovered.videoUrl) {
         if (mountedRef.current) {
           setGeneratedVideoUrl(recovered.videoUrl);
@@ -705,8 +709,12 @@ export default function ResultScreen() {
       setVisionAnalyzing(true);
       setVideoGenProgress({ phase: 'submitting', progress: 0.02, message: 'Vision AI 사물 분석 중...', elapsedSec: 0 });
       try {
-        visionData = await analyzeProductVision(videoCutImages.slice(0, 5), sanitizeVideoProductName(scan.product_name) || undefined, scan.id);
-        if (mountedRef.current) setProductVision(visionData);
+        const VISION_TIMEOUT_MS = 30_000;
+        visionData = await Promise.race([
+          analyzeProductVision(videoCutImages.slice(0, 5), sanitizeVideoProductName(scan.product_name) || undefined, scan.id),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), VISION_TIMEOUT_MS)),
+        ]);
+        if (visionData && mountedRef.current) setProductVision(visionData);
       } catch {
         // Vision analysis failed — proceed without it
       }
@@ -814,7 +822,10 @@ export default function ResultScreen() {
         },
       );
 
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        videoGenLockRef.current = false;
+        return;
+      }
 
       // Job submitted — switch to drafting phase. Keep the progress UI alive
       // so the user sees continuous feedback while the backend renders.
@@ -944,9 +955,9 @@ export default function ResultScreen() {
         clearInterval(draftProgressTimerRef.current);
         draftProgressTimerRef.current = null;
       }
+    } finally {
+      videoGenLockRef.current = false;
     }
-
-    videoGenLockRef.current = false;
   }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage]);
 
   const handleAiImageGenerate = useCallback(async () => {
@@ -1052,8 +1063,6 @@ export default function ResultScreen() {
 
       const results = [...r1, ...r2, ...r3];
 
-      if (!mountedRef.current) return;
-
       const images: string[] = [];
       const failedErrors: string[] = [];
 
@@ -1102,10 +1111,10 @@ export default function ResultScreen() {
         setImageGenError(err instanceof Error ? err.message : '이미지 생성 중 오류가 발생했습니다.');
         setImageGenProgress({ phase: 'error', progress: 1, message: '생성 실패', completedCount: 0, totalCount: 5 });
       }
-    }
-
-    if (mountedRef.current) {
-      setIsGeneratingImage(false);
+    } finally {
+      if (mountedRef.current) {
+        setIsGeneratingImage(false);
+      }
     }
 
     // Auto-clear progress after 3 seconds on success

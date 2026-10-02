@@ -232,6 +232,7 @@ export default function SynthesisScreen() {
 
   useEffect(() => {
     if (!isGenerating) return;
+    const GEN_TIMEOUT_MS = 180_000;
     const timer = setInterval(() => {
       const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
       setVideoProgress((prev) => {
@@ -246,7 +247,15 @@ export default function SynthesisScreen() {
         return { ...prev, message: msg || prev.message, elapsedSec: elapsed, progress: nextProgress };
       });
     }, 1000);
-    return () => clearInterval(timer);
+    const timeout = setTimeout(() => {
+      setIsGenerating(false);
+      setVideoProgress(null);
+      setError('영상 생성 시간이 초과되었습니다. 다시 시도해주세요.');
+    }, GEN_TIMEOUT_MS);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(timeout);
+    };
   }, [isGenerating]);
 
   const handleDownload = useCallback(() => {
