@@ -18,6 +18,19 @@ config.server = {
 
 config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
 
+config.transformer = {
+  ...config.transformer,
+  minifierConfig: {
+    ...(config.transformer.minifierConfig || {}),
+    keep_classnames: true,
+    keep_fnames: true,
+  },
+  // Raise the inline-bytes threshold so small assets (icons, tiny
+  // images) are embedded as base64 instead of emitting separate
+  // HTTP requests that block first paint on web preview.
+  maxWorkerSize: 512 * 1024 * 1024,
+};
+
 const projectRoot = __dirname;
 
 const originalResolveRequest = config.resolver.resolveRequest;
@@ -34,12 +47,6 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     return originalResolveRequest(context, moduleName, platform);
   }
   return context.resolveRequest(context, moduleName, platform);
-};
-
-config.transformer.minifierConfig = {
-  ...(config.transformer.minifierConfig || {}),
-  keep_classnames: true,
-  keep_fnames: true,
 };
 
 module.exports = config;
