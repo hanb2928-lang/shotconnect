@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { safeSupabaseCall } from '@/lib/apiClient';
 import type { AffiliatePlatformKey } from '@/components/AffiliatePlatformSwitch';
 
 export interface AffiliatePlatformRecord {
@@ -24,24 +25,26 @@ function toManaged(ap: AffiliatePlatformRecord): ManagedAffiliatePlatform {
 }
 
 export async function fetchAffiliatePlatforms(): Promise<ManagedAffiliatePlatform[]> {
-  const { data, error } = await supabase
-    .from('affiliate_platforms')
-    .select('*')
-    .order('sort_order', { ascending: true });
-
-  if (error) throw error;
-  return (data as AffiliatePlatformRecord[]).map(toManaged);
+  const data = await safeSupabaseCall(async () => {
+    const result = await supabase
+      .from('affiliate_platforms')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    return { data: result.data as AffiliatePlatformRecord[] | null, error: result.error };
+  });
+  return (data ?? []).map(toManaged);
 }
 
 export async function fetchEnabledAffiliatePlatforms(): Promise<ManagedAffiliatePlatform[]> {
-  const { data, error } = await supabase
-    .from('affiliate_platforms')
-    .select('*')
-    .eq('is_enabled', true)
-    .order('sort_order', { ascending: true });
-
-  if (error) throw error;
-  return (data as AffiliatePlatformRecord[]).map(toManaged);
+  const data = await safeSupabaseCall(async () => {
+    const result = await supabase
+      .from('affiliate_platforms')
+      .select('*')
+      .eq('is_enabled', true)
+      .order('sort_order', { ascending: true });
+    return { data: result.data as AffiliatePlatformRecord[] | null, error: result.error };
+  });
+  return (data ?? []).map(toManaged);
 }
 
 export async function updateAffiliatePlatformId(id: string, partnersId: string): Promise<void> {

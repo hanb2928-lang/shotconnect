@@ -12,6 +12,7 @@ import { isOnline } from '@/hooks/useNetworkStatus';
 import { nativeHeapCooldownGuard } from './imageEdit';
 import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
 import { logError, addBreadcrumb } from './errorLogger';
+import { safeInvoke } from './apiClient';
 
 const UPLOAD_MAX_RETRIES = 2;
 const UPLOAD_RETRY_DELAY_MS = 1500;
@@ -195,18 +196,20 @@ async function invokeStereoCutAuto(
 ): Promise<CloudPipelineResult | null> {
   if (signal?.aborted) return null;
   try {
-    const { data, error } = await supabase.functions.invoke('stereo-cut-auto', {
-      body: {
-        scanId,
-        angles: payloads,
-        customPrompt: context,
-        productName: style === 'studio' ? '프리미엄 스튜디오 제품' : '프리미엄 추천 상품',
-        targetPlatforms: ['youtube', 'instagram', 'tiktok'],
-      },
-      signal,
-    });
-    if (error || !data) return null;
-    return data as CloudPipelineResult;
+    const data = await safeInvoke<{ result?: CloudPipelineResult }>(() =>
+      supabase.functions.invoke('stereo-cut-auto', {
+        body: {
+          scanId,
+          angles: payloads,
+          customPrompt: context,
+          productName: style === 'studio' ? '프리미엄 스튜디오 제품' : '프리미엄 추천 상품',
+          targetPlatforms: ['youtube', 'instagram', 'tiktok'],
+        },
+        signal,
+      }) as Promise<{ data: { result?: CloudPipelineResult } | null; error: { message: string; status?: number } | null }>,
+    );
+    if (!data) return null;
+    return data.result ?? (data as unknown as CloudPipelineResult);
   } catch (err) {
     logError(err, { component: 'stereoPipeline', action: 'invokeStereoCutAuto' });
     return null;

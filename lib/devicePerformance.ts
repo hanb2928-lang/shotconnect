@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { addBreadcrumb, logWarning } from '@/lib/errorLogger';
 
 export type DeviceTier = 'low' | 'mid' | 'high';
 
@@ -96,7 +97,8 @@ export function setMemoryPressure(
     try { fn(level); } catch {}
   }
   if (level !== 'none') {
-    console.warn(`[AdaptiveRender] Memory pressure: ${level}${source ? ` (${source})` : ''}`);
+    addBreadcrumb('device', `Memory pressure: ${level}`, level === 'severe' ? 'error' : 'warning', { source: source ?? null });
+    logWarning(`Memory pressure: ${level}${source ? ` (${source})` : ''}`, { component: 'devicePerformance', action: 'setMemoryPressure' });
   }
 }
 

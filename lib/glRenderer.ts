@@ -6,10 +6,13 @@
  * Falls back to Canvas 2D when WebGL2 is unavailable.
  */
 import { Platform } from 'react-native';
+import { getAdaptiveRenderParams, computeScaledDimensions, setMemoryPressure } from '@/lib/devicePerformance';
+import { logError, addBreadcrumb } from '@/lib/errorLogger';
 
 export interface GLContext {
   gl: WebGL2RenderingContext;
   canvas: HTMLCanvasElement;
+  scale: number;
 }
 
 const VERT_SRC = `#version 300 es
@@ -200,16 +203,22 @@ function getGLCanvas(w: number, h: number): GLContext | null {
   if (typeof document === 'undefined') return null;
   if (glContextLostGlobal) return null;
   try {
+    const adaptive = getAdaptiveRenderParams();
+    const { width: scaledW, height: scaledH, scale } =
+      computeScaledDimensions(w, h, adaptive.maxDimension);
     const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = scaledW;
+    canvas.height = scaledH;
     const gl = canvas.getContext('webgl2', { premultipliedAlpha: false, preserveDrawingBuffer: true });
     if (!gl) return null;
     if (isGLContextLost(gl)) {
       try { const ext = gl.getExtension('WEBGL_lose_context'); ext?.loseContext(); } catch {}
       return null;
     }
-    return { gl, canvas };
+    if (scale < 1) {
+      addBreadcrumb('gl', `Canvas downscaled ${w}x${h} → ${scaledW}x${scaledH}`, 'warning', { reason: adaptive.reason });
+    }
+    return { gl, canvas, scale };
   } catch {
     return null;
   }
@@ -252,8 +261,10 @@ function safeGLRender(
   } catch (err) {
     invalidateContext(gl);
     contextLostCount++;
+    setMemoryPressure('severe', 'gl-context-loss');
+    logError(err, { component: 'glRenderer', action: 'safeGLRender' });
     if (contextLostCount <= 3) {
-      console.warn('WebGL context lost, falling back to CPU path:', err);
+      addBreadcrumb('gl', `WebGL render failed (count: ${contextLostCount})`, 'error');
     }
     return null;
   }
@@ -282,7 +293,7 @@ export function glBuildMask(
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
   return safeGLRender(ctx, (gl, canvas) => {
-    gl.viewport(0, 0, width, height);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -305,7 +316,7 @@ export function glOverlayComposite(
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
   return safeGLRender(ctx, (gl, canvas) => {
-    gl.viewport(0, 0, width, height);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.BLEND);
@@ -333,7 +344,7 @@ export function glApplyAlphaMask(
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
   return safeGLRender(ctx, (gl, canvas) => {
-    gl.viewport(0, 0, width, height);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -356,7 +367,7 @@ export function glCheckerAlphaMask(
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
   return safeGLRender(ctx, (gl, canvas) => {
-    gl.viewport(0, 0, width, height);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -378,7 +389,7 @@ export function glColorFilter(
 ): HTMLCanvasElement | null {
   const ctx = getGLCanvas(width, height);
   return safeGLRender(ctx, (gl, canvas) => {
-    gl.viewport(0, 0, width, height);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -426,8 +437,10 @@ export function attachWebGLContextLossHandler(
     event.preventDefault();
     glContextLostGlobal = true;
     contextLostCount++;
+    setMemoryPressure('severe', 'webglcontextlost-event');
+    addBreadcrumb('gl', `WebGL context lost (count: ${contextLostCount})`, 'error');
     if (contextLostCount <= 3) {
-      console.warn('WebGL context lost — falling back to CPU rendering');
+      logError('WebGL context lost — falling back to CPU rendering', { component: 'glRenderer', action: 'contextLost' });
     }
   };
 

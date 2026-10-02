@@ -28,9 +28,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { installGlobalErrorHandlers } from '@/lib/errorLogger';
 import { installMediaCacheLifecycleHook } from '@/lib/mediaCache';
+import { startPressureMonitoring } from '@/lib/devicePerformance';
 
 installGlobalErrorHandlers();
 installMediaCacheLifecycleHook();
+startPressureMonitoring();
 
 SplashScreen.preventAutoHideAsync();
 

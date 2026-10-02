@@ -34,6 +34,7 @@ import { theme } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSafeTop } from '@/hooks/useSafeTop';
+import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import {
   getImageSize,
   removeBackground,
@@ -163,6 +164,8 @@ export default function EditorScreen() {
   const undoStack = useRef<string[]>([]);
   const imageWrapRef = useRef<View | null>(null);
   const mountedRef = useRef(true);
+
+  useBeforeUnloadGuard(processing || bgProcessing);
 
   useEffect(() => {
     return () => { mountedRef.current = false; };

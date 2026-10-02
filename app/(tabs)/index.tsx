@@ -43,6 +43,7 @@ import { getDeviceCaptureMaxDim } from '@/lib/captureConstraints';
 import { isLowEndDevice } from '@/lib/devicePerformance';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
+import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { getItem, setItem } from '@/lib/storage';
 const CreditPurchaseModal = lazy(() =>
   import('@/components/CreditPurchaseModal').then((m) => ({ default: m.CreditPurchaseModal })),
@@ -233,6 +234,8 @@ function CameraScreenInner() {
   const [workflowMountKey, setWorkflowMountKey] = useState(0);
   const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>({ overallProgress: 0, currentStep: -1, steps: [], result: null, error: null });
   const [stereoOverlayVisible, setStereoOverlayVisible] = useState(false);
+
+  useBeforeUnloadGuard(processing || autoSaving || stereoOverlayVisible);
   const [screenPhase, setScreenPhase] = useState<ScreenPhase>('mode_select');
   const [captureMode, setCaptureMode] = useState<CaptureMode>('single');
   const [contentTone, setContentTone] = useState<ContentTone>('raw');

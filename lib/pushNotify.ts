@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { getItem, setItem } from '@/lib/storage';
+import { safeInvoke } from '@/lib/apiClient';
 
 const DEVICE_ID_KEY = 'push_device_id';
 
@@ -15,7 +16,7 @@ async function getOrCreateDeviceId(): Promise<string> {
 export async function notifyVideoCompleted(videoUrl?: string): Promise<void> {
   try {
     const deviceId = await getOrCreateDeviceId();
-    await supabase.functions.invoke('send-push', {
+    await safeInvoke(() => supabase.functions.invoke('send-push', {
       method: 'POST',
       body: {
         userId: deviceId,
@@ -23,7 +24,7 @@ export async function notifyVideoCompleted(videoUrl?: string): Promise<void> {
         body: 'AI 영상이 완성되었습니다. 지금 바로 확인해보세요!',
         url: videoUrl ? `/result/${videoUrl}` : '/',
       },
-    });
+    }));
   } catch {
     // best-effort — don't block the UI on push failures
   }
