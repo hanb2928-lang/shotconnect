@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -16,8 +16,12 @@ import { initStorage } from '@/lib/storage';
 import { theme } from '@/lib/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AffiliateToastProvider } from '@/components/AffiliateToast';
-import { NetworkBanner } from '@/components/NetworkBanner';
-import { VideoJobRecoveryToast } from '@/components/VideoJobRecoveryToast';
+const NetworkBanner = lazy(() =>
+  import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
+);
+const VideoJobRecoveryToast = lazy(() =>
+  import('@/components/VideoJobRecoveryToast').then((m) => ({ default: m.VideoJobRecoveryToast })),
+);
 import { I18nProvider, useI18n } from '@/hooks/useI18n';
 import { AppThemeProvider } from '@/hooks/useAppTheme';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -206,8 +210,8 @@ export default function RootLayout() {
               <GestureHandlerRootView style={{ flex: 1 }}>
                 <View key={bootKey} style={{ flex: 1 }}>
                   <AppShell />
-                  <NetworkBanner />
-                  <VideoJobRecoveryToast />
+                  <Suspense fallback={null}><NetworkBanner /></Suspense>
+                  <Suspense fallback={null}><VideoJobRecoveryToast /></Suspense>
                   <StatusBar style="light" />
                 </View>
               </GestureHandlerRootView>

@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
   View,
   Text,
@@ -17,10 +17,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { CameraView } from 'expo-camera';
+import type { CameraView as CameraViewType } from 'expo-camera';
+const CameraView = lazy(() => import('expo-camera').then((m) => ({ default: m.CameraView })));
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { useNativeBridgeReady } from '@/hooks/useNativeBridgeReady';
-import * as ImagePicker from 'expo-image-picker';
+let _ImagePicker: typeof import('expo-image-picker') | null = null;
+async function getImagePicker() {
+  if (!_ImagePicker) _ImagePicker = await import('expo-image-picker');
+  return _ImagePicker;
+}
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap } from 'lucide-react-native';
@@ -39,15 +44,30 @@ import { isLowEndDevice } from '@/lib/devicePerformance';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
 import { getItem, setItem } from '@/lib/storage';
-import { CreditPurchaseModal } from '@/components/CreditPurchaseModal';
+const CreditPurchaseModal = lazy(() =>
+  import('@/components/CreditPurchaseModal').then((m) => ({ default: m.CreditPurchaseModal })),
+);
 import { pickImageWeb, isWebPlatform } from '@/lib/webImagePicker';
-import { WebCameraView, type WebCameraHandle } from '@/components/WebCameraView';
-import { MultiAngleCaptureGuide, type AngleShot, type AngleGuide } from '@/components/MultiAngleCaptureGuide';
+import type { WebCameraHandle } from '@/components/WebCameraView';
+const WebCameraView = lazy(() =>
+  import('@/components/WebCameraView').then((m) => ({ default: m.WebCameraView })),
+);
+import type { AngleShot, AngleGuide } from '@/components/MultiAngleCaptureGuide';
+const MultiAngleCaptureGuide = lazy(() =>
+  import('@/components/MultiAngleCaptureGuide').then((m) => ({ default: m.MultiAngleCaptureGuide })),
+);
 import { TriggerBanner } from '@/components/TriggerBanner';
 import { StudioPremiumAccordion, type StudioSliderValues } from '@/components/StudioPremiumPanel';
-import { PostCaptureWorkflow } from '@/components/PostCaptureWorkflow';
+const PostCaptureWorkflow = lazy(() =>
+  import('@/components/PostCaptureWorkflow').then((m) => ({ default: m.PostCaptureWorkflow })),
+);
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
-import { runStereoPipeline, createScanFromAngleShots, makeInitialProgress, type StereoPipelineProgress } from '@/lib/stereoPipeline';
+import type { StereoPipelineProgress } from '@/lib/stereoPipeline';
+let _stereoMod: typeof import('@/lib/stereoPipeline') | null = null;
+async function getStereoMod() {
+  if (!_stereoMod) _stereoMod = await import('@/lib/stereoPipeline');
+  return _stereoMod;
+}
 import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
 
 async function runFittingPipeline(
@@ -151,13 +171,21 @@ const FITTING_GUIDES: AngleGuide[] = [
 type PanelMode = 'auto-3d' | 'ai-blend' | null;
 
 export default function CameraScreen() {
+  return (
+    <Suspense fallback={null}>
+      <CameraScreenInner />
+    </Suspense>
+  );
+}
+
+function CameraScreenInner() {
   const router = useRouter();
   const safeTop = useSafeTop();
   const tabBarHeight = useTabBarHeight();
   const safeInsets = useSafeAreaInsets();
   const bottomInset = Math.max(safeInsets.bottom, 0);
   const isMountedRef = useRef(true);
-  const cameraRef = useRef<CameraView>(null);
+  const cameraRef = useRef<CameraViewType>(null);
   const webCameraRef = useRef<WebCameraHandle>(null);
   const autoSaveStepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoSavePulse = useRef(new RNAnimated.Value(1)).current;
@@ -202,7 +230,7 @@ export default function CameraScreen() {
   const [postCaptureBase64, setPostCaptureBase64] = useState<string | null>(null);
   const [postCaptureMime, setPostCaptureMime] = useState<string>('video/webm');
   const [workflowMountKey, setWorkflowMountKey] = useState(0);
-  const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>(makeInitialProgress());
+  const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>({ overallProgress: 0, currentStep: -1, steps: [], result: null, error: null });
   const [stereoOverlayVisible, setStereoOverlayVisible] = useState(false);
   const [screenPhase, setScreenPhase] = useState<ScreenPhase>('mode_select');
   const [captureMode, setCaptureMode] = useState<CaptureMode>('single');
@@ -596,6 +624,7 @@ export default function CameraScreen() {
         return;
       }
 
+      const ImagePicker = await getImagePicker();
       const result = await withTimeout(
         ImagePicker.launchImageLibraryAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -656,13 +685,14 @@ export default function CameraScreen() {
     await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
-    setStereoProgress(makeInitialProgress());
+    const stereoMod = await getStereoMod();
+    setStereoProgress(stereoMod.makeInitialProgress());
     setStereoOverlayVisible(true);
 
     let scanId: string;
     let uploadedUrls: string[];
     try {
-      const result = await createScanFromAngleShots(sorted, controller.signal);
+      const result = await stereoMod.createScanFromAngleShots(sorted, controller.signal);
       scanId = result.scanId;
       uploadedUrls = result.uploadedUrls;
     } catch (err) {
@@ -684,7 +714,7 @@ export default function CameraScreen() {
     const pipelineShots = [...sorted];
     nativeHeapCooldownGuard().finally(() => {
       if (controller.signal.aborted) { releasePipelineLock(); return; }
-      runStereoPipeline(pipelineShots, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
+      stereoMod.runStereoPipeline(pipelineShots, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
         if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
         releasePipelineLock();
       });
@@ -829,6 +859,7 @@ export default function CameraScreen() {
       }
     }
     try {
+      const ImagePicker = await getImagePicker();
       const result = await withTimeout(
         ImagePicker.launchImageLibraryAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -944,13 +975,14 @@ export default function CameraScreen() {
     await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
-    setStereoProgress(makeInitialProgress());
+    const stereoMod = await getStereoMod();
+    setStereoProgress(stereoMod.makeInitialProgress());
     setStereoOverlayVisible(true);
     setError(null);
 
     let scanId: string;
     try {
-      const result = await createScanFromAngleShots(sorted, controller.signal);
+      const result = await stereoMod.createScanFromAngleShots(sorted, controller.signal);
       scanId = result.scanId;
     } catch (err) {
       if (!isMountedRef.current) return;
