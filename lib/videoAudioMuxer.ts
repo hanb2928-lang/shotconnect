@@ -26,6 +26,8 @@ const MEDIA_LOAD_TIMEOUT_MS = 15_000;
 const AUDIO_PROBE_MAX_RETRIES = 3;
 const AUDIO_PROBE_BASE_DELAY_MS = 1000;
 
+import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
+
 /**
  * Verify that a URL is actually reachable via HTTP before attempting
  * to use it in a media element. Returns true if the server responds
@@ -152,6 +154,7 @@ export async function muxVideoWithAudio(
       `;
       const blob = new Blob([workerSource], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(blob);
+      registerTempFile(workerUrl, 'muxWorkerBlob');
       offscreenWorker = new Worker(workerUrl);
       offscreenWorker.postMessage({ type: 'init', canvas: offscreen }, [offscreen]);
       useOffscreenDraw = await new Promise<boolean>((resolve) => {
@@ -168,6 +171,8 @@ export async function muxVideoWithAudio(
       if (!useOffscreenDraw) {
         offscreenWorker.terminate();
         offscreenWorker = null;
+        URL.revokeObjectURL(workerUrl);
+        unregisterTempFile(workerUrl);
       }
     } catch {
       offscreenWorker = null;
@@ -266,11 +271,18 @@ export async function muxVideoWithAudio(
 
       const blob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(blob);
+      registerTempFile(url, 'muxOutputBlob');
       onProgress?.({ phase: 'finalizing', progress: 1 });
       // Yield to the event loop before resolving so pending UI updates
       // and bridge messages can flush after the heavy blob construction.
       setTimeout(() => {
-        resolve({ blob, url, durationSec, revoke: () => URL.revokeObjectURL(url) });
+        resolve({
+          blob, url, durationSec,
+          revoke: () => {
+            URL.revokeObjectURL(url);
+            unregisterTempFile(url);
+          },
+        });
       }, 0);
     };
 

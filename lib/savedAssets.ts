@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { supabase, supabaseUrl } from '@/lib/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { SavedAsset } from '@/types/database';
+import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 
 const BUCKET = 'assets';
 const MAX_RETRIES = 3;
@@ -128,6 +129,7 @@ export async function uploadAssetDataUrl(
     });
     const fileInfo = await FileSystem.getInfoAsync(fileUri);
     if (!fileInfo.exists) return null;
+    registerTempFile(fileUri, 'uploadAssetDataUrl');
 
     try {
       const formData = new FormData();
@@ -151,7 +153,7 @@ export async function uploadAssetDataUrl(
     } catch {
       return null;
     } finally {
-      await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+      await safeDeleteTempFile(fileUri).catch(() => {});
     }
   }
 }

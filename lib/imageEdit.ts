@@ -7,6 +7,7 @@ import { safeFetch } from '@/lib/apiClient';
 import { isLowEndDevice } from '@/lib/devicePerformance';
 import { withFileLock } from '@/lib/fileLock';
 import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
+import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -196,6 +197,7 @@ export async function compressImageToBase64(
       actions,
       { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
     );
+    registerTempFile(manipulated.uri, 'compressImageToBase64');
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
@@ -203,7 +205,7 @@ export async function compressImageToBase64(
       const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      safeDeleteTempFile(manipulated.uri).catch(() => {});
       return { base64, mimeType: 'image/jpeg' };
     });
   } catch {
@@ -409,6 +411,7 @@ export async function prepareImageForApi(
       { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
     );
 
+    registerTempFile(manipulated.uri, 'prepareImageForApi-native');
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
@@ -416,7 +419,7 @@ export async function prepareImageForApi(
       const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      safeDeleteTempFile(manipulated.uri).catch(() => {});
       return `data:image/jpeg;base64,${base64}`;
     });
   } catch {
@@ -467,13 +470,14 @@ export async function prepareImageForEdit(
       { compress: 1, format: ImageManipulator.SaveFormat.PNG },
     );
 
+    registerTempFile(manipulated.uri, 'prepareImageForEdit-native');
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
       const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      safeDeleteTempFile(manipulated.uri).catch(() => {});
       return `data:image/png;base64,${base64}`;
     });
   } catch {
@@ -604,6 +608,7 @@ export async function compressImageToBase64WithUri(
       actions,
       { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
     );
+    registerTempFile(manipulated.uri, 'prepareImageForUpload-native');
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
@@ -611,7 +616,7 @@ export async function compressImageToBase64WithUri(
       const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      FileSystem.deleteAsync(manipulated.uri, { idempotent: true }).catch(() => {});
+      safeDeleteTempFile(manipulated.uri).catch(() => {});
       return { base64, mimeType: 'image/jpeg', compressedUri: null };
     });
   } catch {

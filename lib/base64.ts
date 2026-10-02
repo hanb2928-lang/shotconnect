@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { withFileLock } from '@/lib/fileLock';
+import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 
 export function cleanBase64(base64: string): string {
   if (!base64) return '';
@@ -142,12 +143,13 @@ export async function urlToDataUrl(url: string, timeoutMs = 15000): Promise<stri
     const localPath = `${FileSystem.cacheDirectory}url-to-data-${Date.now()}.tmp`;
     const downloadRes = await FileSystem.downloadAsync(url, localPath);
     if (downloadRes.status !== 200) throw new Error(`fetch ${downloadRes.status}`);
+    registerTempFile(downloadRes.uri, 'urlToDataUrl');
     return await withFileLock(downloadRes.uri, async () => {
       const base64 = await FileSystem.readAsStringAsync(downloadRes.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
       const mimeType = downloadRes.headers['Content-Type'] || 'image/jpeg';
-      await FileSystem.deleteAsync(downloadRes.uri, { idempotent: true }).catch(() => {});
+      await safeDeleteTempFile(downloadRes.uri).catch(() => {});
       return `data:${mimeType};base64,${base64}`;
     });
   } catch (err) {
