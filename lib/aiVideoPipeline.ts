@@ -866,7 +866,7 @@ export function subscribeVideoJob(
   const scheduleReconnect = () => {
     if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts);
+    const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts) * JITTER();
     reconnectAttempts++;
     reconnectTimer = setTimeout(() => {
       if (settled) return;
@@ -1087,7 +1087,7 @@ export function subscribeHdUpgrade(
   const scheduleReconnect = () => {
     if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts);
+    const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts) * JITTER();
     reconnectAttempts++;
     reconnectTimer = setTimeout(() => {
       if (settled) return;

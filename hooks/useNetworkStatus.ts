@@ -19,6 +19,24 @@ let wasOffline = false;
 const PROBE_INTERVAL_MS = 15000;
 const PROBE_TIMEOUT_MS = 8000;
 
+const RECOVERY_DEBOUNCE_MS = 1500;
+const RECOVERY_STAGGER_MS = 300;
+let recoveryDispatchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function dispatchRecovery() {
+  if (recoveryDispatchTimer) clearTimeout(recoveryDispatchTimer);
+  recoveryDispatchTimer = setTimeout(() => {
+    recoveryDispatchTimer = null;
+    const snapshot = [...recoveryListeners];
+    snapshot.forEach((cb, i) => {
+      const stagger = Math.floor(i * RECOVERY_STAGGER_MS * (0.8 + Math.random() * 0.4));
+      setTimeout(() => {
+        try { cb(); } catch { /* listener error should not block others */ }
+      }, stagger);
+    });
+  }, RECOVERY_DEBOUNCE_MS);
+}
+
 function notify(status: NetworkStatus) {
   const changed = status !== currentStatus;
   const previousStatus = currentStatus;
@@ -29,10 +47,7 @@ function notify(status: NetworkStatus) {
       if (typeof cb === 'function') cb(status);
     }
     if (status === 'online' && previousStatus === 'offline') {
-      const recoverySnapshot = [...recoveryListeners];
-      for (const cb of recoverySnapshot) {
-        try { cb(); } catch { /* listener error should not block others */ }
-      }
+      dispatchRecovery();
     }
   }
 }
@@ -41,10 +56,7 @@ const onlineHandler = () => {
   if (wasOffline) {
     wasOffline = false;
     notify('online');
-    const recoverySnapshot = [...recoveryListeners];
-    for (const cb of recoverySnapshot) {
-      try { cb(); } catch { /* ignore */ }
-    }
+    dispatchRecovery();
   } else {
     notify('online');
   }
@@ -95,10 +107,7 @@ async function runProbe() {
     if (wasOffline) {
       wasOffline = false;
       notify('online');
-      const recoverySnapshot = [...recoveryListeners];
-      for (const cb of recoverySnapshot) {
-        try { cb(); } catch { /* ignore */ }
-      }
+      dispatchRecovery();
     } else {
       notify('online');
     }

@@ -77,6 +77,11 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
       sweepStaleOfflineCache().catch(() => {});
     }
   });
+} else if (Platform.OS !== 'web') {
+  const RUNTIME_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+  setInterval(() => {
+    sweepTempFiles().catch(() => {});
+  }, RUNTIME_SWEEP_INTERVAL_MS);
 }
 
 SplashScreen.preventAutoHideAsync();
