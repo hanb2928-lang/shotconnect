@@ -93,6 +93,7 @@ export function useResultPolling(
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
+      if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
       pollAbort?.abort();
       forceSyncAbort?.abort();
     };
@@ -250,13 +251,35 @@ export function useResultPolling(
     // Start polling.
     pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
 
+    // Resume pump: on foreground return, immediately poll + run a short
+    // burst of fast polls so the UI catches up without waiting for the
+    // normal backoff schedule (which starts at 3 seconds).
+    const RESUME_BURST_INTERVAL_MS = 1500;
+    const RESUME_BURST_COUNT = 3;
+    let resumeBurstCount = 0;
+    let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+    const runResumeBurst = () => {
+      if (cancelled || settledRef.current || resumeBurstCount >= RESUME_BURST_COUNT) {
+        resumeBurstTimer = null;
+        return;
+      }
+      resumeBurstCount++;
+      pollOnce();
+      resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
+    };
+
     // Pause polling when app is backgrounded to avoid zombie requests.
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
-        if (!cancelled && !settledRef.current && !pollTimer) {
-          pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
+        if (!cancelled && !settledRef.current) {
+          pollAttempt = 0;
+          if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+          resumeBurstCount = 0;
+          runResumeBurst();
+          if (!pollTimer) pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
+        if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
         if (pollTimer) {
           clearTimeout(pollTimer);
           pollTimer = null;

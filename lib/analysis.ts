@@ -154,8 +154,12 @@ export async function uploadVideoBlob(
   let body: Uint8Array;
   if (Platform.OS === 'web') {
     const resp = await fetch(uri);
-    const buf = await resp.arrayBuffer();
-    body = new Uint8Array(buf);
+    try {
+      const buf = await resp.arrayBuffer();
+      body = new Uint8Array(buf);
+    } finally {
+      if (resp.body) resp.body.cancel().catch(() => {});
+    }
   } else {
     const FileSystem = await import('expo-file-system/legacy');
     const base64 = await FileSystem.readAsStringAsync(uri, {
@@ -198,20 +202,24 @@ export async function extractVideoFrameFromServer(
     signal,
   });
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({ error: '프레임 추출 서버 오류' }));
-    throw new Error(errData.error || `프레임 추출 실패 (${response.status})`);
+  try {
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({ error: '프레임 추출 서버 오류' }));
+      throw new Error(errData.error || `프레임 추출 실패 (${response.status})`);
+    }
+
+    const data = await response.json();
+    if (data?.error) throw new Error(data.error);
+    if (!data?.base64 && !data?.frameUrl) throw new Error('프레임 추출 결과가 없습니다.');
+
+    return {
+      base64: data.base64 || '',
+      mimeType: 'image/jpeg',
+      ...(data.frameUrl ? { frameUrl: data.frameUrl } : {}),
+    };
+  } finally {
+    if (response.body) response.body.cancel().catch(() => {});
   }
-
-  const data = await response.json();
-  if (data?.error) throw new Error(data.error);
-  if (!data?.base64 && !data?.frameUrl) throw new Error('프레임 추출 결과가 없습니다.');
-
-  return {
-    base64: data.base64 || '',
-    mimeType: 'image/jpeg',
-    ...(data.frameUrl ? { frameUrl: data.frameUrl } : {}),
-  };
 }
 
 export async function analyzeImage(

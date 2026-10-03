@@ -82,24 +82,28 @@ export async function removeBackground(
     timeoutMs: 115000,
   });
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({ error: '배경 제거 서버 오류가 발생했습니다.' }));
-    throw new Error(errData.error || `배경 제거 실패 (${response.status})`);
-  }
+  try {
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({ error: '배경 제거 서버 오류가 발생했습니다.' }));
+      throw new Error(errData.error || `배경 제거 실패 (${response.status})`);
+    }
 
-  const data = await response.json().catch(() => ({}));
-  if (data?.error) throw new Error(data.error);
+    const data = await response.json().catch(() => ({}));
+    if (data?.error) throw new Error(data.error);
 
-  if (data?.imageUrl) {
-    return data.imageUrl;
-  }
+    if (data?.imageUrl) {
+      return data.imageUrl;
+    }
 
-  // Fallback for older deployments still returning base64
-  const base64 = cleanBase64(data?.imageBase64 ?? '');
-  if (!base64) {
-    throw new Error('배경 제거 응답에 이미지 데이터가 없습니다.');
+    // Fallback for older deployments still returning base64
+    const base64 = cleanBase64(data?.imageBase64 ?? '');
+    if (!base64) {
+      throw new Error('배경 제거 응답에 이미지 데이터가 없습니다.');
+    }
+    return `data:${data?.mimeType || 'image/png'};base64,${base64}`;
+  } finally {
+    if (response.body) response.body.cancel().catch(() => {});
   }
-  return `data:${data?.mimeType || 'image/png'};base64,${base64}`;
 }
 
 export function base64ToBlob(base64: string, mimeType: string): Blob | Uint8Array {
