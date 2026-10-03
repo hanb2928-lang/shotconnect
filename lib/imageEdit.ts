@@ -179,12 +179,27 @@ export async function compressBase64ForUpload(
   }
 }
 
+const NATIVE_URI_COPY_TIMEOUT_MS = 60_000;
+
 async function makeReadableNativeUri(uri: string): Promise<{ uri: string; temporary: boolean }> {
   if (Platform.OS === 'web' || !uri.startsWith('content://')) return { uri, temporary: false };
   if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
   const target = `${FileSystem.cacheDirectory}shot-connect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-  await FileSystem.copyAsync({ from: uri, to: target });
-  return { uri: target, temporary: true };
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      FileSystem.copyAsync({ from: uri, to: target }),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('파일을 불러오는 시간이 초과되었습니다.')), NATIVE_URI_COPY_TIMEOUT_MS);
+      }),
+    ]);
+    return { uri: target, temporary: true };
+  } catch (error) {
+    await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
+    throw error;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 export async function compressImageToBase64(

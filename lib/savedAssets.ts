@@ -7,6 +7,7 @@ import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 const BUCKET = 'assets';
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
+const FILE_UPLOAD_TIMEOUT_MS = 120_000;
 
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -207,10 +208,20 @@ export async function uploadAssetFromFileUriWithProgress(
 
     try {
       const result = await new Promise<string | null>((resolve) => {
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          resolve(null);
+        }, FILE_UPLOAD_TIMEOUT_MS);
+
         supabase.storage
           .from(BUCKET)
           .upload(fileName, formData, { contentType: mimeType, upsert: true, cacheControl: '360000' })
           .then(({ error }) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
             if (error) {
               resolve(null);
             } else {
@@ -218,7 +229,12 @@ export async function uploadAssetFromFileUriWithProgress(
               resolve(data.publicUrl);
             }
           })
-          .catch(() => resolve(null));
+          .catch(() => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(null);
+          });
       });
 
       if (result) {
