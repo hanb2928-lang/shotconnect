@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Platform, AppState, type AppStateStatus } from 'react-native';
 import { getActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
-import { supabase } from '@/lib/supabase';
+import { supabase, ensureFreshSession } from '@/lib/supabase';
 
 export type RecoveryState = 'idle' | 'checking' | 'in_progress' | 'completed' | 'failed' | 'not_found';
 
@@ -43,10 +43,11 @@ export function useVideoJobRecovery() {
     safeSetInfo({ state: 'checking', jobId, step: null, videoUrl: null, errorMsg: null });
 
     try {
+      await ensureFreshSession();
       const queryPromise = supabase
         .from('video_jobs')
-        .select('status, step, video_url, error_message')
-        .eq('id', jobId)
+        .select('id, status, step, video_url, error_message')
+        .eq('task_id', jobId)
         .maybeSingle();
 
       let timeoutId: ReturnType<typeof setTimeout> | null = null;

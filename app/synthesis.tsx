@@ -46,7 +46,7 @@ import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
-import { getActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
+import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/lib/videoJobPersistence';
 import { AppState, type AppStateStatus } from 'react-native';
 
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
@@ -429,6 +429,7 @@ export default function SynthesisScreen() {
       if (!mountedRef.current) return;
       jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
+      await saveActiveVideoJob(submitResult.taskId, 'submitting');
       setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (!mountedRef.current) return;
@@ -447,6 +448,7 @@ export default function SynthesisScreen() {
       if (!mountedRef.current) return;
       jobIdRef.current = null;
       setIsGenerating(false);
+      clearActiveVideoJob();
       setVideoProgress((prev) => prev ? { ...prev, phase: 'completed', progress: 1.0, message: '영상 생성 완료' } : null);
       if (outputMode === 'image') {
         setResultImageUrl(videoUrl);
@@ -459,6 +461,7 @@ export default function SynthesisScreen() {
       if (!mountedRef.current) return;
       jobIdRef.current = null;
       setIsGenerating(false);
+      clearActiveVideoJob();
       setVideoProgress((prev) => prev ? { ...prev, phase: 'error', progress: 0, message: errMsg } : null);
       setError(errMsg);
     },
