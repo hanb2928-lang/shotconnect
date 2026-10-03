@@ -18,6 +18,7 @@ import { Platform } from 'react-native';
 import { addBreadcrumb } from '@/lib/errorLogger';
 
 const BOOT_SWEEP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const BOOT_SWEEP_NATIVE_MEDIA_AGE_MS = 2 * 60 * 60 * 1000;
 const BOOT_SWEEP_IDB_BATCH = 50;
 const BOOT_SWEEP_STORAGE_PREFIX = 'cache:';
 const BOOT_SWEEP_IDB_DB_NAME = 'media-cache-db';
@@ -165,7 +166,12 @@ async function sweepNativeTemp(maxAgeMs: number): Promise<number> {
     try {
       const files = await fs.readDirectoryAsync(dir);
       const cacheFiles = files.filter(
-        (f) => f.startsWith('media_cache_') || f.startsWith('temp_render_') || f.startsWith('temp_chunk_'),
+        (f) =>
+          f.startsWith('media_cache_') ||
+          f.startsWith('temp_render_') ||
+          f.startsWith('temp_chunk_') ||
+          f.startsWith('shot-connect-') ||
+          f.startsWith('server-frame-'),
       );
 
       for (const file of cacheFiles) {
@@ -174,7 +180,14 @@ async function sweepNativeTemp(maxAgeMs: number): Promise<number> {
           const info = await fs.getInfoAsync(filePath);
           if (!info.exists) continue;
           const modificationTime = (info as { modificationTime?: number }).modificationTime;
-          if (modificationTime && now - modificationTime * 1000 > maxAgeMs) {
+          if (!modificationTime) continue;
+          const ageMs = now - modificationTime * 1000;
+          const isLargeMedia =
+            file.startsWith('shot-connect-') || file.startsWith('server-frame-');
+          const threshold = isLargeMedia
+            ? Math.min(maxAgeMs, BOOT_SWEEP_NATIVE_MEDIA_AGE_MS)
+            : maxAgeMs;
+          if (ageMs > threshold) {
             await fs.deleteAsync(filePath, { idempotent: true });
             removed++;
           }
