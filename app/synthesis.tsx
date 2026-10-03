@@ -317,21 +317,25 @@ export default function SynthesisScreen() {
 
   const generateLockRef = useRef(false);
   const handleGenerate = useCallback(async () => {
-    if (isGenerating || generateLockRef.current) return;
+    if (generateLockRef.current) return;
+    generateLockRef.current = true;
+    if (isGenerating) { generateLockRef.current = false; return; }
     if (productImages.length < 3) {
       setError('제품 사진을 최소 3컷 등록해주세요.');
+      generateLockRef.current = false;
       return;
     }
     if (genMode === 'universal_synthesis' && !modelImage) {
       setError('AI 범용 합성 모드에서는 모델 사진이 필요합니다.');
+      generateLockRef.current = false;
       return;
     }
     if (!isOnline()) {
       setError('인터넷 연결을 확인해주세요. 네트워크가 연결되지 않아 AI 생성을 시작할 수 없습니다.');
+      generateLockRef.current = false;
       return;
     }
     setError(null);
-    generateLockRef.current = true;
     setIsGenerating(true);
     setResultImageUrl(null);
     setResultVideoUrl(null);

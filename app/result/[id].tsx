@@ -697,12 +697,14 @@ export default function ResultScreen() {
   }, [scan, activePlatform]);
 
   const handleAiVideoGenerate = useCallback(async () => {
-    if (!scan || isGeneratingVideo || videoGenLockRef.current) return;
+    if (videoGenLockRef.current) return;
+    videoGenLockRef.current = true;
+    if (!scan || isGeneratingVideo) { videoGenLockRef.current = false; return; }
     if (!isOnline()) {
       setVideoGenError('인터넷 연결을 확인해주세요. 네트워크가 연결되지 않아 영상 생성을 시작할 수 없습니다.');
+      videoGenLockRef.current = false;
       return;
     }
-    videoGenLockRef.current = true;
     try {
     if (hdUnsubRef.current) { hdUnsubRef.current(); hdUnsubRef.current = null; }
     if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
@@ -1028,12 +1030,14 @@ export default function ResultScreen() {
 
   const imageGenLockRef = useRef(false);
   const handleAiImageGenerate = useCallback(async () => {
-    if (!scan || isGeneratingImage || imageGenLockRef.current) return;
+    if (imageGenLockRef.current) return;
+    imageGenLockRef.current = true;
+    if (!scan || isGeneratingImage) { imageGenLockRef.current = false; return; }
     if (!isOnline()) {
       setImageGenError('인터넷 연결을 확인해주세요. 네트워크가 연결되지 않아 이미지 생성을 시작할 수 없습니다.');
+      imageGenLockRef.current = false;
       return;
     }
-    imageGenLockRef.current = true;
     setIsGeneratingImage(true);
     setImageGenError(null);
     setGeneratedImages([]);
