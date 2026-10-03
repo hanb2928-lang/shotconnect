@@ -4,7 +4,7 @@ import { enqueueJob } from '@/lib/jobQueue';
 import { uploadImage } from '@/lib/analysis';
 import { generateAffiliateLinks } from '@/lib/affiliate';
 import { getUserSettings } from '@/lib/settings';
-import { buildDataUrl, base64ToUint8Array } from '@/lib/base64';
+import { base64ToUint8Array } from '@/lib/base64';
 import { hashImage, hashMultiAngle } from '@/lib/contentHash';
 import { TTS_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
@@ -137,20 +137,20 @@ export async function startAsyncAnalysis(
     }
   }
 
-  // Cache miss — enqueue job and create pending scan.
-  // Build data URLs for the job payload — the edge function sends these to
-  // OpenAI Vision. The base64 strings are already in memory; building the
-  // data URL creates a temporary copy that gets released after enqueue.
+  // Pass already-uploaded storage URLs to the edge function instead of
+  // rebuilding multi-MB base64 data URLs. OpenAI Vision accepts HTTPS URLs
+  // directly, so the edge function forwards them as-is — no base64 decoding
+  // on the server, no multi-MB JSON payload in the render_jobs table.
   const payload =
     additionalBase64Images.length > 0
       ? {
-          images: [buildDataUrl(base64, mimeType), ...additionalBase64Images.map((b) => buildDataUrl(b, 'image/jpeg'))],
+          images: [imageUrl, ...additionalUrls],
           fileName,
           mode: 'multi-shot',
           ...(preferredStyle ? { preferredStyle } : {}),
         }
       : {
-          imageDataUrl: buildDataUrl(base64, mimeType),
+          imageUrl,
           fileName,
           mimeType,
           mode,

@@ -151,9 +151,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const { imageDataUrl, images, fileName, mimeType, mode, preferredStyle, productContext } = body;
+    const { imageDataUrl, imageUrl, images, fileName, mimeType, mode, preferredStyle, productContext } = body;
 
-    if (!imageDataUrl && !images) {
+    if (!imageDataUrl && !imageUrl && !images) {
       return new Response(
         JSON.stringify({ error: "Image data is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -179,13 +179,14 @@ Deno.serve(async (req: Request) => {
         result = generateContextualAnalysis(fileName || "snapshot");
       }
     } else {
-      if (!imageDataUrl) {
+      const singleImageInput = imageDataUrl || imageUrl;
+      if (!singleImageInput) {
         return new Response(
           JSON.stringify({ error: "Image data is required" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      const sanitizedDataUrl = ensureDataUrl(imageDataUrl, cleanMime);
+      const sanitizedDataUrl = ensureDataUrl(singleImageInput, cleanMime);
       const recognitionMode = mode === "single" ? "single" : "multi";
       if (openaiKey) {
         result = await analyzeWithOpenAI(sanitizedDataUrl, cleanMime, openaiKey, recognitionMode, preferredStyle, productContext);
@@ -879,6 +880,11 @@ function ensureDataUrl(imageDataUrl: string, mimeType: string): string {
   if (!imageDataUrl) return "";
 
   const trimmed = imageDataUrl.trim().replace(/\s/g, "");
+
+  // Pass HTTP(S) URLs through unchanged — OpenAI Vision accepts them directly.
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
 
   if (trimmed.startsWith("data:")) {
     return trimmed;

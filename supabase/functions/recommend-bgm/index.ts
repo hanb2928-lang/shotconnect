@@ -90,6 +90,7 @@ function stripJsonFence(s: string): string {
 }
 
 function ensureDataUrl(dataUrl: string, mimeType: string): string {
+  if (dataUrl.startsWith("http://") || dataUrl.startsWith("https://")) return dataUrl;
   if (dataUrl.startsWith("data:")) return dataUrl;
   return `data:${mimeType};base64,${dataUrl}`;
 }
@@ -153,9 +154,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const { imageDataUrl, mimeType } = body;
+    const { imageDataUrl, imageUrl, mimeType } = body;
 
-    if (!imageDataUrl) {
+    if (!imageDataUrl && !imageUrl) {
       return new Response(
         JSON.stringify({ error: "Image data is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -172,7 +173,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const sanitizedDataUrl = ensureDataUrl(imageDataUrl, cleanMime);
+    const sanitizedDataUrl = ensureDataUrl(imageDataUrl || imageUrl, cleanMime);
 
     const systemPrompt =
       "You are a music supervisor for short-form marketing videos (15 seconds).\n" +

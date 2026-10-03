@@ -3,6 +3,7 @@ import { aiCachedCall } from './aiCache';
 import { hashObject } from './contentHash';
 import { compressImagesInParallel } from './parallelImageCompress';
 import { safeInvoke, ApiError } from './apiClient';
+import { cleanBase64, base64ToUint8Array } from './base64';
 
 export interface ProductVisionResult {
   productName: string;
@@ -46,8 +47,27 @@ export async function analyzeProductVision(
     'product-vision',
     cacheInput,
     async () => {
-      const compressed = await compressImagesInParallel(images);
-      return fetchVisionFromApi(compressed.map((c) => c.dataUrl), productName, scanId);
+      // Upload images to storage and pass public URLs to the edge function
+      // instead of multi-MB base64 data URLs — reduces JS bridge payload and
+      // native heap pressure on Android. OpenAI Vision accepts HTTPS URLs.
+      const uploadedUrls: string[] = [];
+      for (let i = 0; i < images.length; i++) {
+        try {
+          const b64 = cleanBase64(images[i]);
+          const fileName = `vision-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const { error: uploadError } = await supabase.storage
+            .from('scans')
+            .upload(fileName, base64ToUint8Array(b64), { contentType: 'image/jpeg', cacheControl: '360000' });
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
+            if (urlData.publicUrl) uploadedUrls.push(urlData.publicUrl);
+          }
+        } catch {
+          // fall through to base64 fallback
+        }
+      }
+      const inputs = uploadedUrls.length === images.length ? uploadedUrls : await compressImagesInParallel(images).then((cs) => cs.map((c) => c.dataUrl));
+      return fetchVisionFromApi(inputs, productName, scanId);
     },
     'gpt-4o',
   );

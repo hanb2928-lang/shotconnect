@@ -9,7 +9,7 @@ import {
 } from './bundledBgm';
 import { aiCachedCall } from './aiCache';
 import { hashObject } from './contentHash';
-import { cleanBase64 } from './base64';
+import { cleanBase64, base64ToUint8Array } from './base64';
 import { supabase } from './supabase';
 import { safeInvoke } from './apiClient';
 
@@ -780,7 +780,22 @@ export async function fetchBgmRecommendation(imageDataUrl: string, mimeType: str
       'bgm-recommend',
       cacheInput,
       async () => {
-        const data = await safeInvoke(() => supabase.functions.invoke('recommend-bgm', { body: { imageDataUrl, mimeType } })).catch(() => null);
+        // Upload to storage first, then pass the public URL to the edge
+        // function instead of sending a multi-MB base64 string through the
+        // JS bridge — reduces native heap pressure and network payload.
+        const fileName = `bgm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        const { error: uploadError } = await supabase.storage
+          .from('scans')
+          .upload(fileName, base64ToUint8Array(b64), { contentType: mimeType, cacheControl: '360000' });
+        let imageUrl = '';
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
+          imageUrl = urlData.publicUrl;
+        }
+        const payload = imageUrl
+          ? { imageUrl }
+          : { imageDataUrl: `data:${mimeType};base64,${b64}` };
+        const data = await safeInvoke(() => supabase.functions.invoke('recommend-bgm', { body: payload })).catch(() => null);
         if (!data) return FALLBACK_RECOMMENDATION;
         const raw = data as Record<string, unknown>;
         const rawCategory = String(raw.category ?? raw.templateId ?? '');
