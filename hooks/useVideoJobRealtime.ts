@@ -87,6 +87,10 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
     };
 
+    const MAX_CONSECUTIVE_POLL_FAILURES = 10;
+    const POLL_FAIL_MESSAGE = '서버 응답이 지연되고 있습니다. 작업 목록에서 나중에 결과를 확인해 주세요.';
+    let consecutivePollFailures = 0;
+
     const checkDb = async () => {
       if (settledRef.current) return;
       try {
@@ -95,7 +99,9 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
           .select('status, step, video_url, error_message')
           .eq('id', jobId)
           .maybeSingle();
-        if (error || !data) return;
+        if (error) throw new Error(error.message);
+        if (!data) return;
+        consecutivePollFailures = 0;
         const row = data as { status: string; step?: string | null; video_url: string | null; error_message: string | null };
         if (row.step) setStep(row.step as VideoJobStep);
         if (row.status === 'SUCCESS') {
@@ -104,7 +110,10 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
           handleResult('failed', undefined, row.error_message ?? undefined, row.step as VideoJobStep | undefined);
         }
       } catch {
-        // ignore — realtime is the primary path
+        consecutivePollFailures++;
+        if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          handleResult('failed', undefined, POLL_FAIL_MESSAGE);
+        }
       }
     };
 
@@ -197,6 +206,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
         if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
         if (!settledRef.current) {
           pollAttempt = 0;
+          consecutivePollFailures = 0;
           checkDb();
           startResumeBurst();
           if (!pollTimer) schedulePoll();
@@ -225,6 +235,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
       }
       retryCount = 0;
       pollAttempt = 0;
+      consecutivePollFailures = 0;
       checkDb();
       connectChannel();
       if (!pollTimer) schedulePoll();

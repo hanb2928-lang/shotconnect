@@ -81,6 +81,8 @@ const JITTER = () => 0.8 + Math.random() * 0.4;
 const CHANNEL_MAX_RECONNECT_ATTEMPTS = 5;
 
 const BG_MAX_WAIT_MS = 120_000;
+const MAX_CONSECUTIVE_POLL_FAILURES = 10;
+const POLL_FAIL_MESSAGE = '서버 응답이 지연되고 있습니다. 작업 목록에서 나중에 결과를 확인해 주세요.';
 
 /**
  * Install an AppState listener that pauses all timers/channels when the app
@@ -570,6 +572,7 @@ function waitForVideoCompletion(
     };
 
     // Check video_jobs table directly (used for initial check + fallback polling)
+    let consecutivePollFailures = 0;
     const checkDb = async () => {
       if (settled || !scanId) return;
       try {
@@ -579,10 +582,18 @@ function waitForVideoCompletion(
           .eq('scan_id', scanId)
           .eq('task_id', submitData.taskId)
           .maybeSingle();
-        if (error || !data) return;
+        if (error) throw new Error(error.message);
+        if (!data) return;
+        consecutivePollFailures = 0;
         handleRow(data as VideoJobRow);
       } catch (err) {
-        logError(err, { component: 'aiVideoPipeline', action: 'checkDb' });
+        consecutivePollFailures++;
+        logError(err, { component: 'aiVideoPipeline', action: 'checkDb', extra: { consecutivePollFailures } });
+        if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          const msg = POLL_FAIL_MESSAGE;
+          report('error', 0, msg);
+          finish(() => reject(new Error(msg)));
+        }
       }
     };
 
@@ -743,8 +754,15 @@ function waitForVideoCompletion(
             return;
           }
         } catch (err) {
-          addBreadcrumb('video', 'Runway poll fallback failed', 'warning', { taskId: submitData.taskId });
+          consecutivePollFailures++;
+          addBreadcrumb('video', 'Runway poll fallback failed', 'warning', { taskId: submitData.taskId, consecutivePollFailures });
           logError(err, { component: 'aiVideoPipeline', action: 'runwayPollFallback' });
+          if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+            const msg = POLL_FAIL_MESSAGE;
+            report('error', 0, msg);
+            finish(() => reject(new Error(msg)));
+            return;
+          }
         }
         scheduleNext();
       };
@@ -963,6 +981,7 @@ export function subscribeVideoJob(
   let reconnectAttempts = 0;
   let pollBackoffAttempt = 0;
   let channel: ReturnType<typeof supabase.channel> | null = null;
+  let consecutivePollFailures = 0;
 
   const checkAndNotify = async () => {
     if (settled) return;
@@ -973,7 +992,9 @@ export function subscribeVideoJob(
         .eq('scan_id', scanId)
         .eq('task_id', taskId)
         .maybeSingle();
-      if (error || !data) return;
+      if (error) throw new Error(error.message);
+      if (!data) return;
+      consecutivePollFailures = 0;
       const row = data as VideoJobRow;
       if (row.status === 'SUCCESS' && row.video_url) {
         settled = true;
@@ -985,7 +1006,13 @@ export function subscribeVideoJob(
         callback({ status: 'FAILED', error: row.error_message ?? '비디오 생성에 실패했습니다.' });
       }
     } catch (err) {
-      logError(err, { component: 'aiVideoPipeline', action: 'subscribeVideoJob.checkAndNotify' });
+      consecutivePollFailures++;
+      logError(err, { component: 'aiVideoPipeline', action: 'subscribeVideoJob.checkAndNotify', extra: { consecutivePollFailures } });
+      if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        settled = true;
+        cleanup();
+        callback({ status: 'FAILED', error: POLL_FAIL_MESSAGE });
+      }
     }
   };
 
@@ -1233,6 +1260,7 @@ export function subscribeHdUpgrade(
   let reconnectAttempts = 0;
   let pollBackoffAttempt = 0;
   let channel: ReturnType<typeof supabase.channel> | null = null;
+  let consecutivePollFailures = 0;
 
   const checkAndNotify = async () => {
     if (settled) return;
@@ -1243,7 +1271,9 @@ export function subscribeHdUpgrade(
         .eq('scan_id', scanId)
         .eq('task_id', draftJobId)
         .maybeSingle();
-      if (error || !data) return;
+      if (error) throw new Error(error.message);
+      if (!data) return;
+      consecutivePollFailures = 0;
       const row = data as VideoJobRow;
       if (row.hd_status === 'SUCCESS' && row.hd_video_url) {
         settled = true;
@@ -1255,7 +1285,13 @@ export function subscribeHdUpgrade(
         callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
       }
     } catch (err) {
-      logError(err, { component: 'aiVideoPipeline', action: 'subscribeHdUpgrade.checkAndNotify' });
+      consecutivePollFailures++;
+      logError(err, { component: 'aiVideoPipeline', action: 'subscribeHdUpgrade.checkAndNotify', extra: { consecutivePollFailures } });
+      if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        settled = true;
+        cleanup();
+        callback({ status: 'FAILED', error: POLL_FAIL_MESSAGE });
+      }
     }
   };
 
