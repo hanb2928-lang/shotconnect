@@ -2,8 +2,9 @@ import { Platform } from 'react-native';
 import { prepareImageForApi } from './imageEdit';
 import { cleanBase64, getMimeTypeFromDataUrl, buildDataUrl } from './base64';
 import { compressImageInWorker, isWorkerPoolAvailable } from './workerPool';
+import { getAdaptiveImageMaxDimension } from './devicePerformance';
 
-const EDGE_FN_MAX_DIMENSION = 1080;
+const EDGE_FN_MAX_DIMENSION = getAdaptiveImageMaxDimension();
 const EDGE_FN_QUALITY = 0.72;
 const PARALLEL_BATCH_SIZE = Platform.OS === 'web' ? 5 : 1;
 

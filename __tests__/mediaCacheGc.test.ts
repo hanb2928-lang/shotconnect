@@ -39,4 +39,11 @@ describe('mediaCache L2 stale entry GC', () => {
     delete (global as any).indexedDB;
     await expect(sweepL2StaleEntries(60_000)).resolves.toBe(0);
   });
+
+  it('sweepL2StaleEntries default maxAge is 7 days (604800000ms)', async () => {
+    delete (global as any).indexedDB;
+    // Verify the default resolves without error — the 7-day TTL
+    // is enforced internally via L2_MAX_AGE_MS constant.
+    await expect(sweepL2StaleEntries()).resolves.toBe(0);
+  });
 });

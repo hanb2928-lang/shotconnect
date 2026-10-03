@@ -534,6 +534,8 @@ export default function ResultScreen() {
     isGeneratingVideo ||
     isMuxing ||
     isGeneratingImage ||
+    isRegenerating ||
+    visionAnalyzing ||
     videoStage === 'drafting' ||
     videoStage === 'hd_upgrading',
   );

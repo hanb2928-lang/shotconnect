@@ -162,7 +162,7 @@ export function PostCaptureWorkflow({
   const mountedRef = useRef(true);
   const prevVisibleRef = useRef(false);
 
-  useBeforeUnloadGuard(isUploading || savingToGallery);
+  useBeforeUnloadGuard(isUploading || savingToGallery || uploadRetrying || bgmLoading || addingPlatform);
 
   useEffect(() => {
     return () => { mountedRef.current = false; };

@@ -1,5 +1,6 @@
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 import { aiCachedCall } from '@/lib/aiCache';
+import { safeFetch } from '@/lib/apiClient';
 
 export interface StyleRecommendation {
   cardStyle: 'bold' | 'magazine' | 'feed' | 'minimal';
@@ -33,19 +34,15 @@ export async function fetchStyleRecommendation(params: {
       platform: params.platform || '',
     },
     async () => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 115000);
-
       try {
-        const response = await fetch(RECOMMEND_FUNCTION_URL, {
+        const response = await safeFetch(RECOMMEND_FUNCTION_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${supabaseAnonKey}`,
-            apikey: supabaseAnonKey,
           },
-          signal: controller.signal,
           body: JSON.stringify(params),
+          timeoutMs: 115000,
         });
 
         if (!response.ok) {
@@ -58,12 +55,10 @@ export async function fetchStyleRecommendation(params: {
 
         return data as StyleRecommendation;
       } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
+        if (err instanceof Error && (err.name === 'AbortError' || /abort|timeout/i.test(err.message))) {
           throw new Error('AI 스타일 추천 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
         }
         throw err;
-      } finally {
-        clearTimeout(timeout);
       }
     },
     'recommend-style',

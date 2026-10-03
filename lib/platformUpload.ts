@@ -1,4 +1,5 @@
 import { getDisclosureForPlatforms } from '@/lib/disclosure';
+import { applyByteGuard } from '@/lib/payloadByteGuard';
 
 export type UploadPlatformKey = 'instagram' | 'blog' | 'tiktok' | 'youtube' | 'twitter' | 'pinterest' | 'naver_clip';
 
@@ -293,7 +294,17 @@ export function buildPlatformCaption(
     ? `${commentDisclosure}${trimmedUrl ? '\n\n단축 링크: ' + trimmedUrl : ''}`
     : '';
 
-  return { title, body, hashtags, fullText, commentDisclosure, commentText, linkGuidance: tmpl.linkGuidance };
+  const byteSafe = applyByteGuard(key, { title, body, fullText, commentText });
+
+  return {
+    title: byteSafe.title,
+    body: byteSafe.body,
+    hashtags,
+    fullText: byteSafe.fullText,
+    commentDisclosure,
+    commentText: byteSafe.commentText,
+    linkGuidance: tmpl.linkGuidance,
+  };
 }
 
 export function getCaptionStyleDescription(key: UploadPlatformKey): string {

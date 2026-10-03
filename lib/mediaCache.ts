@@ -18,7 +18,7 @@ import { hashObject } from '@/lib/contentHash';
 const L1_MAX_ENTRIES = 60;
 const L2_BATCH_THRESHOLD = 5;
 const L2_KEY_PREFIX = 'media-cache:';
-const L2_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+const L2_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const L2_GC_BATCH_SIZE = 50;
 
 interface L1Entry {

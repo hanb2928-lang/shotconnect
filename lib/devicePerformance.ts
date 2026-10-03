@@ -115,17 +115,31 @@ export function onMemoryPressureChange(
   };
 }
 
-function getBatteryLevel(): number | null {
+let cachedBatteryLevel: number | null = null;
+let batteryFetchPromise: Promise<number | null> | null = null;
+
+async function fetchBatteryLevel(): Promise<number | null> {
   if (Platform.OS !== 'web') return null;
   if (typeof navigator === 'undefined') return null;
   const nav = navigator as any;
-  if (nav.getBattery) {
-    return null;
-  }
-  if (nav.battery?.level !== undefined) {
-    return nav.battery.level;
-  }
-  return null;
+  if (!nav.getBattery) return null;
+  if (batteryFetchPromise) return batteryFetchPromise;
+  batteryFetchPromise = (async () => {
+    try {
+      const battery = await nav.getBattery();
+      cachedBatteryLevel = battery?.level ?? null;
+      return cachedBatteryLevel;
+    } catch {
+      return null;
+    } finally {
+      batteryFetchPromise = null;
+    }
+  })();
+  return batteryFetchPromise;
+}
+
+function getCachedBatteryLevel(): number | null {
+  return cachedBatteryLevel;
 }
 
 function checkJsHeapPressure(): 'none' | 'moderate' | 'severe' {
@@ -141,7 +155,7 @@ function checkJsHeapPressure(): 'none' | 'moderate' | 'severe' {
 export function detectRuntimePressure(): 'none' | 'moderate' | 'severe' {
   const heap = checkJsHeapPressure();
   if (heap === 'severe') return 'severe';
-  const battery = getBatteryLevel();
+  const battery = getCachedBatteryLevel();
   if (battery !== null && battery < 0.15) {
     return heap === 'moderate' ? 'severe' : 'moderate';
   }
@@ -192,6 +206,23 @@ export function computeScaledDimensions(
   };
 }
 
+/**
+ * Adaptive max dimension for image processing pipelines.
+ * Combines device tier with runtime memory pressure to pick the
+ * safest resolution for image canvas operations. On a low-end phone
+ * under memory pressure, this drops to 720px to avoid OOM kills
+ * when decoding large photos onto a canvas.
+ */
+export function getAdaptiveImageMaxDimension(): number {
+  const tier = detectTier();
+  const pressure = detectRuntimePressure();
+  if (pressure === 'severe') return 720;
+  if (tier === 'low') return 720;
+  if (pressure === 'moderate') return 1080;
+  if (tier === 'mid') return 1080;
+  return 1280;
+}
+
 let pressurePollInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startPressureMonitoring(intervalMs: number = 5000): () => void {
@@ -203,11 +234,13 @@ export function startPressureMonitoring(intervalMs: number = 5000): () => void {
     if (detected !== 'none') {
       setMemoryPressure(detected, 'heap-poll');
     } else if (dynamicPressure !== 'none') {
-      const battery = getBatteryLevel();
+      const battery = getCachedBatteryLevel();
       if (battery === null || battery >= 0.15) {
         setMemoryPressure('none', 'heap-poll-recovery');
       }
     }
+    // Kick off async battery level fetch for next poll cycle
+    fetchBatteryLevel();
   }, intervalMs);
 
   return () => stopPressureMonitoring();

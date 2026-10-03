@@ -115,6 +115,91 @@ let contextLostCount = 0;
 let glContextLostGlobal = false;
 const contextState = new WeakMap<WebGL2RenderingContext, GLContextState>();
 
+/**
+ * WebGL context pool — prevents exceeding the iOS/Safari limit (~16 concurrent
+ * contexts) by tracking all active contexts and evicting the least recently
+ * used ones when the pool is at capacity. Each transient render context
+ * (created by getGLCanvas) is registered here and released after the render
+ * completes. Contexts that are explicitly retained (via retainGLContext) stay
+ * in the pool until released.
+ */
+const MAX_GL_CONTEXTS = 12;
+
+interface PooledContext {
+  gl: WebGL2RenderingContext;
+  canvas: HTMLCanvasElement;
+  retained: boolean;
+  lastUsed: number;
+}
+
+const contextPool: PooledContext[] = [];
+
+function registerContext(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement): void {
+  contextPool.push({ gl, canvas, retained: false, lastUsed: Date.now() });
+  if (contextPool.length > MAX_GL_CONTEXTS) {
+    evictOldestContext();
+  }
+}
+
+function evictOldestContext(): void {
+  for (let i = 0; i < contextPool.length; i++) {
+    const entry = contextPool[i];
+    if (entry.retained) continue;
+    if (isGLContextLost(entry.gl)) {
+      invalidateContext(entry.gl);
+      contextPool.splice(i, 1);
+      i--;
+      return;
+    }
+    invalidateContext(entry.gl);
+    try {
+      const ext = entry.gl.getExtension('WEBGL_lose_context');
+      ext?.loseContext();
+    } catch {}
+    contextPool.splice(i, 1);
+    addBreadcrumb('gl', `Context pool evicted oldest (pool size was ${contextPool.length + 1})`, 'warning');
+    return;
+  }
+}
+
+function releaseContext(gl: WebGL2RenderingContext): void {
+  const idx = contextPool.findIndex((e) => e.gl === gl);
+  if (idx === -1) return;
+  const entry = contextPool[idx];
+  if (entry.retained) return;
+  invalidateContext(gl);
+  try {
+    const ext = gl.getExtension('WEBGL_lose_context');
+    ext?.loseContext();
+  } catch {}
+  contextPool.splice(idx, 1);
+}
+
+export function retainGLContext(gl: WebGL2RenderingContext): void {
+  const entry = contextPool.find((e) => e.gl === gl);
+  if (entry) entry.retained = true;
+}
+
+export function releaseRetainedContext(gl: WebGL2RenderingContext): void {
+  const entry = contextPool.find((e) => e.gl === gl);
+  if (entry) entry.retained = false;
+}
+
+export function getActiveContextCount(): number {
+  return contextPool.length;
+}
+
+export function releaseAllGLContexts(): void {
+  for (const entry of contextPool) {
+    invalidateContext(entry.gl);
+    try {
+      const ext = entry.gl.getExtension('WEBGL_lose_context');
+      ext?.loseContext();
+    } catch {}
+  }
+  contextPool.length = 0;
+}
+
 function isGLContextLost(gl: WebGL2RenderingContext): boolean {
   try {
     return typeof gl.isContextLost === 'function' && gl.isContextLost();
@@ -215,6 +300,7 @@ function getGLCanvas(w: number, h: number): GLContext | null {
       try { const ext = gl.getExtension('WEBGL_lose_context'); ext?.loseContext(); } catch {}
       return null;
     }
+    registerContext(gl, canvas);
     if (scale < 1) {
       addBreadcrumb('gl', `Canvas downscaled ${w}x${h} → ${scaledW}x${scaledH}`, 'warning', { reason: adaptive.reason });
     }
@@ -246,6 +332,7 @@ function safeGLRender(
 
   if (glContextLostGlobal || isGLContextLost(gl)) {
     invalidateContext(gl);
+    releaseContext(gl);
     return null;
   }
 
@@ -254,12 +341,16 @@ function safeGLRender(
 
     if (isGLContextLost(gl)) {
       invalidateContext(gl);
+      releaseContext(gl);
       return null;
     }
 
-    return { canvas };
+    const result = { canvas };
+    releaseContext(gl);
+    return result;
   } catch (err) {
     invalidateContext(gl);
+    releaseContext(gl);
     contextLostCount++;
     setMemoryPressure('severe', 'gl-context-loss');
     logError(err, { component: 'glRenderer', action: 'safeGLRender' });
@@ -402,6 +493,171 @@ export function glColorFilter(
     drawQuad(gl, program);
     gl.deleteTexture(tex);
   })?.canvas ?? null;
+}
+
+/**
+ * Tile height for chunked CPU fallback rendering.
+ * Processing in 256-row strips keeps each getImageData/putImageData call
+ * small enough that the browser can composite intermediate results,
+ * eliminating the 1-2 frame jank that occurs when the full image is
+ * processed in a single synchronous pass after GPU context loss.
+ */
+const CHUNK_TILE_HEIGHT = 256;
+
+/**
+ * Processes a canvas pixel operation in horizontal tile strips.
+ * Each strip gets its own getImageData/putImageData cycle, which is
+ * faster than one massive call on large images and lets the browser
+ * composite partial results between strips.
+ *
+ * The `processStrip` callback receives a Uint8ClampedArray for the
+ * current strip and should mutate it in place.
+ */
+export function cpuChunkedProcess(
+  source: HTMLCanvasElement,
+  width: number,
+  height: number,
+  processStrip: (data: Uint8ClampedArray, stripY: number, stripH: number) => void,
+): HTMLCanvasElement | null {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+
+  const ctx = source.getContext('2d');
+  if (!ctx) return null;
+
+  const out = document.createElement('canvas');
+  out.width = width;
+  out.height = height;
+  const outCtx = out.getContext('2d');
+  if (!outCtx) return null;
+
+  for (let y = 0; y < height; y += CHUNK_TILE_HEIGHT) {
+    const stripH = Math.min(CHUNK_TILE_HEIGHT, height - y);
+    const imageData = ctx.getImageData(0, y, width, stripH);
+    processStrip(imageData.data, y, stripH);
+    outCtx.putImageData(imageData, 0, y);
+  }
+
+  return out;
+}
+
+/**
+ * Chunked CPU fallback for mask building (alpha → black/white threshold).
+ * Replaces the full-image for-loop with per-tile processing.
+ */
+export function cpuBuildMask(
+  alphaCanvas: HTMLCanvasElement,
+  width: number,
+  height: number,
+  threshold = 0.5,
+): HTMLCanvasElement | null {
+  const thresholdByte = threshold * 255;
+  return cpuChunkedProcess(alphaCanvas, width, height, (data) => {
+    for (let i = 0; i < data.length; i += 4) {
+      const keep = data[i + 3] >= thresholdByte ? 255 : 0;
+      data[i] = keep;
+      data[i + 1] = keep;
+      data[i + 2] = keep;
+      data[i + 3] = 255;
+    }
+  });
+}
+
+/**
+ * Chunked CPU fallback for overlay composite (red tint on removed areas).
+ */
+export function cpuOverlayComposite(
+  imageCanvas: HTMLCanvasElement,
+  maskCanvas: HTMLCanvasElement,
+  width: number,
+  height: number,
+  overlayColor: [number, number, number],
+  overlayAlpha: number,
+): HTMLCanvasElement | null {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+
+  const imgCtx = imageCanvas.getContext('2d');
+  const maskCtx = maskCanvas.getContext('2d');
+  if (!imgCtx || !maskCtx) return null;
+
+  const [r, g, b] = overlayColor;
+  const alphaByte = Math.round(overlayAlpha * 255);
+
+  const out = document.createElement('canvas');
+  out.width = width;
+  out.height = height;
+  const outCtx = out.getContext('2d');
+  if (!outCtx) return null;
+
+  for (let y = 0; y < height; y += CHUNK_TILE_HEIGHT) {
+    const stripH = Math.min(CHUNK_TILE_HEIGHT, height - y);
+    const imgData = imgCtx.getImageData(0, y, width, stripH);
+    const maskData = maskCtx.getImageData(0, y, width, stripH);
+    for (let i = 0; i < imgData.data.length; i += 4) {
+      const isRemoved = maskData.data[i] < 128;
+      if (isRemoved) {
+        imgData.data[i] = Math.round(r * 255);
+        imgData.data[i + 1] = Math.round(g * 255);
+        imgData.data[i + 2] = Math.round(b * 255);
+        imgData.data[i + 3] = alphaByte;
+      }
+    }
+    outCtx.putImageData(imgData, 0, y);
+  }
+
+  return out;
+}
+
+/**
+ * Chunked CPU fallback for applying mask as alpha channel.
+ */
+export function cpuApplyAlphaMask(
+  imageCanvas: HTMLCanvasElement,
+  maskCanvas: HTMLCanvasElement,
+  width: number,
+  height: number,
+): HTMLCanvasElement | null {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+
+  const imgCtx = imageCanvas.getContext('2d');
+  const maskCtx = maskCanvas.getContext('2d');
+  if (!imgCtx || !maskCtx) return null;
+
+  const out = document.createElement('canvas');
+  out.width = width;
+  out.height = height;
+  const outCtx = out.getContext('2d');
+  if (!outCtx) return null;
+
+  for (let y = 0; y < height; y += CHUNK_TILE_HEIGHT) {
+    const stripH = Math.min(CHUNK_TILE_HEIGHT, height - y);
+    const imgData = imgCtx.getImageData(0, y, width, stripH);
+    const maskData = maskCtx.getImageData(0, y, width, stripH);
+    for (let i = 0; i < imgData.data.length; i += 4) {
+      imgData.data[i + 3] = maskData.data[i];
+    }
+    outCtx.putImageData(imgData, 0, y);
+  }
+
+  return out;
+}
+
+/**
+ * Chunked CPU fallback for checker alpha mask (alpha = removed areas).
+ */
+export function cpuCheckerAlphaMask(
+  maskCanvas: HTMLCanvasElement,
+  width: number,
+  height: number,
+): HTMLCanvasElement | null {
+  return cpuChunkedProcess(maskCanvas, width, height, (data) => {
+    for (let i = 0; i < data.length; i += 4) {
+      const isRemoved = data[i] < 128;
+      data[i] = 0;
+      data[i + 1] = 0;
+      data[i + 2] = 0;
+      data[i + 3] = isRemoved ? 255 : 0;
+    }
+  });
 }
 
 export function isWebGL2Available(): boolean {

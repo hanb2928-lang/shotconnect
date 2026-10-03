@@ -1,4 +1,5 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
+import { safeFetch } from '@/lib/apiClient';
 
 export interface WeatherAlertSettings {
   id: number;
@@ -192,11 +193,12 @@ export async function fetchLiveWeather(
   if (coldThreshold !== undefined) params.set('cold', String(coldThreshold));
   if (hotThreshold !== undefined) params.set('hot', String(hotThreshold));
   const url = `${supabaseUrl}/functions/v1/weather-check?${params.toString()}`;
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     headers: {
       Authorization: `Bearer ${supabaseAnonKey}`,
       'Content-Type': 'application/json',
     },
+    timeoutMs: 30000,
   });
   if (!res.ok) throw new Error(`Weather API failed: ${res.status}`);
   const data: unknown = await res.json();

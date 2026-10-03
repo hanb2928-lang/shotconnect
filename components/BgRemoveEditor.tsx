@@ -13,7 +13,7 @@ import {
 import { Eraser, RotateCcw, Undo2, Check, X, Loader } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
-import { glBuildMask, glOverlayComposite, glCheckerAlphaMask, glApplyAlphaMask, isWebGL2Available, attachWebGLContextLossHandler, isGLContextLostGlobally } from '@/lib/glRenderer';
+import { glBuildMask, glOverlayComposite, glCheckerAlphaMask, glApplyAlphaMask, isWebGL2Available, attachWebGLContextLossHandler, isGLContextLostGlobally, releaseAllGLContexts, cpuBuildMask, cpuOverlayComposite, cpuCheckerAlphaMask, cpuApplyAlphaMask } from '@/lib/glRenderer';
 
 type BrushMode = 'erase' | 'restore';
 
@@ -76,6 +76,7 @@ export function BgRemoveEditor({
       glLossCleanupRef.current();
       glLossCleanupRef.current = null;
     }
+    releaseAllGLContexts();
     [canvasRef, maskCanvasRef, overlayCanvasRef, checkerCanvasRef].forEach((r) => {
       if (r.current) {
         r.current.width = 0;
@@ -129,15 +130,20 @@ export function BgRemoveEditor({
         if (glResult) {
           maskCtx.drawImage(glResult, 0, 0);
         } else {
-          const maskImg = maskCtx.createImageData(imageWidth, imageHeight);
-          for (let i = 0; i < imageWidth * imageHeight; i++) {
-            const alpha = initialMask[i * 4 + 3];
-            maskImg.data[i * 4] = alpha < 128 ? 0 : 255;
-            maskImg.data[i * 4 + 1] = alpha < 128 ? 0 : 255;
-            maskImg.data[i * 4 + 2] = alpha < 128 ? 0 : 255;
-            maskImg.data[i * 4 + 3] = 255;
+          const cpuResult = cpuBuildMask(alphaCanvas, imageWidth, imageHeight, 0.5);
+          if (cpuResult) {
+            maskCtx.drawImage(cpuResult, 0, 0);
+          } else {
+            const maskImg = maskCtx.createImageData(imageWidth, imageHeight);
+            for (let i = 0; i < imageWidth * imageHeight; i++) {
+              const alpha = initialMask[i * 4 + 3];
+              maskImg.data[i * 4] = alpha < 128 ? 0 : 255;
+              maskImg.data[i * 4 + 1] = alpha < 128 ? 0 : 255;
+              maskImg.data[i * 4 + 2] = alpha < 128 ? 0 : 255;
+              maskImg.data[i * 4 + 3] = 255;
+            }
+            maskCtx.putImageData(maskImg, 0, 0);
           }
-          maskCtx.putImageData(maskImg, 0, 0);
         }
       } else {
         // No initial mask — start with everything kept (white)
@@ -221,31 +227,38 @@ export function BgRemoveEditor({
     const maskCtx = maskCanvas.getContext('2d');
     if (!maskCtx) return;
 
-    const maskData = maskCtx.getImageData(0, 0, imageWidth, imageHeight);
-
-    if (!overlayCanvasRef.current) {
-      overlayCanvasRef.current = document.createElement('canvas');
-    }
-    const overlayCanvas = overlayCanvasRef.current;
-    if (overlayCanvas.width !== imageWidth || overlayCanvas.height !== imageHeight) {
-      overlayCanvas.width = imageWidth;
-      overlayCanvas.height = imageHeight;
-    }
-    const oCtx = overlayCanvas.getContext('2d');
-    if (!oCtx) return;
-    oCtx.clearRect(0, 0, imageWidth, imageHeight);
-    const overlayData = oCtx.createImageData(imageWidth, imageHeight);
-    for (let i = 0; i < imageWidth * imageHeight; i++) {
-      const isRemoved = maskData.data[i * 4] < 128;
-      if (isRemoved) {
-        overlayData.data[i * 4] = 220;
-        overlayData.data[i * 4 + 1] = 50;
-        overlayData.data[i * 4 + 2] = 50;
-        overlayData.data[i * 4 + 3] = 140;
+    const cpuOverlay = cpuOverlayComposite(
+      canvasRef.current, maskCanvas, imageWidth, imageHeight,
+      [220 / 255, 50 / 255, 50 / 255], 140 / 255,
+    );
+    if (cpuOverlay) {
+      dCtx.drawImage(cpuOverlay, 0, 0, displayCanvas.width, displayCanvas.height);
+    } else {
+      const maskData = maskCtx.getImageData(0, 0, imageWidth, imageHeight);
+      if (!overlayCanvasRef.current) {
+        overlayCanvasRef.current = document.createElement('canvas');
       }
+      const overlayCanvas = overlayCanvasRef.current;
+      if (overlayCanvas.width !== imageWidth || overlayCanvas.height !== imageHeight) {
+        overlayCanvas.width = imageWidth;
+        overlayCanvas.height = imageHeight;
+      }
+      const oCtx = overlayCanvas.getContext('2d');
+      if (!oCtx) return;
+      oCtx.clearRect(0, 0, imageWidth, imageHeight);
+      const overlayData = oCtx.createImageData(imageWidth, imageHeight);
+      for (let i = 0; i < imageWidth * imageHeight; i++) {
+        const isRemoved = maskData.data[i * 4] < 128;
+        if (isRemoved) {
+          overlayData.data[i * 4] = 220;
+          overlayData.data[i * 4 + 1] = 50;
+          overlayData.data[i * 4 + 2] = 50;
+          overlayData.data[i * 4 + 3] = 140;
+        }
+      }
+      oCtx.putImageData(overlayData, 0, 0);
+      dCtx.drawImage(overlayCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
     }
-    oCtx.putImageData(overlayData, 0, 0);
-    dCtx.drawImage(overlayCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
 
     const checkerKey = `${imageWidth}x${imageHeight}`;
     if (!checkerCanvasRef.current || checkerBuiltFor.current !== checkerKey) {
@@ -271,22 +284,27 @@ export function BgRemoveEditor({
     if (!cCtx) return;
 
     cCtx.globalCompositeOperation = 'destination-in';
-    const removedMask = document.createElement('canvas');
-    removedMask.width = imageWidth;
-    removedMask.height = imageHeight;
-    const rCtx = removedMask.getContext('2d');
-    if (!rCtx) return;
-    const rData = rCtx.createImageData(imageWidth, imageHeight);
-    for (let i = 0; i < imageWidth * imageHeight; i++) {
-      const isRemoved = maskData.data[i * 4] < 128;
-      rData.data[i * 4 + 3] = isRemoved ? 255 : 0;
+    const cpuChecker = cpuCheckerAlphaMask(maskCanvas, imageWidth, imageHeight);
+    if (cpuChecker) {
+      cCtx.drawImage(cpuChecker, 0, 0);
+    } else {
+      const removedMask = document.createElement('canvas');
+      removedMask.width = imageWidth;
+      removedMask.height = imageHeight;
+      const rCtx = removedMask.getContext('2d');
+      if (!rCtx) return;
+      const rData = rCtx.createImageData(imageWidth, imageHeight);
+      const maskData = maskCtx.getImageData(0, 0, imageWidth, imageHeight);
+      for (let i = 0; i < imageWidth * imageHeight; i++) {
+        const isRemoved = maskData.data[i * 4] < 128;
+        rData.data[i * 4 + 3] = isRemoved ? 255 : 0;
+      }
+      rCtx.putImageData(rData, 0, 0);
+      cCtx.drawImage(removedMask, 0, 0);
+      removedMask.width = 0;
+      removedMask.height = 0;
     }
-    rCtx.putImageData(rData, 0, 0);
-    cCtx.drawImage(removedMask, 0, 0);
     cCtx.globalCompositeOperation = 'source-over';
-
-    removedMask.width = 0;
-    removedMask.height = 0;
 
     dCtx.globalCompositeOperation = 'destination-over';
     dCtx.drawImage(checkerCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
@@ -438,7 +456,15 @@ export function BgRemoveEditor({
         return;
       }
 
-      // CPU fallback
+      // CPU fallback — chunked tile processing
+      const cpuResult = cpuApplyAlphaMask(canvasRef.current, maskCanvasRef.current, imageWidth, imageHeight);
+      if (cpuResult) {
+        const dataUrl = cpuResult.toDataURL('image/png');
+        onConfirm(dataUrl);
+        return;
+      }
+
+      // Last-resort fallback: full-image synchronous processing
       const resultCanvas = document.createElement('canvas');
       resultCanvas.width = imageWidth;
       resultCanvas.height = imageHeight;

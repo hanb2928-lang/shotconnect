@@ -8,6 +8,7 @@ import * as Clipboard from 'expo-clipboard';
 import type { PlatformKey } from '@/types/database';
 import { spinCaption, type CaptionVariation } from '@/lib/humanLikeEngine';
 import { sanitizeEncodedText } from '@/lib/textSanitizer';
+import { useSanitizedInput } from '@/hooks/useSanitizedInput';
 
 type CopyType = 'viral' | 'info' | 'deal';
 
@@ -73,7 +74,7 @@ export function CopyWriter({
   const [otherVersionTab, setOtherVersionTab] = useState<CopyType>('info');
   const [spinningKey, setSpinningKey] = useState<string | null>(null);
   const [spunVariations, setSpunVariations] = useState<Record<string, CaptionVariation>>({});
-  const [customPrompt, setCustomPrompt] = useState('');
+  const customPromptInput = useSanitizedInput('', { maxLength: 200 });
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -107,7 +108,7 @@ export function CopyWriter({
           platform,
           count,
           brandPersona: brandPersona || undefined,
-          customPrompt: customPrompt.trim() || undefined,
+          customPrompt: customPromptInput.value.trim() || undefined,
           contentTone: contentTone || undefined,
         }),
         timeoutMs: 115000,
@@ -141,7 +142,7 @@ export function CopyWriter({
       if (mountedRef.current) setError(true);
     }
     if (mountedRef.current) setGenerating(false);
-  }, [productName, productCategory, priceEstimate, oneLiner, productAdvantages, platform, count, brandPersona, customPrompt, contentTone]);
+  }, [productName, productCategory, priceEstimate, oneLiner, productAdvantages, platform, count, brandPersona, customPromptInput.value, contentTone]);
 
   const handleCopy = useCallback(async (item: CopyItem, cardKey: string) => {
     const text = `${item.hook}\n\n${item.caption}\n\n${item.hashtags.map((h) => `#${h}`).join(' ')}`;
@@ -327,8 +328,9 @@ export function CopyWriter({
         </View>
         <TextInput
           style={styles.customPromptInput}
-          value={customPrompt}
-          onChangeText={setCustomPrompt}
+          value={customPromptInput.value}
+          onChangeText={customPromptInput.onChangeText}
+          onBlur={customPromptInput.onBlur}
           placeholder="예: 오늘 갓 구운 소금빵 30% 할인, 절대 놓치지 마세요!"
           placeholderTextColor={theme.colors.dark.textFaint}
           multiline

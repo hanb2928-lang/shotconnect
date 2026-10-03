@@ -12,9 +12,13 @@ import {
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
+import { useBootState } from '@/hooks/useBootState';
+import { useBootReady } from '@/hooks/useBootReady';
 import { initStorage } from '@/lib/storage';
 import { theme } from '@/lib/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { BootFallback } from '@/components/BootFallback';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { AffiliateToastProvider } from '@/components/AffiliateToast';
 const NetworkBanner = lazy(() =>
   import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
@@ -30,19 +34,33 @@ import { installGlobalErrorHandlers } from '@/lib/errorLogger';
 import { installMediaCacheLifecycleHook } from '@/lib/mediaCache';
 import { startPressureMonitoring } from '@/lib/devicePerformance';
 import { sweepTempFiles } from '@/lib/tempFileManager';
+import { sweepStaleOfflineCache } from '@/lib/offlineCache';
+import { runBootSweep } from '@/lib/bootSweeper';
+import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
+import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 
 installGlobalErrorHandlers();
 installMediaCacheLifecycleHook();
 startPressureMonitoring();
+registerDefaultFlushHandlers();
+installProactiveMemoryFlush();
 
-// Run a temp file GC sweep 5s after boot — non-blocking, best-effort.
-// Cleans up orphaned Blob URLs and temp files from a previous session.
-setTimeout(() => { sweepTempFiles().catch(() => {}); }, 5000);
+// Run all GC sweeps 5s after boot — non-blocking, best-effort.
+// Cleans up orphaned Blob URLs, temp files, stale IndexedDB media cache,
+// and stale LocalStorage offline cache from previous sessions.
+// The boot sweeper scans storage directly (not the in-memory registry)
+// to catch orphans left by force-killed sessions.
+setTimeout(() => {
+  sweepTempFiles().catch(() => {});
+  sweepStaleOfflineCache().catch(() => {});
+  runBootSweep().catch(() => {});
+}, 5000);
 
 if (Platform.OS === 'web' && typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       sweepTempFiles().catch(() => {});
+      sweepStaleOfflineCache().catch(() => {});
     }
   });
 }
@@ -98,6 +116,10 @@ function refreshStalePreview(): void {
     window.sessionStorage.setItem('shotconnect-preview-version', SHOTCONNECT_PREVIEW_VERSION);
     // Verify the write actually persisted before reloading.
     if (window.sessionStorage.getItem('shotconnect-preview-version') !== SHOTCONNECT_PREVIEW_VERSION) return;
+    // Clear the stale boot marker so the reloaded page starts a fresh
+    // boot sequence instead of skipping the splash due to an old marker.
+    window.sessionStorage.removeItem('shotconnect-boot-session');
+    window.sessionStorage.removeItem('shotconnect-boot-version');
     window.location.reload();
   } catch {
     // Restricted session storage — skip reload to avoid infinite loop.
@@ -141,11 +163,13 @@ function AppShell() {
 
 export default function RootLayout() {
   useFrameworkReady();
+  const { phase: bootPhase, isFreshBoot, markBooted } = useBootState();
   const [ready, setReady] = useState<ReadyState>('loading');
   const [fontTimedOut, setFontTimedOut] = useState(false);
   const [bootKey] = useState(() => `shotconnect-${Date.now()}`);
   const initStartedRef = useRef(false);
   const splashHiddenRef = useRef(false);
+  const bootReadyMarkedRef = useRef(false);
 
   const [fontsLoaded, fontError] = useFonts({
     'PlusJakartaSans-Regular': PlusJakartaSans_400Regular,
@@ -186,7 +210,7 @@ export default function RootLayout() {
 
       const webTask = (async () => {
         purgeLegacyWebSession();
-        refreshStalePreview();
+        if (isFreshBoot) refreshStalePreview();
       })();
 
       await Promise.all([storageTask, webTask]);
@@ -196,9 +220,9 @@ export default function RootLayout() {
 
     Promise.race([initPromise, hardTimeout]).finally(() => {
       setReady('app');
-      hideSplash();
+      markBooted();
     });
-  }, [hideSplash]);
+  }, [hideSplash, markBooted, isFreshBoot]);
 
   // Deep link handling
   useEffect(() => {
@@ -224,8 +248,21 @@ export default function RootLayout() {
     };
   }, []);
 
-  const fontsReady = fontsLoaded || fontError || fontTimedOut;
-  const isReady = fontsReady && ready !== 'loading';
+  const fontsReady = fontsLoaded || !!fontError || fontTimedOut;
+  const { isBootReady } = useBootReady({ fontsReady, bootPhase });
+
+  // Hide splash only after all critical resources are confirmed ready.
+  // This prevents the splash from fading before fonts, storage, and
+  // other essentials are initialized, which would expose a blank or
+  // partially-rendered screen during preview updates.
+  useEffect(() => {
+    if (isBootReady && !bootReadyMarkedRef.current) {
+      bootReadyMarkedRef.current = true;
+      hideSplash();
+    }
+  }, [isBootReady, hideSplash]);
+
+  const isReady = isBootReady && ready !== 'loading';
 
   return (
     <ErrorBoundary>
@@ -235,9 +272,14 @@ export default function RootLayout() {
             <SafeAreaProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
                 <View key={bootKey} style={{ flex: 1 }}>
-                  <AppShell />
-                  <Suspense fallback={null}><NetworkBanner /></Suspense>
-                  <Suspense fallback={null}><VideoJobRecoveryToast /></Suspense>
+                  {!isReady && <LoadingScreen fullScreen />}
+                  {isReady && (
+                    <>
+                      <AppShell />
+                      <Suspense fallback={<BootFallback />}><NetworkBanner /></Suspense>
+                      <Suspense fallback={<BootFallback />}><VideoJobRecoveryToast /></Suspense>
+                    </>
+                  )}
                   <StatusBar style="light" />
                 </View>
               </GestureHandlerRootView>

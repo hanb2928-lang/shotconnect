@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform } from 'r
 import { Star, Save, RotateCcw, MessageSquare, Check, Sparkles, Loader as Loader2 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { REVIEW_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
+import { useSanitizedInput } from '@/hooks/useSanitizedInput';
 import { safeFetch } from '@/lib/apiClient';
 import { friendlyError } from '@/lib/errors';
 import type { CustomReview } from '@/types/database';
@@ -23,7 +24,7 @@ interface ReviewInputProps {
 }
 
 export function ReviewInput({ review, onSave, onClear, productData, brandPersona }: ReviewInputProps) {
-  const [text, setText] = useState('');
+  const reviewInput = useSanitizedInput('', { maxLength: 300 });
   const [rating, setRating] = useState(5);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -39,20 +40,20 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
 
   useEffect(() => {
     if (review && review.text) {
-      setText(review.text);
+      reviewInput.setValue(review.text);
       setRating(review.rating ?? 5);
     } else {
-      setText('');
+      reviewInput.reset();
       setRating(5);
     }
   }, [review]);
 
   const handleSave = useCallback(async () => {
-    if (!text.trim()) return;
+    if (!reviewInput.value.trim()) return;
     setSaving(true);
     try {
       await onSave({
-        text: text.trim(),
+        text: reviewInput.value.trim(),
         rating,
         updatedAt: new Date().toISOString(),
       });
@@ -63,10 +64,10 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
       // error handled by parent
     }
     if (mountedRef.current) setSaving(false);
-  }, [text, rating, onSave]);
+  }, [reviewInput.value, rating, onSave]);
 
   const handleClear = useCallback(async () => {
-    setText('');
+    reviewInput.reset();
     setRating(5);
     try {
       await onClear();
@@ -94,7 +95,7 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       if (!mountedRef.current) return;
-      setText(String(data.text || '').slice(0, 300));
+      reviewInput.setValue(String(data.text || '').slice(0, 300));
       setRating(Math.min(Math.max(Math.round(Number(data.rating) || 5), 1), 5));
       setReviewIsFallback(!!data.isFallback);
     } catch {
@@ -136,8 +137,9 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
 
       <TextInput
         style={styles.textInput}
-        value={text}
-        onChangeText={setText}
+        value={reviewInput.value}
+        onChangeText={reviewInput.onChangeText}
+        onBlur={reviewInput.onBlur}
         placeholder="이 제품을 사용해본 솔직한 후기를 적어주세요. 예: 생각보다 가벼워서 데일리로 들기 좋아요. 색감도 사진이랑 똑같고 마감도 깔끔해요!"
         placeholderTextColor={theme.colors.dark.textFaint}
         multiline
@@ -145,14 +147,14 @@ export function ReviewInput({ review, onSave, onClear, productData, brandPersona
         maxLength={300}
       />
       <View style={styles.charRow}>
-        <Text style={styles.charText}>{text.length} / 300자</Text>
+        <Text style={styles.charText}>{reviewInput.value.length} / 300자</Text>
       </View>
 
       <View style={styles.buttonRow}>
         <TouchableOpacity
-          style={[styles.saveButton, !text.trim() && styles.saveButtonDisabled]}
+          style={[styles.saveButton, !reviewInput.value.trim() && styles.saveButtonDisabled]}
           onPress={handleSave}
-          disabled={!text.trim() || saving}
+          disabled={!reviewInput.value.trim() || saving}
           activeOpacity={0.8}
         >
           {saved ? (

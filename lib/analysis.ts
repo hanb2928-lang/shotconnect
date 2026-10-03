@@ -367,18 +367,15 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
   } catch {
     // use defaults
   }
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 115000);
-  const response = await fetch(TTS_FUNCTION_URL, {
+  const response = await safeFetch(TTS_FUNCTION_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${supabaseAnonKey}`,
     },
     body: JSON.stringify({ text, voice, speed, pitch, ttsApiKey }),
-    signal: controller.signal,
+    timeoutMs: 115000,
   });
-  clearTimeout(timeoutId);
   if (!response.ok) return;
   let data: { audioBase64?: string };
   try {

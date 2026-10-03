@@ -1,14 +1,11 @@
 import { lazy, Suspense } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
+import { BootFallback } from '@/components/BootFallback';
 
 const ScrollableTabBar = lazy(() =>
   import('@/components/ScrollableTabBar').then((m) => ({ default: m.ScrollableTabBar })),
 );
-
-function TabBarFallback() {
-  return null;
-}
 
 export default function TabLayout() {
   return (
@@ -17,7 +14,7 @@ export default function TabLayout() {
           <Tabs
             initialRouteName="index"
             tabBar={(props) => (
-              <Suspense fallback={<TabBarFallback />}>
+              <Suspense fallback={<BootFallback />}>
                 <ScrollableTabBar {...props} badges={{}} />
               </Suspense>
             )}

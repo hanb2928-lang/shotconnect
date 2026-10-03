@@ -9,6 +9,7 @@ import { hashImage, hashMultiAngle } from '@/lib/contentHash';
 import { TTS_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
 import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
+import { safeFetch } from '@/lib/apiClient';
 
 const SUPABASE_TIMEOUT_MS = 30000;
 
@@ -311,18 +312,15 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
   } catch {
     // use defaults
   }
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 115000);
-  const response = await fetch(TTS_FUNCTION_URL, {
+  const response = await safeFetch(TTS_FUNCTION_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${supabaseAnonKey}`,
     },
     body: JSON.stringify({ text, voice, speed, pitch, ttsApiKey }),
-    signal: controller.signal,
+    timeoutMs: 115000,
   });
-  clearTimeout(timeoutId);
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
     throw new Error(`TTS 생성 실패 (${response.status}): ${errorBody || response.statusText}`);
