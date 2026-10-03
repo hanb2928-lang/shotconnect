@@ -569,20 +569,6 @@ function CameraScreenInner() {
     postCaptureBase64Ref.current = null;
   }, []);
 
-  const handleHardResetCamera = useCallback(async () => {
-    try {
-      if (cameraRef.current) {
-        await cameraRef.current.pausePreview?.();
-      }
-    } catch {
-      // session may already be dead
-    }
-    setCameraReady(false);
-    cameraReadyRef.current = false;
-    setError(null);
-    setCameraSessionKey(Date.now());
-  }, []);
-
   const prepareCameraForProcessing = useCallback(async () => {
     if (Platform.OS === 'web') return;
     updateCameraReady(false);
@@ -1365,7 +1351,11 @@ function CameraScreenInner() {
               style={styles.cameraPreview}
               facing={facing}
               onCameraReady={handleNativeCameraReady}
-              onMountError={() => { cameraReadyRef.current = false; setCameraReady(false); handleHardResetCamera(); }}
+              onMountError={(event) => {
+                cameraReadyRef.current = false;
+                setCameraReady(false);
+                setError(event.message || '카메라를 시작할 수 없습니다. 권한과 다른 앱의 카메라 사용 여부를 확인해주세요.');
+              }}
               mode="video"
             />
           ) : (
@@ -1571,7 +1561,11 @@ function CameraScreenInner() {
             style={styles.cameraPreview}
             facing={facing}
             onCameraReady={handleNativeCameraReady}
-            onMountError={() => { cameraReadyRef.current = false; setCameraReady(false); handleHardResetCamera(); }}
+            onMountError={(event) => {
+                cameraReadyRef.current = false;
+                setCameraReady(false);
+                setError(event.message || '카메라를 시작할 수 없습니다. 권한과 다른 앱의 카메라 사용 여부를 확인해주세요.');
+              }}
             mode="video"
           />
         ) : (
