@@ -264,6 +264,10 @@ export const InlineCameraViewfinder = forwardRef<
     if (captureLockRef.current || captureInProgressRef.current || processing) return;
     captureLockRef.current = true;
     onCapture?.();
+    // Safety net: if the parent's onCapture early-returns without calling
+    // viewfinder.capture() (which resets the lock in its finally block),
+    // release the lock after a short delay so the shutter doesn't freeze.
+    setTimeout(() => { captureLockRef.current = false; }, 2000);
   }, [onCapture, processing]);
 
   if (Platform.OS === 'web') {

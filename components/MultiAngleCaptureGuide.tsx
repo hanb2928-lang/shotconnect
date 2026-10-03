@@ -159,9 +159,9 @@ export function MultiAngleCaptureGuide({
         if (mountedRef.current) setCaptureError('갤러리에서 이미지를 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.');
         console.error('[MultiAngleGuide] gallery pick failed:', err);
       } finally {
-        await nativeHeapCooldownGuard();
+        pickLockRef.current = false;
         if (mountedRef.current) setProcessing(false);
-        setTimeout(() => { pickLockRef.current = false; }, 300);
+        try { await nativeHeapCooldownGuard(); } catch { /* cooldown must not block lock release */ }
       }
     },
     [onPickImage, handleAddShot],
@@ -192,12 +192,10 @@ export function MultiAngleCaptureGuide({
         if (mountedRef.current) setCaptureError('카메라 캡처 중 오류가 발생했습니다. 다시 촬영해 주세요.');
         console.error('[MultiAngleGuide] camera capture failed:', err);
       } finally {
-        await nativeHeapCooldownGuard();
+        isCapturingRef.current = false;
+        pickLockRef.current = false;
         if (mountedRef.current) setProcessing(false);
-        setTimeout(() => {
-          pickLockRef.current = false;
-          isCapturingRef.current = false;
-        }, 500);
+        try { await nativeHeapCooldownGuard(); } catch { /* cooldown must not block lock release */ }
       }
     },
     [onCaptureImage, handleAddShot],
@@ -222,6 +220,8 @@ export function MultiAngleCaptureGuide({
     }).filter(Boolean) as AngleShot[];
     if (ordered.length === 0) return;
     if (!mountedRef.current) return;
+    pickLockRef.current = false;
+    isCapturingRef.current = false;
     onComplete(ordered);
     setShots({});
     shotsRef.current = {};
@@ -229,11 +229,14 @@ export function MultiAngleCaptureGuide({
   }, [guides, onComplete]);
 
   const handleClose = useCallback(() => {
+    pickLockRef.current = false;
+    isCapturingRef.current = false;
     setShots({});
     shotsRef.current = {};
     setCurrentAngle(0);
     setCaptureError(null);
     setCameraReady(false);
+    setProcessing(false);
     onClose();
   }, [onClose]);
 
