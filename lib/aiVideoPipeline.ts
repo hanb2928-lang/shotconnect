@@ -1,3 +1,4 @@
+import { AppState, type AppStateStatus } from 'react-native';
 import { supabase } from './supabase';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
@@ -78,6 +79,47 @@ const POLL_BACKOFF_FACTOR = 1.5;
 const CHANNEL_RECONNECT_DELAY_MS = 3000;
 const JITTER = () => 0.8 + Math.random() * 0.4;
 const CHANNEL_MAX_RECONNECT_ATTEMPTS = 5;
+
+const BG_MAX_WAIT_MS = 120_000;
+
+/**
+ * Install an AppState listener that pauses all timers/channels when the app
+ * goes to background and resumes them on return. After BG_MAX_WAIT_MS in
+ * background, calls onBackgroundTimeout to settle the job and stop polling.
+ * Returns a cleanup function that removes the listener.
+ */
+function installBackgroundPause(opts: {
+  isSettled: () => boolean;
+  pause: () => void;
+  resume: () => void;
+  onBackgroundTimeout: () => void;
+}): () => void {
+  let bgTimer: ReturnType<typeof setTimeout> | null = null;
+  let isBackgrounded = false;
+
+  const handleAppState = (nextState: AppStateStatus) => {
+    if (nextState === 'background' || nextState === 'inactive') {
+      if (isBackgrounded || opts.isSettled()) return;
+      isBackgrounded = true;
+      opts.pause();
+      bgTimer = setTimeout(() => {
+        if (opts.isSettled()) return;
+        opts.onBackgroundTimeout();
+      }, BG_MAX_WAIT_MS);
+    } else if (nextState === 'active') {
+      if (!isBackgrounded || opts.isSettled()) return;
+      isBackgrounded = false;
+      if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+      opts.resume();
+    }
+  };
+
+  const appSub = AppState.addEventListener('change', handleAppState);
+  return () => {
+    if (bgTimer) clearTimeout(bgTimer);
+    appSub.remove();
+  };
+}
 
 enum ChannelHealth {
   HEALTHY = 'healthy',
@@ -449,10 +491,23 @@ function waitForVideoCompletion(
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };
 
+    // Background pause state — declared early so cleanup/finish can reference them
+    let bgTimer: ReturnType<typeof setTimeout> | null = null;
+    let runwayFallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
+    let isBackgrounded = false;
+    let appSub: { remove: () => void } | null = null;
+
+    const fullCleanup = () => {
+      cleanup();
+      if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+      if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
+      appSub?.remove();
+    };
+
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
-      cleanup();
+      fullCleanup();
       if (abortListener) signal?.removeEventListener('abort', abortListener);
       fn();
     };
@@ -693,7 +748,7 @@ function waitForVideoCompletion(
       };
       runwayPoll();
     };
-    setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
+    runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
 
     // Soft warning at 120s — don't reject, just inform the user
     let softWarnTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
@@ -708,6 +763,51 @@ function waitForVideoCompletion(
       report('error', 0, msg);
       finish(() => reject(new Error(msg)));
     }, REALTIME_TIMEOUT_MS);
+
+    // Background pause: stop all timers/channels when backgrounded to avoid
+    // CPU drain and battery consumption. After BG_MAX_WAIT_MS in background,
+    // fully stop polling — the job continues server-side and the user can
+    // check the result page when they return.
+    const pauseBackground = () => {
+      if (isBackgrounded || settled) return;
+      isBackgrounded = true;
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
+      bgTimer = setTimeout(() => {
+        if (settled) return;
+        const msg = '백그라운드 대기 시간이 초과되었습니다. 앱으로 돌아오면 완성된 영상을 확인할 수 있습니다.';
+        report('error', 0, msg);
+        finish(() => reject(new Error(msg)));
+      }, BG_MAX_WAIT_MS);
+    };
+
+    const resumeBackground = () => {
+      if (!isBackgrounded || settled) return;
+      isBackgrounded = false;
+      if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+      pollBackoffAttempt = 0;
+      reconnectAttempts = 0;
+      setupChannel();
+      scheduleNextPoll();
+      checkDb();
+      checkScanVideoUrl();
+      runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
+    };
+
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        pauseBackground();
+      } else if (nextState === 'active') {
+        resumeBackground();
+      }
+    };
+    appSub = AppState.addEventListener('change', handleAppState);
 
     // Initial DB check in case the webhook already completed before we subscribed
     checkDb();
@@ -942,9 +1042,35 @@ export function subscribeVideoJob(
   scheduleNextPoll();
   checkAndNotify();
 
+  const removeBgPause = installBackgroundPause({
+    isSettled: () => settled,
+    pause: () => {
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
+    },
+    resume: () => {
+      pollBackoffAttempt = 0;
+      reconnectAttempts = 0;
+      setupChannel();
+      scheduleNextPoll();
+      checkAndNotify();
+    },
+    onBackgroundTimeout: () => {
+      settled = true;
+      cleanup();
+      removeBgPause();
+      callback({ status: 'FAILED', error: '백그라운드 대기 시간이 초과되었습니다. 앱으로 돌아오면 완성된 영상을 확인할 수 있습니다.' });
+    },
+  });
+
   return () => {
     settled = true;
     cleanup();
+    removeBgPause();
   };
 }
 
@@ -1164,9 +1290,35 @@ export function subscribeHdUpgrade(
   scheduleNextPoll();
   checkAndNotify();
 
+  const removeBgPause = installBackgroundPause({
+    isSettled: () => settled,
+    pause: () => {
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
+    },
+    resume: () => {
+      pollBackoffAttempt = 0;
+      reconnectAttempts = 0;
+      setupChannel();
+      scheduleNextPoll();
+      checkAndNotify();
+    },
+    onBackgroundTimeout: () => {
+      settled = true;
+      cleanup();
+      removeBgPause();
+      callback({ status: 'FAILED', error: '백그라운드 대기 시간이 초과되었습니다. 앱으로 돌아오면 완성된 영상을 확인할 수 있습니다.' });
+    },
+  });
+
   return () => {
     settled = true;
     cleanup();
+    removeBgPause();
   };
 }
 

@@ -21,6 +21,7 @@ const TIMEOUT_MS = 300_000;
 const MAX_CHANNEL_RETRIES = 5;
 const CHANNEL_RETRY_DELAY_MS = 3000;
 const JITTER = () => 0.8 + Math.random() * 0.4;
+const BG_MAX_WAIT_MS = 120_000;
 
 export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJobRealtimeOptions) {
   const [status, setStatus] = useState<VideoJobStatus>('idle');
@@ -70,6 +71,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let bgTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
     let pollAttempt = 0;
 
@@ -81,6 +83,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (bgTimer) clearTimeout(bgTimer);
     };
 
     const checkDb = async () => {
@@ -165,6 +168,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
     // Pause polling and realtime when backgrounded to avoid zombie requests.
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
+        if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
         if (!settledRef.current) {
           pollAttempt = 0;
           checkDb();
@@ -177,6 +181,10 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
           try { supabase.removeChannel(channel); } catch { /* ignore */ }
           channel = null;
         }
+        bgTimer = setTimeout(() => {
+          if (settledRef.current) return;
+          handleResult('failed', undefined, '백그라운드 대기 시간이 초과되었습니다. 앱으로 돌아오면 완성된 영상을 확인할 수 있습니다.');
+        }, BG_MAX_WAIT_MS);
       }
     };
     const appSub = AppState.addEventListener('change', handleAppState);
