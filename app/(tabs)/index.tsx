@@ -274,7 +274,7 @@ function CameraScreenInner() {
     getItem('content_tone').then((saved) => {
       if (!mounted) return;
       if (saved === 'studio' || saved === 'raw') setContentTone(saved as ContentTone);
-    });
+    }).catch(() => {});
     return () => {
       mounted = false;
     };
@@ -732,7 +732,18 @@ function CameraScreenInner() {
     await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
-    const stereoMod = await getStereoMod();
+    let stereoMod;
+    try {
+      stereoMod = await getStereoMod();
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      stereoOverlayRef.current = false;
+      setStereoOverlayVisible(false);
+      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+      releasePipelineLock();
+      setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+      return;
+    }
     setStereoProgress(stereoMod.makeInitialProgress());
     setStereoOverlayVisible(true);
 
@@ -985,6 +996,8 @@ function CameraScreenInner() {
     }
     if (!isMountedRef.current) return;
     setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
+    } catch (err) {
+      if (isMountedRef.current) setError(friendlyError(err, '캡처 처리 중 오류가 발생했습니다. 다시 시도해주세요.'));
     } finally {
       processingRef.current = false;
       setProcessing(false);
@@ -1025,7 +1038,18 @@ function CameraScreenInner() {
     await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
-    const stereoMod = await getStereoMod();
+    let stereoMod;
+    try {
+      stereoMod = await getStereoMod();
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      stereoOverlayRef.current = false;
+      setStereoOverlayVisible(false);
+      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+      releasePipelineLock();
+      setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+      return;
+    }
     setStereoProgress(stereoMod.makeInitialProgress());
     setStereoOverlayVisible(true);
     setError(null);

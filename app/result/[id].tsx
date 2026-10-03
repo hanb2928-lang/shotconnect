@@ -823,7 +823,7 @@ export default function ResultScreen() {
             if (data?.tts_url && mountedRef.current) setTtsUrl(data.tts_url);
           }).catch(() => {});
         }
-      });
+      }).catch(() => {});
     }
 
     try {
@@ -3411,11 +3411,17 @@ export default function ResultScreen() {
                 if (scan?.analysis_job_id) {
                   setAnalysisStatus('processing');
                   setAnalysisError(null);
-                  await supabase
-                    .from('render_jobs')
-                    .update({ status: 'queued', error_message: null })
-                    .eq('id', scan.analysis_job_id);
-                  setRetryCount((c) => c + 1);
+                  try {
+                    const { error: retryError } = await supabase
+                      .from('render_jobs')
+                      .update({ status: 'queued', error_message: null })
+                      .eq('id', scan.analysis_job_id);
+                    if (retryError) throw new Error(retryError.message);
+                    setRetryCount((c) => c + 1);
+                  } catch (err) {
+                    setAnalysisStatus('error');
+                    setAnalysisError(err instanceof Error ? err.message : '재시도 중 오류가 발생했습니다.');
+                  }
                 }
               }}
               activeOpacity={0.8}
@@ -4690,7 +4696,11 @@ export default function ResultScreen() {
                 style={styles.pushPromptAcceptBtn}
                 onPress={async () => {
                   setPushPromptVisible(false);
-                  await subscribePush();
+                  try {
+                    await subscribePush();
+                  } catch {
+                    // Notification subscription is best-effort; user can retry later
+                  }
                 }}
                 activeOpacity={0.8}>
                 <BellRing size={16} color="#fff" strokeWidth={2.5} />

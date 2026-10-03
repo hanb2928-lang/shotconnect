@@ -468,7 +468,8 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
   const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
   if (!urlData.publicUrl) return;
 
-  await supabase.from('scans').update({ tts_url: urlData.publicUrl }).eq('id', scanId);
+  const { error: ttsUpdateError } = await supabase.from('scans').update({ tts_url: urlData.publicUrl }).eq('id', scanId);
+  if (ttsUpdateError) return;
 }
 
 export async function saveManualScan(

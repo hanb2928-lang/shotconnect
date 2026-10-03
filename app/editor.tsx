@@ -159,7 +159,11 @@ async function saveImageToGallery(base64: string, mimeType: string, fileName: st
   await FileSystem.writeAsStringAsync(fileUri, base64, {
     encoding: FileSystem.EncodingType.Base64,
   });
-  await MediaLibrary.createAssetAsync(fileUri);
+  try {
+    await MediaLibrary.createAssetAsync(fileUri);
+  } finally {
+    FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+  }
 }
 
 

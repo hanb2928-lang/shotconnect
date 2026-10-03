@@ -600,13 +600,16 @@ export async function extractVideoFrameBase64(
       if (result.frameUrl) {
         const FileSystem2 = await import('expo-file-system/legacy');
         const localPath = `${FileSystem2.cacheDirectory}server-frame-${Date.now()}.jpg`;
-        await FileSystem2.downloadAsync(result.frameUrl, localPath);
-        registerTempFile(localPath, 'extractVideoFrameBase64');
-        const base64 = await FileSystem2.readAsStringAsync(localPath, {
-          encoding: FileSystem2.EncodingType.Base64,
-        });
-        safeDeleteTempFile(localPath).catch(() => {});
-        return { base64, mimeType: 'image/jpeg' };
+        try {
+          await FileSystem2.downloadAsync(result.frameUrl, localPath);
+          registerTempFile(localPath, 'extractVideoFrameBase64');
+          const base64 = await FileSystem2.readAsStringAsync(localPath, {
+            encoding: FileSystem2.EncodingType.Base64,
+          });
+          return { base64, mimeType: 'image/jpeg' };
+        } finally {
+          safeDeleteTempFile(localPath).catch(() => {});
+        }
       }
       return { base64: result.base64, mimeType: result.mimeType };
     } finally {
