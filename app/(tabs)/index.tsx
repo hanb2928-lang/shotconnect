@@ -97,13 +97,23 @@ async function runFittingPipeline(
 
   try {
     if (signal?.aborted) return;
-    const productDataUrl = buildDataUrl(productBase64, productMime);
-    const modelDataUrl = buildDataUrl(bgBase64, bgMime);
+
+    // Upload images to Storage first, then pass public URLs to the edge
+    // function. Sending multi-MB base64 strings through supabase.functions
+    // .invoke() buffers the entire JSON payload in native heap, causing
+    // OOM kills on Android.
     if (signal?.aborted) return;
+
+    const [productUrl, modelUrl] = await Promise.all([
+      uploadImage(productBase64, productMime, signal),
+      uploadImage(bgBase64, bgMime, signal),
+    ]);
+    if (signal?.aborted) return;
+
     const { data, error } = await supabase.functions.invoke('virtual-fitting', {
       body: {
-        productImage: productDataUrl,
-        modelImage: modelDataUrl,
+        productImage: productUrl,
+        modelImage: modelUrl,
         customPrompt: customPrompt?.trim() || undefined,
         facetSparkle: studioSliders?.facetSparkle,
         fabricDetail: studioSliders?.fabricDetail,

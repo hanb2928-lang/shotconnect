@@ -9,7 +9,8 @@ const corsHeaders = {
 interface AngleImageInput {
   key: string;
   label: string;
-  base64: string;
+  url?: string;
+  base64?: string;
   mimeType: string;
   orderIndex: number;
 }

@@ -114,7 +114,8 @@ async function uploadAngleShotsConcurrently(
 export interface AngleImagePayload {
   key: string;
   label: string;
-  base64: string;
+  url?: string;
+  base64?: string;
   mimeType?: string;
   orderIndex: number;
 }
@@ -330,28 +331,29 @@ export async function runStereoPipeline(
     }
   }
 
-  // Build a single filtered array and derive both payloads from it.
-  // Reuse the same base64 reference (not a copy) and release shots' base64
-  // after building payloads to avoid holding multiple multi-MB strings in memory.
+  // Build angle payloads with storage URLs instead of base64 data.
+  // The edge function only needs metadata (key, label, orderIndex) for its
+  // synthesis logic — sending multi-MB base64 strings through the JS bridge
+  // causes native heap OOM kills on Android.
   const validShots = sorted.filter((s) => s.base64);
-  const anglePayloads: AngleImagePayload[] = validShots.map((s) => ({
+  const allUrls = [imageUrl, ...additionalUrls];
+  const anglePayloads: AngleImagePayload[] = validShots.map((s, i) => ({
     key: ['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front',
     label: s.label,
-    base64: s.base64!,
+    url: allUrls[i],
     mimeType: s.mimeType,
     orderIndex: s.orderIndex,
   }));
-  const angleInputs: AngleInput[] = anglePayloads.map((p) => ({
-    key: p.key as AngleInput['key'],
-    label: p.label,
-    base64: p.base64,
-    mimeType: p.mimeType ?? 'image/jpeg',
-    orderIndex: p.orderIndex,
+  const angleInputs: AngleInput[] = validShots.map((s) => ({
+    key: (['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front') as AngleInput['key'],
+    label: s.label,
+    base64: s.base64!,
+    mimeType: s.mimeType ?? 'image/jpeg',
+    orderIndex: s.orderIndex,
   }));
 
   // Release the sorted copies' base64 references so only one copy remains
   // during the pipeline. Each shot's base64 can be several MB.
-  // We only null out the copies in `sorted`, not the caller's originals.
   for (const s of sorted) { (s as { base64?: string }).base64 = undefined; }
 
   // Yield to allow GC to reclaim the released base64 strings before the

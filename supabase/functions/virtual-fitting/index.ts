@@ -47,8 +47,8 @@ Deno.serve(async (req: Request) => {
 
     const prompt = buildFittingPromptWithRules("", body.bodyType, body.pose, body.mood, body.sceneStyle, body.customPrompt);
 
-    const productDataUrl = ensureDataUrl(body.productImage, "image/jpeg");
-    const modelDataUrl = ensureDataUrl(body.modelImage, "image/jpeg");
+    const productDataUrl = await resolveImageDataUrl(body.productImage, "image/jpeg");
+    const modelDataUrl = await resolveImageDataUrl(body.modelImage, "image/jpeg");
 
     const resultBase64 = await callImageEdit(productDataUrl, modelDataUrl, prompt, openaiKey);
 
@@ -125,6 +125,34 @@ function ensureDataUrl(image: string, mimeType: string): string {
   const trimmed = image.trim().replace(/\s/g, "");
   if (trimmed.startsWith("data:")) return trimmed;
   return `data:${mimeType};base64,${trimmed}`;
+}
+
+async function resolveImageDataUrl(image: string, mimeType: string): Promise<string> {
+  if (!image) return "";
+  const trimmed = image.trim();
+  if (trimmed.startsWith("data:")) return trimmed.replace(/\s/g, "");
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      const resp = await fetch(trimmed, { signal: controller.signal });
+      if (!resp.ok) throw new Error(`이미지를 불러올 수 없습니다 (${resp.status})`);
+      const blob = await resp.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      const base64 = btoa(binary);
+      const detectedMime = blob.type || mimeType;
+      return `data:${detectedMime};base64,${base64}`;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  return `data:${mimeType};base64,${trimmed.replace(/\s/g, "")}`;
 }
 
 async function resolveOpenAIKey(): Promise<string | null> {
