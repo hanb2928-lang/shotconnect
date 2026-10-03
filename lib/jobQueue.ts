@@ -28,7 +28,9 @@ export interface RenderJob {
   attempts: number;
 }
 
-const POLL_INTERVAL_MS = 3000;
+const POLL_INITIAL_MS = 3000;
+const POLL_MAX_MS = 15000;
+const POLL_BACKOFF_FACTOR = 1.5;
 const DEFAULT_TIMEOUT_MS = 300000;
 const MAX_POLL_ERRORS = 5;
 
@@ -133,15 +135,14 @@ export async function waitForJob<T = Record<string, unknown>>(
 ): Promise<JobResult<T>> {
   return new Promise((resolve) => {
     let settled = false;
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-    let initialPollTimer: ReturnType<typeof setTimeout> | undefined;
     let channel: ReturnType<typeof supabase.channel> | undefined;
+    let pollAttempt = 0;
 
     const cleanup = () => {
-      if (pollInterval) clearInterval(pollInterval);
+      if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (initialPollTimer) clearTimeout(initialPollTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* channel already closed */ }
       }
@@ -218,8 +219,20 @@ export async function waitForJob<T = Record<string, unknown>>(
       }
     };
 
-    initialPollTimer = setTimeout(poll, 5000);
-    pollInterval = setInterval(poll, POLL_INTERVAL_MS);
+    const schedulePoll = () => {
+      if (settled) return;
+      const delayMs = Math.min(
+        Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
+        POLL_MAX_MS,
+      );
+      pollAttempt++;
+      pollTimer = setTimeout(async () => {
+        if (settled) return;
+        await poll();
+        if (!settled) schedulePoll();
+      }, delayMs);
+    };
+    pollTimer = setTimeout(() => { poll(); schedulePoll(); }, POLL_INITIAL_MS);
   });
 }
 

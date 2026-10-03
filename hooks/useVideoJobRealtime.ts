@@ -13,7 +13,9 @@ interface UseVideoJobRealtimeOptions {
   onError?: (errorMsg: string) => void;
 }
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INITIAL_MS = 3000;
+const POLL_MAX_MS = 15000;
+const POLL_BACKOFF_FACTOR = 1.5;
 const TIMEOUT_MS = 300_000;
 const MAX_CHANNEL_RETRIES = 5;
 const CHANNEL_RETRY_DELAY_MS = 3000;
@@ -68,6 +70,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
+    let pollAttempt = 0;
 
     const cleanup = () => {
       if (channel) {
@@ -102,11 +105,16 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
 
     const schedulePoll = () => {
       if (settledRef.current) return;
+      const delayMs = Math.min(
+        Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
+        POLL_MAX_MS,
+      );
+      pollAttempt++;
       pollTimer = setTimeout(async () => {
         if (settledRef.current) return;
         await checkDb();
         if (!settledRef.current) schedulePoll();
-      }, POLL_INTERVAL_MS);
+      }, delayMs);
     };
 
     const connectChannel = () => {
@@ -157,6 +165,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         if (!settledRef.current) {
+          pollAttempt = 0;
           checkDb();
           if (!pollTimer) schedulePoll();
           if (!channel) connectChannel();

@@ -15,7 +15,9 @@ export interface ResultPollingOptions {
   onSoftWarn?: () => void;
 }
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INITIAL_MS = 3000;
+const POLL_MAX_MS = 15000;
+const POLL_BACKOFF_FACTOR = 1.5;
 const SOFT_WARN_MS = 120_000;
 const HARD_TIMEOUT_MS = 300_000;
 const POLL_ERROR_WINDOW_MS = 60_000;
@@ -84,6 +86,7 @@ export function useResultPolling(
     let pollAbort: AbortController | null = null;
     let forceSyncAbort: AbortController | null = null;
     const pollErrorWindow: number[] = [];
+    let pollAttempt = 0;
 
     const cleanup = () => {
       cancelled = true;
@@ -220,7 +223,12 @@ export function useResultPolling(
       }
 
       if (!cancelled && !settledRef.current) {
-        pollTimer = setTimeout(pollOnce, POLL_INTERVAL_MS);
+        const delayMs = Math.min(
+          Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
+          POLL_MAX_MS,
+        );
+        pollAttempt++;
+        pollTimer = setTimeout(pollOnce, delayMs);
       }
     };
 
@@ -240,13 +248,13 @@ export function useResultPolling(
     }, HARD_TIMEOUT_MS);
 
     // Start polling.
-    pollTimer = setTimeout(pollOnce, 1000);
+    pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
 
     // Pause polling when app is backgrounded to avoid zombie requests.
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         if (!cancelled && !settledRef.current && !pollTimer) {
-          pollTimer = setTimeout(pollOnce, 1000);
+          pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
         if (pollTimer) {
