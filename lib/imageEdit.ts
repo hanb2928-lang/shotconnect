@@ -327,19 +327,31 @@ export async function compressImageToBase64(
           : [{ resize: { height: maxDimension } }]
         : [];
     try {
-      const manipulated = await ImageManipulator.manipulateAsync(
-        source.uri,
-        actions,
-        { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+      const manipulated = await withTimeout(
+        ImageManipulator.manipulateAsync(
+          source.uri,
+          actions,
+          { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+        ),
+        NATIVE_READ_TIMEOUT_MS,
+        '이미지 변환',
       );
       registerTempFile(manipulated.uri, 'compressImageToBase64');
       return await withFileLock(manipulated.uri, async () => {
-        const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+        const fileInfo = await withTimeout(
+          FileSystem.getInfoAsync(manipulated.uri),
+          NATIVE_READ_TIMEOUT_MS,
+          '변환 파일 정보 조회',
+        );
         if (!fileInfo.exists) throw new Error('이미지 변환 실패');
         assertNativeImageSize(fileInfo.size);
-        const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        const base64 = await withTimeout(
+          FileSystem.readAsStringAsync(manipulated.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          }),
+          NATIVE_READ_TIMEOUT_MS,
+          '이미지 파일 읽기',
+        );
         safeDeleteTempFile(manipulated.uri).catch(() => {});
         return { base64, mimeType: 'image/jpeg' };
       });

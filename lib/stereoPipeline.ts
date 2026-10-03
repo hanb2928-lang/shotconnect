@@ -45,7 +45,12 @@ function waitForOnline(): Promise<boolean> {
   });
 }
 
+const UPLOAD_MAX_BASE64_BYTES = 4_500_000;
+
 async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortSignal): Promise<string> {
+  if (base64.length > UPLOAD_MAX_BASE64_BYTES) {
+    throw new Error('이미지가 너무 커서 업로드할 수 없습니다. 더 낮은 해상도로 다시 촬영해주세요.');
+  }
   let lastErr: unknown = null;
   const blob = base64ToBlob(base64, mimeType);
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {

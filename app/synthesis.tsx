@@ -38,7 +38,7 @@ import {
 } from '@/components/GenerationModePanel';
 import { PreviewExportTray } from '@/components/PreviewExportTray';
 import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
-import { isOnline } from '@/hooks/useNetworkStatus';
+import { isOnline, useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useResultPolling } from '@/hooks/useResultPolling';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
@@ -101,6 +101,8 @@ export default function SynthesisScreen() {
   const safeTop = useSafeTop();
   const insets = useSafeAreaInsets();
 
+  const networkStatus = useNetworkStatus();
+  const isOffline = networkStatus === 'offline';
   const [platform, setPlatform] = useState<PlatformMode>('shortform');
   const [outputMode, setOutputMode] = useState<OutputMode>('image');
   const [mood, setMood] = useState<ProductMood>('studio_premium');
@@ -621,6 +623,7 @@ export default function SynthesisScreen() {
           onModeChange={setGenMode}
           isGenerating={isGenerating}
           onGenerate={handleGenerate}
+          isOffline={isOffline}
           manualPrompt={manualPrompt}
           onManualPromptChange={setManualPrompt}
           cameraSpeed={cameraSpeed}

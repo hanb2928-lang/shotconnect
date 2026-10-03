@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ViewStyle } from 'react-native';
-import { Zap, Wrench, Sliders, ChevronDown, ChevronUp, Loader2, Orbit, Layers } from 'lucide-react-native';
+import { Zap, Wrench, Sliders, ChevronDown, ChevronUp, Loader2, Orbit, Layers, AlertCircle } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 
 export type GenMode = 'auto_3d' | 'universal_synthesis' | 'manual';
@@ -27,6 +27,7 @@ interface Props {
   captionText: string;
   onCaptionTextChange: (text: string) => void;
   modeOptions: ModeOptionToggle[];
+  isOffline?: boolean;
 }
 
 const MODE_ACCENT = {
@@ -49,6 +50,7 @@ function GenerationModePanelInner({
   captionText,
   onCaptionTextChange,
   modeOptions,
+  isOffline = false,
 }: Props) {
   const [manualExpanded, setManualExpanded] = useState(false);
   const accent = MODE_ACCENT[mode] ?? theme.colors.primary[400];
@@ -265,18 +267,20 @@ function GenerationModePanelInner({
       )}
 
       <TouchableOpacity
-        style={[styles.generateBtn, { backgroundColor: accent }, isGen && styles.generateBtnDisabled]}
+        style={[styles.generateBtn, { backgroundColor: accent }, (isGen || isOffline) && styles.generateBtnDisabled]}
         onPress={onGenerate}
-        disabled={isGen}
+        disabled={isGen || isOffline}
         activeOpacity={0.8}
       >
         {isGen ? (
           <Loader2 size={20} color="#fff" strokeWidth={2.5} />
+        ) : isOffline ? (
+          <AlertCircle size={20} color="#fff" strokeWidth={2.5} />
         ) : (
           <Zap size={20} color="#fff" strokeWidth={2.5} />
         )}
         <Text style={styles.generateBtnText}>
-          {isGen ? '생성 중...' : mode === 'auto_3d' ? '입체컷 자동 생성' : mode === 'universal_synthesis' ? 'AI 범용 합성 생성' : '수동 설정으로 생성'}
+          {isGen ? '생성 중...' : isOffline ? '인터넷 연결을 확인해주세요' : mode === 'auto_3d' ? '입체컷 자동 생성' : mode === 'universal_synthesis' ? 'AI 범용 합성 생성' : '수동 설정으로 생성'}
         </Text>
       </TouchableOpacity>
     </View>
