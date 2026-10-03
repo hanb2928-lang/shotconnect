@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Platform, AppState, type AppStateStatus } from 'react-native';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 
-export type NetworkStatus = 'online' | 'offline' | 'unknown';
+export type NetworkStatus = 'online' | 'offline' | 'unstable' | 'unknown';
 
 type RecoveryListener = () => void;
 
@@ -22,6 +22,42 @@ const PROBE_TIMEOUT_MS = 8000;
 const RECOVERY_DEBOUNCE_MS = 1500;
 const RECOVERY_STAGGER_MS = 300;
 let recoveryDispatchTimer: ReturnType<typeof setTimeout> | null = null;
+
+const RAPID_FLIP_WINDOW_MS = 10_000;
+const RAPID_FLIP_THRESHOLD = 3;
+let recentFlips: number[] = [];
+let unstableTimer: ReturnType<typeof setTimeout> | null = null;
+
+function recordFlip() {
+  const now = Date.now();
+  recentFlips = recentFlips.filter((t) => now - t < RAPID_FLIP_WINDOW_MS);
+  recentFlips.push(now);
+  if (recentFlips.length >= RAPID_FLIP_THRESHOLD) {
+    recentFlips = [];
+    notify('unstable');
+    if (unstableTimer) clearTimeout(unstableTimer);
+    unstableTimer = setTimeout(() => {
+      unstableTimer = null;
+      if (currentStatus === 'unstable') {
+        if (wasOffline) {
+          notify('offline');
+        } else {
+          notify('online');
+        }
+      }
+    }, 5000);
+    return true;
+  }
+  return false;
+}
+
+function clearUnstable() {
+  if (unstableTimer) {
+    clearTimeout(unstableTimer);
+    unstableTimer = null;
+  }
+  recentFlips = [];
+}
 
 function dispatchRecovery() {
   if (recoveryDispatchTimer) clearTimeout(recoveryDispatchTimer);
@@ -53,6 +89,7 @@ function notify(status: NetworkStatus) {
 }
 
 const onlineHandler = () => {
+  if (recordFlip()) return;
   if (wasOffline) {
     wasOffline = false;
     notify('online');
@@ -63,6 +100,7 @@ const onlineHandler = () => {
 };
 const offlineHandler = () => {
   wasOffline = true;
+  if (recordFlip()) return;
   notify('offline');
 };
 
@@ -104,6 +142,7 @@ async function runProbe() {
   probing = false;
   if (reachable) {
     consecutiveProbeFailures = 0;
+    clearUnstable();
     if (wasOffline) {
       wasOffline = false;
       notify('online');
@@ -133,6 +172,7 @@ function stopProbing() {
   }
   abortActiveProbe();
   consecutiveProbeFailures = 0;
+  clearUnstable();
 }
 
 function handleAppStateChange(nextState: AppStateStatus) {
@@ -183,7 +223,7 @@ init();
 
 export function isOnline(): boolean {
   if (!initialized) init();
-  return currentStatus === 'online';
+  return currentStatus === 'online' || currentStatus === 'unstable';
 }
 
 export function waitForOnline(timeoutMs = 30000): Promise<boolean> {
@@ -207,4 +247,12 @@ export function waitForOnline(timeoutMs = 30000): Promise<boolean> {
 export function onNetworkRecovery(listener: RecoveryListener): () => void {
   recoveryListeners.add(listener);
   return () => { recoveryListeners.delete(listener); };
+}
+
+export function _resetFlipStateForTesting(): void {
+  recentFlips = [];
+  if (unstableTimer) {
+    clearTimeout(unstableTimer);
+    unstableTimer = null;
+  }
 }

@@ -5,7 +5,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useI18n } from '@/hooks/useI18n';
 import { theme } from '@/lib/theme';
 
-type BannerKind = 'offline' | 'online' | null;
+type BannerKind = 'offline' | 'online' | 'unstable' | null;
 
 export function NetworkBanner() {
   const status = useNetworkStatus();
@@ -17,18 +17,18 @@ export function NetworkBanner() {
   const prevStatusRef = useRef(status);
 
   useEffect(() => {
-    if (status === 'offline') {
+    if (status === 'offline' || status === 'unstable') {
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
-      setBanner('offline');
+      setBanner(status);
       Animated.timing(fadeAnim.current, {
         toValue: 1,
         duration: 300,
         useNativeDriver: true,
       }).start();
-    } else if (status === 'online' && prevStatusRef.current === 'offline') {
+    } else if (status === 'online' && (prevStatusRef.current === 'offline' || prevStatusRef.current === 'unstable')) {
       setBanner('online');
       Animated.timing(fadeAnim.current, {
         toValue: 1,
@@ -57,8 +57,19 @@ export function NetworkBanner() {
 
   if (!banner) return null;
 
-  const isOffline = banner === 'offline';
-  const backgroundColor = isOffline ? theme.colors.error[600] : theme.colors.success[600];
+  const bannerColors: Record<string, string> = {
+    offline: theme.colors.error[600],
+    unstable: theme.colors.warning[500],
+    online: theme.colors.success[600],
+  };
+  const backgroundColor = bannerColors[banner] ?? theme.colors.error[600];
+
+  const bannerText: Record<string, string> = {
+    offline: t('network.offline'),
+    unstable: t('network.unstable'),
+    online: t('network.online'),
+  };
+  const text = bannerText[banner] ?? t('network.offline');
 
   return (
     <Animated.View
@@ -66,10 +77,10 @@ export function NetworkBanner() {
       style={[styles.container, { backgroundColor, opacity: fadeAnim.current, paddingTop: insets.top + 8 }]}
     >
       <View style={styles.content}>
-        <View style={[styles.dot, { backgroundColor: isOffline ? '#fff' : '#fff' }]}>
+        <View style={[styles.dot, { backgroundColor: '#fff' }]}>
           <View style={[styles.dotInner, { backgroundColor }]} />
         </View>
-        <Text style={styles.text}>{isOffline ? t('network.offline') : t('network.online')}</Text>
+        <Text style={styles.text}>{text}</Text>
       </View>
     </Animated.View>
   );

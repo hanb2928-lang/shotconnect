@@ -43,7 +43,7 @@ global.AbortController = class {
 global.fetch = jest.fn(() => Promise.resolve({ ok: true, status: 200 } as any)) as any;
 
 // Require AFTER all mocks are in place so init() sees them
-const { useNetworkStatus, isOnline } = require('@/hooks/useNetworkStatus');
+const { useNetworkStatus, isOnline, _resetFlipStateForTesting } = require('@/hooks/useNetworkStatus');
 
 // Simple React test renderer to verify hook state
 const React = require('react');
@@ -60,6 +60,9 @@ describe('NetworkBanner — useNetworkStatus transitions', () => {
     navigatorOnLine = true;
     // Reset to online by firing online event
     onlineListeners.forEach((cb) => cb());
+    // Clear flip counter AFTER the initial online event so only
+    // subsequent transitions within each test count toward rapid-flip
+    _resetFlipStateForTesting();
   });
 
   it('registers window event listeners at module load', () => {
@@ -108,6 +111,35 @@ describe('NetworkBanner — useNetworkStatus transitions', () => {
       onlineListeners.forEach((cb) => cb());
     });
     expect(testRenderer.root.findByType('Text').props.children).toBe('online');
+    expect(isOnline()).toBe(true);
+  });
+
+  it('transitions to unstable when network rapidly flips 3+ times', () => {
+    let testRenderer: any;
+    act(() => {
+      testRenderer = TestRenderer.create(React.createElement(HookComp));
+    });
+
+    // Flip 1: online → offline
+    act(() => {
+      navigatorOnLine = false;
+      offlineListeners.forEach((cb) => cb());
+    });
+
+    // Flip 2: offline → online
+    act(() => {
+      navigatorOnLine = true;
+      onlineListeners.forEach((cb) => cb());
+    });
+
+    // Flip 3: online → offline — triggers unstable
+    act(() => {
+      navigatorOnLine = false;
+      offlineListeners.forEach((cb) => cb());
+    });
+
+    expect(testRenderer.root.findByType('Text').props.children).toBe('unstable');
+    // Unstable is still considered "online-ish" for API gating
     expect(isOnline()).toBe(true);
   });
 });
