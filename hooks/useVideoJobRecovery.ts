@@ -26,6 +26,7 @@ export function useVideoJobRecovery() {
   const checkingRef = useRef(false);
   const mountedRef = useRef(true);
   const dismissedJobIdRef = useRef<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const safeSetInfo = useCallback((updater: VideoJobRecoveryInfo | ((prev: VideoJobRecoveryInfo) => VideoJobRecoveryInfo)) => {
     if (mountedRef.current) setInfo(updater);
@@ -33,6 +34,10 @@ export function useVideoJobRecovery() {
 
   const checkJob = useCallback(async (jobId: string) => {
     if (checkingRef.current) return;
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
     checkingRef.current = true;
 
     safeSetInfo({ state: 'checking', jobId, step: null, videoUrl: null, errorMsg: null });
@@ -44,12 +49,13 @@ export function useVideoJobRecovery() {
         .eq('id', jobId)
         .maybeSingle();
 
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
-        const t = setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 5000);
-        (t as unknown as { _unref?: () => void })._unref?.();
+        timeoutId = setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 5000);
       });
 
       const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (error || !data) {
         clearActiveVideoJob();
@@ -85,6 +91,10 @@ export function useVideoJobRecovery() {
           videoUrl: null,
           errorMsg: null,
         });
+        pollTimerRef.current = setTimeout(() => {
+          pollTimerRef.current = null;
+          checkJob(jobId).catch(() => {});
+        }, 5000);
       }
     } catch {
       safeSetInfo({ ...INITIAL, state: 'not_found' });
@@ -101,6 +111,10 @@ export function useVideoJobRecovery() {
   }, [checkJob]);
 
   const dismiss = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
     if (info.jobId) dismissedJobIdRef.current = info.jobId;
     setInfo(INITIAL);
   }, [info.jobId]);
@@ -144,6 +158,10 @@ export function useVideoJobRecovery() {
 
     return () => {
       mountedRef.current = false;
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
       cleanupFns.forEach((fn) => fn());
     };
   }, [runRecovery]);

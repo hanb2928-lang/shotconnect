@@ -36,6 +36,13 @@ function isCacheableGet(options: SafeFetchOptions): boolean {
   return method === 'GET' && !options.body;
 }
 
+function responseFromCachedData(data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 function isRetryableError(err: unknown): boolean {
   if (err instanceof ApiError) {
     return err.status === 408 || err.status === 429 || err.status >= 500;
@@ -69,7 +76,7 @@ export async function safeFetch(
   if (isCacheableGet(options)) {
     const key = cacheKey || url;
     if (inflightGets.has(key)) {
-      return inflightGets.get(key)!;
+      return inflightGets.get(key)!.then((response) => response.clone());
     }
     const promise = doFetch(url, { timeoutMs, retries, ...fetchOptions }, cacheKey, cacheTtlMs)
       .finally(() => inflightGets.delete(key));
@@ -89,8 +96,8 @@ async function doFetch(
   const { timeoutMs = 60000, retries = MAX_RETRIES, ...fetchOptions } = options;
 
   if (cacheKey) {
-    const cached = await getCached<Response>(cacheKey);
-    if (cached instanceof Response) return cached;
+    const cached = await getCached<unknown>(cacheKey);
+    if (cached !== null) return responseFromCachedData(cached);
   }
 
   let lastError: unknown = null;
@@ -170,8 +177,8 @@ async function doFetch(
       if (callerSignal) callerSignal.removeEventListener('abort', callerAbortListener);
 
       if (cacheKey && err instanceof Error && /failed to fetch|network|abort/i.test(err.message)) {
-        const stale = await getStaleCached<Response>(cacheKey);
-        if (stale) return stale;
+        const stale = await getStaleCached<unknown>(cacheKey);
+        if (stale !== null) return responseFromCachedData(stale);
       }
 
       if (err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message))) {
@@ -210,10 +217,16 @@ export async function safeSupabaseCall<T>(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
-        setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), SUPABASE_OP_TIMEOUT_MS),
-      );
-      const result = await Promise.race([operation(), timeoutPromise]);
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
+        timeoutId = setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), SUPABASE_OP_TIMEOUT_MS);
+      });
+      let result: { data: T | null; error: { message: string } | null };
+      try {
+        result = await Promise.race([operation(), timeoutPromise]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
       if (result.error) {
         const msg = result.error?.message ?? String(result.error);
         if (msg.includes('JWT') || msg.includes('token') || msg.includes('auth')) {
@@ -232,7 +245,8 @@ export async function safeSupabaseCall<T>(
       const isNetwork = err instanceof Error && (
         err.message.includes('Failed to fetch') ||
         err.message.includes('network') ||
-        err.message.includes('abort')
+        err.message.includes('abort') ||
+        err.message.includes('timeout')
       );
 
       if (isNetwork && attempt < retries) {

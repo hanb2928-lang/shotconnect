@@ -11,7 +11,7 @@ import { CameraView } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
-import { compressCaptureFrameToBlob } from '@/lib/imageEdit';
+import { compressCaptureFrameToBlob, compressImageToBase64 } from '@/lib/imageEdit';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
 import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery';
 
@@ -42,6 +42,7 @@ export const InlineCameraViewfinder = forwardRef<
   const mountedRef = useRef(true);
   const streamGenRef = useRef(0);
   const captureLockRef = useRef(false);
+  const captureReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -188,11 +189,10 @@ export const InlineCameraViewfinder = forwardRef<
     if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady) return null;
     try {
       const result = await nativeCameraRef.current.takePictureAsync({
-        base64: true,
         quality: 0.7,
       });
-      if (!result?.base64) return null;
-      return { base64: result.base64, mimeType: 'image/jpeg' };
+      if (!result?.uri) return null;
+      return await compressImageToBase64(result.uri, 1080, 0.7);
     } catch (err) {
       console.error('[InlineCameraViewfinder] native capture failed:', err);
       return null;
@@ -212,20 +212,33 @@ export const InlineCameraViewfinder = forwardRef<
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
   };
 
+  const releaseCaptureLock = useCallback(() => {
+    if (captureReleaseTimerRef.current) {
+      clearTimeout(captureReleaseTimerRef.current);
+      captureReleaseTimerRef.current = null;
+    }
+    captureLockRef.current = false;
+  }, []);
+
   const handleCapturePress = useCallback(() => {
     if (captureLockRef.current || processing) return;
     captureLockRef.current = true;
+    captureReleaseTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) releaseCaptureLock();
+    }, 1200);
     onCapture?.();
-  }, [onCapture, processing]);
+  }, [onCapture, processing, releaseCaptureLock]);
 
   useEffect(() => {
     if (!processing && captureLockRef.current) {
-      const id = setTimeout(() => {
-        if (mountedRef.current) captureLockRef.current = false;
+      if (captureReleaseTimerRef.current) clearTimeout(captureReleaseTimerRef.current);
+      captureReleaseTimerRef.current = setTimeout(() => {
+        if (mountedRef.current) releaseCaptureLock();
       }, 500);
-      return () => clearTimeout(id);
     }
-  }, [processing]);
+  }, [processing, releaseCaptureLock]);
+
+  useEffect(() => () => releaseCaptureLock(), [releaseCaptureLock]);
 
   if (Platform.OS === 'web') {
     return (

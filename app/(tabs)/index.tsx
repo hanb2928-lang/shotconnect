@@ -28,7 +28,7 @@ async function getImagePicker() {
 }
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
-import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap } from 'lucide-react-native';
+import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, Video } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { theme } from '@/lib/theme';
@@ -594,6 +594,42 @@ function CameraScreenInner() {
     }
   };
 
+  const handlePickVideo = useCallback(async () => {
+    if (processingRef.current || processing || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
+    processingRef.current = true;
+    setProcessing(true);
+    setError(null);
+    try {
+      const ImagePicker = await getImagePicker();
+      const result = await withTimeout(
+        ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+          allowsEditing: false,
+          videoMaxDuration: 30,
+          quality: 1,
+        }),
+        PICK_TIMEOUT_MS,
+        '동영상 선택',
+      );
+      if (!isMountedRef.current || result.canceled || !result.assets?.[0]?.uri) return;
+      const asset = result.assets[0];
+      const mimeType = asset.mimeType?.startsWith('video/') ? asset.mimeType : 'video/mp4';
+      setPostCaptureBase64(null);
+      postCaptureBase64Ref.current = null;
+      setPostCaptureMime(mimeType);
+      postCaptureMimeRef.current = mimeType;
+      setPostCaptureVideoUri(asset.uri);
+      postCaptureVideoUriRef.current = asset.uri;
+      setWorkflowMountKey((key) => key + 1);
+      setPostCaptureVisible(true);
+    } catch (err) {
+      if (isMountedRef.current) setError(friendlyError(err, '동영상 선택에 실패했습니다. 다시 시도해주세요.'));
+    } finally {
+      processingRef.current = false;
+      setProcessing(false);
+    }
+  }, [processing, autoSaving]);
+
   const handlePickImage = async () => {
     if (processingRef.current || processing || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
     processingRef.current = true;
@@ -682,7 +718,10 @@ function CameraScreenInner() {
     setMultiAngleVisible(false);
     captureActiveRef.current = false;
     captureBtnLockRef.current = false;
-    if (validShots.length === 0) return;
+    if (validShots.length === 0) {
+      stereoOverlayRef.current = false;
+      return;
+    }
 
     stereoOverlayRef.current = true;
     if (!acquirePipelineLock('stereo')) {
@@ -972,7 +1011,10 @@ function CameraScreenInner() {
     setFittingGuideVisible(false);
     captureActiveRef.current = false;
     captureBtnLockRef.current = false;
-    if (validShots.length < 2) return;
+    if (validShots.length < 2) {
+      stereoOverlayRef.current = false;
+      return;
+    }
 
     stereoOverlayRef.current = true;
     if (!acquirePipelineLock('fitting')) {
@@ -1589,9 +1631,18 @@ function CameraScreenInner() {
           >
             <Camera size={28} color="#fff" strokeWidth={2.5} />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.videoPickBtn}
+            onPress={handlePickVideo}
+            disabled={processing || autoSaving}
+            activeOpacity={0.8}
+          >
+            <Video size={18} color={theme.colors.dark.text} strokeWidth={2} />
+            <Text style={styles.videoPickText}>영상 불러오기</Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.shutterHintText}>
-          {autoSaving ? 'AI 자동 분석 중...' : '정면·좌측·우측·후면·상부 순차 촬영'}
+          {autoSaving ? 'AI 자동 분석 중...' : '사진 촬영 또는 기기 영상 선택'}
         </Text>
       </View>
 
@@ -2064,6 +2115,23 @@ const styles = StyleSheet.create({
   shutterRow: {
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 12,
+  },
+  videoPickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.colors.dark.surfaceLight,
+    borderWidth: 1,
+    borderColor: theme.colors.dark.border,
+  },
+  videoPickText: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.text,
   },
   shutterBtn: {
     width: 72,
