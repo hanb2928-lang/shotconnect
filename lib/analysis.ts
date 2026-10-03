@@ -7,7 +7,7 @@ import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base64';
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
-import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY } from '@/lib/imageEdit';
+import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes } from '@/lib/imageEdit';
 import { compressForEdgeFunction, compressBase64ArrayForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
 import { hashObject } from '@/lib/contentHash';
@@ -94,7 +94,12 @@ export async function uploadImageBlob(
   if (!alreadyCompressed && blob instanceof Blob && blob.size > MAX_RAW_BLOB_BYTES && mimeType.startsWith('image/')) {
     try {
       const dataUrl = await blobToDataUrl(blob);
-      const compressed = await prepareImageForApi(dataUrl, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+      let compressed = await prepareImageForApi(dataUrl, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+      const b64 = cleanBase64(compressed);
+      const payloadBytes = Math.floor((b64.length * 3) / 4);
+      if (payloadBytes > UPLOAD_MAX_PAYLOAD_BYTES) {
+        compressed = await compressDataUrlToMaxBytes(dataUrl, UPLOAD_MAX_PAYLOAD_BYTES, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+      }
       const compressedBase64 = cleanBase64(compressed);
       const compressedMime = compressed.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
       uploadBlob = base64ToBlob(compressedBase64, compressedMime);

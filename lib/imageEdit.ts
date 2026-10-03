@@ -124,6 +124,42 @@ export const UPLOAD_QUALITY = 0.68;
 const CAPTURE_MAX_DIMENSION = getAdaptiveImageMaxDimension();
 const CAPTURE_QUALITY = 0.78;
 const MAX_NATIVE_IMAGE_BYTES = 12_000_000;
+export const UPLOAD_MAX_PAYLOAD_BYTES = 2_000_000;
+
+function dataUrlByteLength(dataUrl: string): number {
+  const b64 = cleanBase64(dataUrl);
+  return Math.floor((b64.length * 3) / 4);
+}
+
+export async function compressDataUrlToMaxBytes(
+  dataUrl: string,
+  maxBytes: number,
+  initialMaxDimension = UPLOAD_MAX_DIMENSION,
+  initialQuality = UPLOAD_QUALITY,
+): Promise<string> {
+  let current = dataUrl;
+  const dimSteps = [initialMaxDimension, 900, 720, 540];
+  const qualitySteps = [initialQuality, 0.55, 0.42, 0.3];
+
+  for (let pass = 0; pass < dimSteps.length; pass++) {
+    const dim = dimSteps[pass];
+    const qual = qualitySteps[pass];
+    try {
+      current = await prepareImageForApi(current, dim, qual);
+    } catch {
+      // keep previous result
+    }
+    if (dataUrlByteLength(current) <= maxBytes) return current;
+  }
+
+  // Last resort: re-compress from original at smallest settings
+  try {
+    current = await prepareImageForApi(dataUrl, dimSteps[dimSteps.length - 1], qualitySteps[qualitySteps.length - 1]);
+  } catch {
+    // give up
+  }
+  return current;
+}
 
 function assertNativeImageSize(size: number | undefined): void {
   if (Platform.OS !== 'web' && size !== undefined && size > MAX_NATIVE_IMAGE_BYTES) {
@@ -162,19 +198,30 @@ export async function compressBase64ForUpload(
   assertNativeBase64Size(base64);
   const dataUrl = `data:${mimeType};base64,${base64}`;
 
+  const applyCap = (compressed: string): { base64: string; mimeType: string } => {
+    const compressedMime = compressed.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+    const b64 = cleanBase64(compressed);
+    return { base64: b64, mimeType: compressedMime };
+  };
+
   if (Platform.OS === 'web') {
     try {
-      const compressed = await prepareImageForApi(dataUrl, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
-      const compressedMime = compressed.startsWith('data:image/webp') ? 'image/webp' : mimeType;
-      return { base64: cleanBase64(compressed), mimeType: compressedMime };
+      let compressed = await prepareImageForApi(dataUrl, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+      if (dataUrlByteLength(compressed) > UPLOAD_MAX_PAYLOAD_BYTES) {
+        compressed = await compressDataUrlToMaxBytes(dataUrl, UPLOAD_MAX_PAYLOAD_BYTES, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+      }
+      return applyCap(compressed);
     } catch {
       return { base64, mimeType };
     }
   }
 
   try {
-    const compressed = await prepareImageForApi(dataUrl, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
-    return { base64: cleanBase64(compressed), mimeType: 'image/jpeg' };
+    let compressed = await prepareImageForApi(dataUrl, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+    if (dataUrlByteLength(compressed) > UPLOAD_MAX_PAYLOAD_BYTES) {
+      compressed = await compressDataUrlToMaxBytes(dataUrl, UPLOAD_MAX_PAYLOAD_BYTES, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+    }
+    return applyCap(compressed);
   } catch {
     return { base64, mimeType };
   }

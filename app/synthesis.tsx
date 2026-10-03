@@ -13,6 +13,8 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
+import { compressDataUrlToMaxBytes } from '@/lib/imageEdit';
+import { cleanBase64 } from '@/lib/base64';
 import { ArrowLeft, Sparkles } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
@@ -50,22 +52,41 @@ import { AppState, type AppStateStatus } from 'react-native';
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
 
 async function uploadImageToStorage(uri: string): Promise<string> {
-  const compressed = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ resize: { width: 1080 } }],
-    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG },
-  );
-  const fileInfo = await FileSystem.getInfoAsync(compressed.uri);
-  if (!fileInfo.exists) throw new Error('이미지 파일을 찾을 수 없습니다.');
-  if (Platform.OS !== 'web' && fileInfo.size > MAX_NATIVE_IMAGE_BYTES) {
-    throw new Error('이미지가 너무 큽니다. 더 낮은 해상도로 다시 시도해주세요.');
+  let compressedUri = uri;
+  let quality = 0.7;
+  const dimSteps = [1080, 900, 720, 540];
+  const qualitySteps = [0.7, 0.55, 0.42, 0.3];
+
+  for (let pass = 0; pass < dimSteps.length; pass++) {
+    const manipulated = await ImageManipulator.manipulateAsync(
+      compressedUri,
+      [{ resize: { width: dimSteps[pass] } }],
+      { compress: qualitySteps[pass], format: ImageManipulator.SaveFormat.JPEG },
+    );
+    compressedUri = manipulated.uri;
+    const fileInfo = await FileSystem.getInfoAsync(compressedUri);
+    if (fileInfo.exists && fileInfo.size <= MAX_NATIVE_IMAGE_BYTES) break;
   }
-  const base64 = await FileSystem.readAsStringAsync(compressed.uri, {
+
+  const fileInfo = await FileSystem.getInfoAsync(compressedUri);
+  if (!fileInfo.exists) throw new Error('이미지 파일을 찾을 수 없습니다.');
+
+  const base64 = await FileSystem.readAsStringAsync(compressedUri, {
     encoding: FileSystem.EncodingType.Base64,
   });
+
+  // Enforce 2MB payload on all platforms via iterative data-URL compression
+  let finalBase64 = base64;
+  const payloadBytes = Math.floor((base64.length * 3) / 4);
+  if (payloadBytes > MAX_NATIVE_IMAGE_BYTES) {
+    const dataUrl = `data:image/jpeg;base64,${base64}`;
+    const compressed = await compressDataUrlToMaxBytes(dataUrl, MAX_NATIVE_IMAGE_BYTES, 540, 0.3);
+    finalBase64 = cleanBase64(compressed);
+  }
+
   const bytes = Platform.OS === 'web'
-    ? new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' })
-    : Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    ? new Blob([Uint8Array.from(atob(finalBase64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' })
+    : Uint8Array.from(atob(finalBase64), (c) => c.charCodeAt(0));
   const fileName = `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   const { error } = await supabase.storage
     .from('scans')
