@@ -52,6 +52,22 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+/**
+ * Ensure the auth session is fresh before a resume fetch. On background→
+ * foreground transition the token may have expired; autoRefreshToken fires
+ * asynchronously but may not complete before our resume burst polls run.
+ * Calling getSession() forces the client to resolve the current session
+ * (refreshing if needed) so subsequent DB queries use a valid token.
+ */
+export async function ensureFreshSession(): Promise<void> {
+  try {
+    await supabase.auth.getSession();
+  } catch {
+    // Token refresh failure is non-fatal — the resume fetch will simply
+    // use whatever token is available and retry via the normal poll loop.
+  }
+}
+
 export const ANALYSIS_FUNCTION_URL = `${supabaseUrl}/functions/v1/analyze-photo`;
 export const REVIEW_FUNCTION_URL = `${supabaseUrl}/functions/v1/generate-review`;
 export const COPY_FUNCTION_URL = `${supabaseUrl}/functions/v1/generate-copy`;

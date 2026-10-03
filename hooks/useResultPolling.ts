@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import { supabase } from '@/lib/supabase';
+import { supabase, ensureFreshSession } from '@/lib/supabase';
 
 export type JobState = 'idle' | 'polling' | 'completed' | 'failed' | 'timeout';
 
@@ -258,12 +258,13 @@ export function useResultPolling(
     const RESUME_BURST_COUNT = 3;
     let resumeBurstCount = 0;
     let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
-    const runResumeBurst = () => {
+    const runResumeBurst = async () => {
       if (cancelled || settledRef.current || resumeBurstCount >= RESUME_BURST_COUNT) {
         resumeBurstTimer = null;
         return;
       }
       resumeBurstCount++;
+      if (resumeBurstCount === 1) await ensureFreshSession();
       pollOnce();
       resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
     };

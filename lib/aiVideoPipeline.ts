@@ -1,5 +1,5 @@
 import { AppState, type AppStateStatus } from 'react-native';
-import { supabase } from './supabase';
+import { supabase, ensureFreshSession } from './supabase';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { getMultiAngleCache, setMultiAngleCache } from './aiCache';
@@ -800,12 +800,13 @@ function waitForVideoCompletion(
     const RESUME_BURST_COUNT = 3;
     let resumeBurstCount = 0;
     let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
-    const runResumeBurst = () => {
+    const runResumeBurst = async () => {
       if (settled || resumeBurstCount >= RESUME_BURST_COUNT) {
         resumeBurstTimer = null;
         return;
       }
       resumeBurstCount++;
+      if (resumeBurstCount === 1) await ensureFreshSession();
       checkDb();
       checkScanVideoUrl();
       resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
@@ -992,12 +993,13 @@ export function subscribeVideoJob(
   let resumeBurstCount = 0;
   const RESUME_BURST_INTERVAL_MS = 1500;
   const RESUME_BURST_COUNT = 3;
-  const runResumeBurst = () => {
+  const runResumeBurst = async () => {
     if (settled || resumeBurstCount >= RESUME_BURST_COUNT) {
       resumeBurstTimer = null;
       return;
     }
     resumeBurstCount++;
+    if (resumeBurstCount === 1) await ensureFreshSession();
     checkAndNotify();
     resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
   };
@@ -1259,12 +1261,13 @@ export function subscribeHdUpgrade(
 
   let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
   let resumeBurstCount = 0;
-  const runResumeBurst = () => {
+  const runResumeBurst = async () => {
     if (settled || resumeBurstCount >= 3) {
       resumeBurstTimer = null;
       return;
     }
     resumeBurstCount++;
+    if (resumeBurstCount === 1) await ensureFreshSession();
     checkAndNotify();
     resumeBurstTimer = setTimeout(runResumeBurst, 1500);
   };
