@@ -160,6 +160,10 @@ function isNetworkError(err: unknown): boolean {
 
 const INVOKE_TIMEOUT_MS = 60_000;
 
+function yieldToUI(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function compactBody(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
@@ -266,6 +270,7 @@ export async function generateAiVideo(
 
   for (let attempt = 0; attempt <= SUBMIT_MAX_RETRIES; attempt++) {
     try {
+      if (attempt === 0) await yieldToUI();
       const result = await invokeWithNetworkRetry(
         'generate-video',
         compactBody({
@@ -846,45 +851,49 @@ export async function submitVideoJobAsync(
 ): Promise<SubmitOnlyResult> {
   const SUBMIT_TIMEOUT_MS = 45_000;
 
+  const bodyJson = JSON.stringify(compactBody({
+    mode: 'submit',
+    prompt,
+    durationSec: options.durationSec ?? 5,
+    aspectRatio: options.aspectRatio ?? '9:16',
+    productName: options.productName,
+    scanId: options.scanId,
+    variationSeed: options.variationSeed ?? 0,
+    bgmMood: options.bgmMood,
+    captionText: options.captionText,
+    platform: options.platform ?? 'shorts',
+    hookCategory: options.hookCategory ?? 'curiosity',
+    cutCount: options.cutCount,
+    productVision: options.productVision,
+    draft: options.draft,
+    isCleanVideoMode: options.isCleanVideoMode,
+    promptStrength: options.promptStrength,
+    negativePrompt: options.negativePrompt,
+    bgStyle: options.bgStyle,
+    outfitIntensity: options.outfitIntensity,
+    zoomSpeed: options.zoomSpeed,
+    cameraRotation: options.cameraRotation,
+    transitionEffect: options.transitionEffect,
+    stylePreset: options.stylePreset,
+    detailRestoration: options.detailRestoration,
+    hdUpscale: options.hdUpscale,
+    qualityTier: options.hdUpscale ? 'pro' : (options.qualityTier ?? 'standard'),
+    resolution: options.resolution ?? (options.hdUpscale ? '1080p' : '720p'),
+    fps: options.fps ?? (options.hdUpscale ? 30 : 24),
+    selectedMode: options.selectedMode,
+    enableOrbit360: options.enableOrbit360,
+    orbitSpeed: options.orbitSpeed,
+    enableCaustics: options.enableCaustics,
+    enableVirtualFitting: options.enableVirtualFitting,
+    enableFabricPhysics: options.enableFabricPhysics,
+  }));
+
+  await yieldToUI();
+
   const submitController = new AbortController();
   const submitTimeoutId = setTimeout(() => submitController.abort(), SUBMIT_TIMEOUT_MS);
   const invokePromise = supabase.functions.invoke('generate-video', {
-    body: compactBody({
-      mode: 'submit',
-      prompt,
-      durationSec: options.durationSec ?? 5,
-      aspectRatio: options.aspectRatio ?? '9:16',
-      productName: options.productName,
-      scanId: options.scanId,
-      variationSeed: options.variationSeed ?? 0,
-      bgmMood: options.bgmMood,
-      captionText: options.captionText,
-      platform: options.platform ?? 'shorts',
-      hookCategory: options.hookCategory ?? 'curiosity',
-      cutCount: options.cutCount,
-      productVision: options.productVision,
-      draft: options.draft,
-      isCleanVideoMode: options.isCleanVideoMode,
-      promptStrength: options.promptStrength,
-      negativePrompt: options.negativePrompt,
-      bgStyle: options.bgStyle,
-      outfitIntensity: options.outfitIntensity,
-      zoomSpeed: options.zoomSpeed,
-      cameraRotation: options.cameraRotation,
-      transitionEffect: options.transitionEffect,
-      stylePreset: options.stylePreset,
-      detailRestoration: options.detailRestoration,
-      hdUpscale: options.hdUpscale,
-      qualityTier: options.hdUpscale ? 'pro' : (options.qualityTier ?? 'standard'),
-      resolution: options.resolution ?? (options.hdUpscale ? '1080p' : '720p'),
-      fps: options.fps ?? (options.hdUpscale ? 30 : 24),
-      selectedMode: options.selectedMode,
-      enableOrbit360: options.enableOrbit360,
-      orbitSpeed: options.orbitSpeed,
-      enableCaustics: options.enableCaustics,
-      enableVirtualFitting: options.enableVirtualFitting,
-      enableFabricPhysics: options.enableFabricPhysics,
-    }),
+    body: bodyJson,
     signal: submitController.signal,
   });
 
@@ -1087,45 +1096,49 @@ export async function upgradeVideoToHd(
 ): Promise<{ hdTaskId: string; hdJobId: string }> {
   const HD_SUBMIT_TIMEOUT_MS = 45_000;
 
+  const bodyJson = JSON.stringify(compactBody({
+    mode: 'submit',
+    prompt,
+    durationSec: options.durationSec ?? 5,
+    aspectRatio: options.aspectRatio ?? '9:16',
+    productName: options.productName,
+    scanId,
+    variationSeed: options.variationSeed ?? 0,
+    bgmMood: options.bgmMood,
+    captionText: options.captionText,
+    platform: options.platform ?? 'shorts',
+    hookCategory: options.hookCategory ?? 'curiosity',
+    cutCount: options.cutCount,
+    productVision: options.productVision,
+    draft: false,
+    isCleanVideoMode: options.isCleanVideoMode,
+    promptStrength: options.promptStrength,
+    negativePrompt: options.negativePrompt,
+    bgStyle: options.bgStyle,
+    outfitIntensity: options.outfitIntensity,
+    zoomSpeed: options.zoomSpeed,
+    cameraRotation: options.cameraRotation,
+    transitionEffect: options.transitionEffect,
+    stylePreset: options.stylePreset,
+    detailRestoration: options.detailRestoration,
+    hdUpscale: true,
+    qualityTier: 'pro',
+    resolution: options.resolution ?? '1080p',
+    fps: options.fps ?? 30,
+    selectedMode: options.selectedMode,
+    enableOrbit360: options.enableOrbit360,
+    orbitSpeed: options.orbitSpeed,
+    enableCaustics: options.enableCaustics,
+    enableVirtualFitting: options.enableVirtualFitting,
+    enableFabricPhysics: options.enableFabricPhysics,
+  }));
+
+  await yieldToUI();
+
   const hdController = new AbortController();
   const hdTimeoutId = setTimeout(() => hdController.abort(), HD_SUBMIT_TIMEOUT_MS);
   const invokePromise = supabase.functions.invoke('generate-video', {
-    body: compactBody({
-      mode: 'submit',
-      prompt,
-      durationSec: options.durationSec ?? 5,
-      aspectRatio: options.aspectRatio ?? '9:16',
-      productName: options.productName,
-      scanId,
-      variationSeed: options.variationSeed ?? 0,
-      bgmMood: options.bgmMood,
-      captionText: options.captionText,
-      platform: options.platform ?? 'shorts',
-      hookCategory: options.hookCategory ?? 'curiosity',
-      cutCount: options.cutCount,
-      productVision: options.productVision,
-      draft: false,
-      isCleanVideoMode: options.isCleanVideoMode,
-      promptStrength: options.promptStrength,
-      negativePrompt: options.negativePrompt,
-      bgStyle: options.bgStyle,
-      outfitIntensity: options.outfitIntensity,
-      zoomSpeed: options.zoomSpeed,
-      cameraRotation: options.cameraRotation,
-      transitionEffect: options.transitionEffect,
-      stylePreset: options.stylePreset,
-      detailRestoration: options.detailRestoration,
-      hdUpscale: true,
-      qualityTier: 'pro',
-      resolution: options.resolution ?? '1080p',
-      fps: options.fps ?? 30,
-      selectedMode: options.selectedMode,
-      enableOrbit360: options.enableOrbit360,
-      orbitSpeed: options.orbitSpeed,
-      enableCaustics: options.enableCaustics,
-      enableVirtualFitting: options.enableVirtualFitting,
-      enableFabricPhysics: options.enableFabricPhysics,
-    }),
+    body: bodyJson,
     signal: hdController.signal,
   });
 
