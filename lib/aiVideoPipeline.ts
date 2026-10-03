@@ -160,7 +160,7 @@ function isNetworkError(err: unknown): boolean {
   return false;
 }
 
-const INVOKE_TIMEOUT_MS = 60_000;
+const INVOKE_TIMEOUT_MS = 90_000;
 
 function yieldToUI(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -890,7 +890,7 @@ export async function submitVideoJobAsync(
   prompt: string,
   options: GenerateAiVideoOptions,
 ): Promise<SubmitOnlyResult> {
-  const SUBMIT_TIMEOUT_MS = 45_000;
+  const SUBMIT_TIMEOUT_MS = 90_000;
 
   const bodyJson = JSON.stringify(compactBody({
     mode: 'submit',
@@ -1163,7 +1163,7 @@ export async function upgradeVideoToHd(
   prompt: string,
   options: GenerateAiVideoOptions,
 ): Promise<{ hdTaskId: string; hdJobId: string }> {
-  const HD_SUBMIT_TIMEOUT_MS = 45_000;
+  const HD_SUBMIT_TIMEOUT_MS = 90_000;
 
   const bodyJson = JSON.stringify(compactBody({
     mode: 'submit',

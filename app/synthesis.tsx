@@ -471,7 +471,7 @@ export default function SynthesisScreen() {
 
   useEffect(() => {
     if (!isGenerating) return;
-    const GEN_TIMEOUT_MS = 180_000;
+    const GEN_TIMEOUT_MS = 300_000;
     const timer = setInterval(() => {
       if (!mountedRef.current) return;
       const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
@@ -492,7 +492,7 @@ export default function SynthesisScreen() {
       jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress(null);
-      setError('영상 생성 시간이 초과되었습니다. 다시 시도해주세요.');
+      setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
     }, GEN_TIMEOUT_MS);
     return () => {
       clearInterval(timer);
