@@ -344,16 +344,19 @@ export async function runStereoPipeline(
     mimeType: s.mimeType,
     orderIndex: s.orderIndex,
   }));
+  // runSynthesis only reads .key, .label, .orderIndex — never .base64.
+  // Omitting base64 here prevents 5 multi-MB strings (10-20MB) from
+  // coexisting in native heap during the parallel synthesis + cloud call.
   const angleInputs: AngleInput[] = validShots.map((s) => ({
     key: (['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front') as AngleInput['key'],
     label: s.label,
-    base64: s.base64!,
+    base64: '',
     mimeType: s.mimeType ?? 'image/jpeg',
     orderIndex: s.orderIndex,
   }));
 
-  // Release the sorted copies' base64 references so only one copy remains
-  // during the pipeline. Each shot's base64 can be several MB.
+  // Release the sorted copies' base64 references immediately — the synthesis
+  // inputs above don't need them, and each shot's base64 can be several MB.
   for (const s of sorted) { (s as { base64?: string }).base64 = undefined; }
 
   // Yield to allow GC to reclaim the released base64 strings before the

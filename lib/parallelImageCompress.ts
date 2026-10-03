@@ -56,8 +56,16 @@ export async function compressImagesInParallel(
   quality = EDGE_FN_QUALITY,
 ): Promise<CompressedImage[]> {
   const results: CompressedImage[] = [];
-  for (let i = 0; i < dataUrls.length; i += PARALLEL_BATCH_SIZE) {
-    const batch = dataUrls.slice(i, i + PARALLEL_BATCH_SIZE);
+  // Work on a mutable copy so we can null out entries as each batch
+  // completes, letting GC reclaim the multi-MB input strings on native
+  // instead of holding the full array for the entire duration.
+  const queue = [...dataUrls];
+  for (let i = 0; i < queue.length; i += PARALLEL_BATCH_SIZE) {
+    const batch = queue.slice(i, i + PARALLEL_BATCH_SIZE);
+    // Null out processed entries to release references for GC
+    for (let j = i; j < Math.min(i + PARALLEL_BATCH_SIZE, queue.length); j++) {
+      queue[j] = '';
+    }
     const batchResults = await Promise.all(
       batch.map((url) => compressForEdgeFunction(url, maxDimension, quality)),
     );
@@ -72,7 +80,13 @@ export async function compressBase64ArrayForEdgeFunction(
   maxDimension = EDGE_FN_MAX_DIMENSION,
   quality = EDGE_FN_QUALITY,
 ): Promise<string[]> {
-  const dataUrls = base64Images.map((b64) => buildDataUrl(b64, mimeType));
-  const compressed = await compressImagesInParallel(dataUrls, maxDimension, quality);
-  return compressed.map((c) => c.dataUrl);
+  // Process one at a time on native to avoid building all data URLs + all
+  // compressed results simultaneously, which doubles memory for N images.
+  const results: string[] = [];
+  for (let i = 0; i < base64Images.length; i++) {
+    const dataUrl = buildDataUrl(base64Images[i], mimeType);
+    const compressed = await compressForEdgeFunction(dataUrl, maxDimension, quality);
+    results.push(compressed.dataUrl);
+  }
+  return results;
 }

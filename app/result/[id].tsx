@@ -1433,6 +1433,15 @@ export default function ResultScreen() {
 
               if (pollAbort.signal.aborted || cancelled) return;
               if (pollError) {
+                const errStatus = (pollError as { status?: number }).status;
+                if (errStatus === 401 || errStatus === 403) {
+                  if (mountedRef.current) {
+                    setVideoGenError('인증 세션이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.');
+                    setIsGeneratingVideo(false);
+                    setVideoGenProgress(null);
+                  }
+                  return;
+                }
                 consecutiveErrors++;
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                   if (mountedRef.current) {

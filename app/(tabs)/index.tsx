@@ -89,9 +89,9 @@ async function runFittingPipeline(
   const bgShot = sorted.find((s) => !s.id.startsWith('product')) ?? sorted[sorted.length - 1];
   if (!productShot?.base64 || !productShot?.mimeType || !bgShot?.base64 || !bgShot?.mimeType) return;
 
-  const productBase64 = productShot.base64;
+  let productBase64 = productShot.base64;
   const productMime = productShot.mimeType || 'image/jpeg';
-  const bgBase64 = bgShot.base64;
+  let bgBase64 = bgShot.base64;
   const bgMime = bgShot.mimeType || 'image/jpeg';
   for (const s of sorted) { s.base64 = undefined; }
 
@@ -108,6 +108,10 @@ async function runFittingPipeline(
       uploadImage(productBase64, productMime, signal),
       uploadImage(bgBase64, bgMime, signal),
     ]);
+    // Release input base64 strings immediately after upload so GC can
+    // reclaim them before the AI response adds another multi-MB base64.
+    productBase64 = '';
+    bgBase64 = '';
     if (signal?.aborted) return;
 
     const { data, error } = await supabase.functions.invoke('virtual-fitting', {

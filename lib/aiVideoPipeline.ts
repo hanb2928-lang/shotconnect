@@ -123,16 +123,17 @@ function invokeWithTimeout(
   body: Record<string, unknown>,
   timeoutMs = INVOKE_TIMEOUT_MS,
 ): Promise<{ data: unknown; error: unknown }> {
-  const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
-    setTimeout(
-      () => resolve({ data: null, error: new Error('AI 서버 응답 시간이 초과되었습니다. 네트워크 상태를 확인하고 다시 시도해주세요.') }),
-      timeoutMs,
-    ),
-  );
-  return Promise.race([
-    supabase.functions.invoke(fnName, { body }) as Promise<{ data: unknown; error: unknown }>,
-    timeoutPromise,
-  ]);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const invokePromise = supabase.functions.invoke(fnName, { body, signal: controller.signal }) as Promise<{ data: unknown; error: unknown }>;
+  return invokePromise
+    .finally(() => clearTimeout(timeoutId))
+    .catch((err: unknown) => {
+      if (err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message))) {
+        return { data: null, error: new Error('AI 서버 응답 시간이 초과되었습니다. 네트워크 상태를 확인하고 다시 시도해주세요.') };
+      }
+      return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    });
 }
 
 async function invokeWithNetworkRetry(
@@ -635,10 +636,20 @@ function waitForVideoCompletion(
       const runwayPoll = async () => {
         if (settled) return;
         try {
+          const pollController = new AbortController();
+          const pollTimeoutId = setTimeout(() => pollController.abort(), INVOKE_TIMEOUT_MS);
           const { data, error } = await supabase.functions.invoke('generate-video', {
             body: { mode: 'poll', taskId: submitData.taskId, scanId },
-          });
-          if (error) { scheduleNext(); return; }
+            signal: pollController.signal,
+          }).finally(() => clearTimeout(pollTimeoutId));
+          if (error) {
+            const errStatus = (error as { status?: number }).status;
+            if (errStatus === 401 || errStatus === 403) {
+              finish(() => reject(new Error('인증 세션이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.')));
+              return;
+            }
+            scheduleNext(); return;
+          }
           const resp = data as { status?: string; videoUrl?: string; error?: string };
           if (resp.status === 'SUCCESS' && resp.videoUrl) {
             report('completed', 1.0, 'AI 비디오 생성 완료');
@@ -725,6 +736,8 @@ export async function submitVideoJobAsync(
 ): Promise<SubmitOnlyResult> {
   const SUBMIT_TIMEOUT_MS = 45_000;
 
+  const submitController = new AbortController();
+  const submitTimeoutId = setTimeout(() => submitController.abort(), SUBMIT_TIMEOUT_MS);
   const invokePromise = supabase.functions.invoke('generate-video', {
     body: {
       mode: 'submit',
@@ -762,13 +775,17 @@ export async function submitVideoJobAsync(
       enableVirtualFitting: options.enableVirtualFitting,
       enableFabricPhysics: options.enableFabricPhysics,
     },
+    signal: submitController.signal,
   });
 
   const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
-    setTimeout(() => resolve({ data: null, error: new Error('영상 생성 요청 시간이 초과되었습니다. 다시 시도해주세요.') }), SUBMIT_TIMEOUT_MS),
+    setTimeout(
+      () => { submitController.abort(); resolve({ data: null, error: new Error('영상 생성 요청 시간이 초과되었습니다. 다시 시도해주세요.') }); },
+      SUBMIT_TIMEOUT_MS,
+    ),
   );
 
-  const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
+  const { data, error } = await Promise.race([invokePromise, timeoutPromise]).finally(() => clearTimeout(submitTimeoutId));
 
   if (error) throw await buildVideoFunctionError(error);
   if (!data || typeof data.taskId !== 'string') {
@@ -934,6 +951,8 @@ export async function upgradeVideoToHd(
 ): Promise<{ hdTaskId: string; hdJobId: string }> {
   const HD_SUBMIT_TIMEOUT_MS = 45_000;
 
+  const hdController = new AbortController();
+  const hdTimeoutId = setTimeout(() => hdController.abort(), HD_SUBMIT_TIMEOUT_MS);
   const invokePromise = supabase.functions.invoke('generate-video', {
     body: {
       mode: 'submit',
@@ -971,13 +990,17 @@ export async function upgradeVideoToHd(
       enableVirtualFitting: options.enableVirtualFitting,
       enableFabricPhysics: options.enableFabricPhysics,
     },
+    signal: hdController.signal,
   });
 
   const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
-    setTimeout(() => resolve({ data: null, error: new Error('고화질 업그레이드 요청 시간이 초과되었습니다. 다시 시도해주세요.') }), HD_SUBMIT_TIMEOUT_MS),
+    setTimeout(
+      () => { hdController.abort(); resolve({ data: null, error: new Error('고화질 업그레이드 요청 시간이 초과되었습니다. 다시 시도해주세요.') }); },
+      HD_SUBMIT_TIMEOUT_MS,
+    ),
   );
 
-  const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
+  const { data, error } = await Promise.race([invokePromise, timeoutPromise]).finally(() => clearTimeout(hdTimeoutId));
 
   if (error) throw await buildVideoFunctionError(error);
   if (!data || typeof data.taskId !== 'string') {
