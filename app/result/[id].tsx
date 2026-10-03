@@ -1616,12 +1616,30 @@ export default function ResultScreen() {
       connectChannel();
     });
 
+    const handleAppState = (nextState: string) => {
+      if (nextState === 'active') {
+        if (mountedRef.current && !channel) {
+          retryCount = 0;
+          connectChannel();
+        }
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (channel) {
+          try { supabase.removeChannel(channel); } catch { /* ignore */ }
+          channel = null;
+          bgVideoChannelRef.current = null;
+        }
+      }
+    };
+    const appSub = AppState.addEventListener('change', handleAppState);
+
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
       bgVideoChannelRef.current = null;
+      appSub.remove();
       unsubRecovery();
     };
   }, [scan, activePlatform]);
@@ -1793,11 +1811,28 @@ export default function ResultScreen() {
       connectChannel();
     });
 
+    const handleAppState = (nextState: string) => {
+      if (nextState === 'active') {
+        if (mountedRef.current && !channel) {
+          retryCount = 0;
+          connectChannel();
+        }
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (channel) {
+          try { supabase.removeChannel(channel); } catch { /* ignore */ }
+          channel = null;
+        }
+      }
+    };
+    const appSub = AppState.addEventListener('change', handleAppState);
+
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
+      appSub.remove();
       unsubRecovery();
     };
   }, [scan?.id]);
