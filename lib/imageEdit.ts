@@ -228,6 +228,37 @@ export async function compressBase64ForUpload(
 }
 
 const NATIVE_URI_COPY_TIMEOUT_MS = 60_000;
+const NATIVE_READ_TIMEOUT_MS = 30_000;
+
+let nativeCopyInProgress = false;
+const nativeCopyQueue: Array<() => void> = [];
+
+function releaseNativeCopySlot(): void {
+  const next = nativeCopyQueue.shift();
+  if (next) next();
+  else nativeCopyInProgress = false;
+}
+
+async function acquireNativeCopySlot(): Promise<() => void> {
+  if (!nativeCopyInProgress) {
+    nativeCopyInProgress = true;
+    return releaseNativeCopySlot;
+  }
+  return new Promise((resolve) => {
+    nativeCopyQueue.push(() => {
+      nativeCopyInProgress = true;
+      resolve(releaseNativeCopySlot);
+    });
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} (시간 초과)`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 async function validateCopiedFile(path: string): Promise<void> {
   let info: { exists: boolean; size?: number } | null = null;
@@ -250,6 +281,7 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
   if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
   const target = `${FileSystem.cacheDirectory}shot-connect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const releaseSlot = await acquireNativeCopySlot();
   try {
     await Promise.race([
       FileSystem.copyAsync({ from: uri, to: target }),
@@ -275,6 +307,7 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
     throw error;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    releaseSlot();
   }
 }
 
@@ -311,12 +344,20 @@ export async function compressImageToBase64(
         return { base64, mimeType: 'image/jpeg' };
       });
     } catch {
-      const fileInfo = await FileSystem.getInfoAsync(source.uri);
-      if (!fileInfo.exists) throw new Error('이미지를 불러올 수 없습니다.');
+      const fileInfo = await withTimeout(
+        FileSystem.getInfoAsync(source.uri),
+        NATIVE_READ_TIMEOUT_MS,
+        '파일 정보 조회',
+      ).catch(() => null);
+      if (!fileInfo || !fileInfo.exists) throw new Error('이미지를 불러올 수 없습니다.');
       assertNativeImageSize(fileInfo.size);
-      const base64 = await FileSystem.readAsStringAsync(source.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      const base64 = await withTimeout(
+        FileSystem.readAsStringAsync(source.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        }),
+        NATIVE_READ_TIMEOUT_MS,
+        '이미지 파일 읽기',
+      );
       return { base64, mimeType: 'image/jpeg' };
     }
   } finally {

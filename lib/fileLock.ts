@@ -7,14 +7,22 @@
  */
 
 const activeFileLocks = new Map<string, number>();
+const ACQUIRE_TIMEOUT_MS = 30_000;
+const POLL_INTERVAL_MS = 50;
 
 /**
  * Acquire a lock on a file path. Returns a release function.
- * If the path is already locked, waits until it is released.
+ * If the path is already locked, waits until it is released or
+ * the timeout expires. Throws on timeout to prevent permanent deadlock.
  */
 export async function acquireFileLock(filePath: string): Promise<() => void> {
+  const deadline = Date.now() + ACQUIRE_TIMEOUT_MS;
   while (activeFileLocks.has(filePath)) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    if (Date.now() >= deadline) {
+      activeFileLocks.delete(filePath);
+      throw new Error(`파일 잠금 대기 시간이 초과되었습니다: ${filePath}`);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
   activeFileLocks.set(filePath, Date.now());
 

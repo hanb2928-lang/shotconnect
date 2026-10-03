@@ -8,7 +8,7 @@ import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
 import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes } from '@/lib/imageEdit';
-import { compressForEdgeFunction, compressBase64ArrayForEdgeFunction } from '@/lib/parallelImageCompress';
+import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
 import { hashObject } from '@/lib/contentHash';
 import { cleanBase64 } from '@/lib/base64';
@@ -264,10 +264,25 @@ export async function analyzeMultiShot(
   base64Images: string[],
   fileName: string,
 ): Promise<AnalysisResult> {
-  const dataUrls = await withTimeout(compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg'), COMPRESS_TIMEOUT_MS, '이미지 압축');
+  // Stream each image through compress→upload→release so only one
+  // image's base64 is live at a time, preventing heap OOM on mobile.
+  const imageHashes: string[] = [];
+  const imageUrls: string[] = [];
+  const srcCopy = [...base64Images];
+
+  for (let i = 0; i < srcCopy.length; i++) {
+    const dataUrl = buildDataUrl(srcCopy[i], 'image/jpeg');
+    srcCopy[i] = ''; // release source string for GC
+    const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
+    const b64 = cleanBase64(compressed.dataUrl);
+    imageHashes.push(hashObject({ b64 }).slice(0, 16));
+    const url = await uploadImage(b64, compressed.mimeType);
+    imageUrls.push(url);
+  }
+
   const cacheInput = {
     task: 'multi-shot',
-    imageHashes: dataUrls.map((url) => hashObject({ b64: cleanBase64(url) }).slice(0, 16)),
+    imageHashes,
   };
 
   const { data } = await aiCachedCall<AnalysisResult>(
@@ -276,11 +291,6 @@ export async function analyzeMultiShot(
     async () => {
       await deductCredits('multi_shot_analysis');
       try {
-      const imageUrls: string[] = [];
-      for (let i = 0; i < dataUrls.length; i++) {
-        const url = await uploadImage(cleanBase64(dataUrls[i]), 'image/jpeg');
-        imageUrls.push(url);
-      }
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
         method: 'POST',
         headers: {
@@ -724,10 +734,26 @@ export async function analyzeMultiShotQueued(
   fileName: string,
   signal?: AbortSignal,
 ): Promise<AnalysisResult> {
-  const dataUrls = await withTimeout(compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg'), COMPRESS_TIMEOUT_MS, '이미지 압축');
+  // Stream each image through compress→upload→release to avoid holding
+  // all compressed data URLs in memory simultaneously (heap OOM on mobile).
+  const imageHashes: string[] = [];
+  const imageUrls: string[] = [];
+  const srcCopy = [...base64Images];
+
+  for (let i = 0; i < srcCopy.length; i++) {
+    if (signal?.aborted) throw new Error('다각도 분석이 취소되었습니다.');
+    const dataUrl = buildDataUrl(srcCopy[i], 'image/jpeg');
+    srcCopy[i] = ''; // release source string for GC
+    const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
+    const b64 = cleanBase64(compressed.dataUrl);
+    imageHashes.push(hashObject({ b64 }).slice(0, 16));
+    const url = await uploadImage(b64, compressed.mimeType, signal);
+    imageUrls.push(url);
+  }
+
   const cacheInput = {
     task: 'multi-shot-queued',
-    imageHashes: dataUrls.map((url) => hashObject({ b64: cleanBase64(url) }).slice(0, 16)),
+    imageHashes,
   };
 
   const { data } = await aiCachedCall<AnalysisResult>(
@@ -736,12 +762,6 @@ export async function analyzeMultiShotQueued(
     async () => {
       await deductCredits('multi_shot_analysis');
       try {
-      const imageUrls: string[] = [];
-      for (let i = 0; i < dataUrls.length; i++) {
-        if (signal?.aborted) throw new Error('다각도 분석이 취소되었습니다.');
-        const url = await uploadImage(cleanBase64(dataUrls[i]), 'image/jpeg', signal);
-        imageUrls.push(url);
-      }
       const result = await enqueueAndWait<Record<string, unknown>>(
         'analyze-photo',
         { images: imageUrls, fileName, mode: 'multi-shot' },
