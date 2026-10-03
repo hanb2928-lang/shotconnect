@@ -596,19 +596,6 @@ function CameraScreenInner() {
     await nativeHeapCooldownGuard();
   }, [updateCameraReady]);
 
-  const handleCapture = async () => {
-    if (!cameraRef.current || processingRef.current || processing || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
-    captureActiveRef.current = true;
-    processingRef.current = true;
-    setProcessing(true);
-    try {
-      setMultiAngleVisible(true);
-    } finally {
-      processingRef.current = false;
-      setProcessing(false);
-    }
-  };
-
   const handlePickVideo = useCallback(async () => {
     if (processingRef.current || processing || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
     processingRef.current = true;
@@ -819,7 +806,10 @@ function CameraScreenInner() {
     shots.length = 0;
   };
 
+  const multiAngleCaptureInProgressRef = useRef(false);
   const handleMultiAngleCapture = async (_angleId: string): Promise<{ base64: string; mimeType: string; uri?: string } | null> => {
+    if (multiAngleCaptureInProgressRef.current) return null;
+    multiAngleCaptureInProgressRef.current = true;
     if (isWebPlatform()) {
       const webCam = webCameraRef.current;
       if (webCam?.isReady()) {
@@ -829,22 +819,24 @@ function CameraScreenInner() {
             CAPTURE_TIMEOUT_MS,
             '카메라 캡처',
           );
-          if (!isMountedRef.current) return null;
-          if (result?.base64) return result;
+          if (!isMountedRef.current) { multiAngleCaptureInProgressRef.current = false; return null; }
+          if (result?.base64) { multiAngleCaptureInProgressRef.current = false; return result; }
         } catch {
           // Fall through to file picker
         }
       }
       try {
         const images = await withTimeout(pickImageWeb(false, 1, true), PICK_TIMEOUT_MS, '카메라 캡처');
-        if (images.length === 0) return null;
+        if (images.length === 0) { multiAngleCaptureInProgressRef.current = false; return null; }
+        multiAngleCaptureInProgressRef.current = false;
         return { base64: images[0].base64, mimeType: images[0].mimeType };
       } catch {
+        multiAngleCaptureInProgressRef.current = false;
         return null;
       }
     }
     const cam = cameraRef.current;
-    if (!cam || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || !isMountedRef.current || isPipelineLocked()) return null;
+    if (!cam || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || !isMountedRef.current || isPipelineLocked()) { multiAngleCaptureInProgressRef.current = false; return null; }
     if (bufferReleaseTimerRef.current) clearTimeout(bufferReleaseTimerRef.current);
     bufferReleasedRef.current = false;
     try {
@@ -869,11 +861,13 @@ function CameraScreenInner() {
       } catch {
         if (!isMountedRef.current || !cameraRef.current) {
           console.warn('Camera session destroyed before capture completed.');
+          multiAngleCaptureInProgressRef.current = false;
           return null;
         }
         await new Promise((r) => setTimeout(r, 400));
         if (!isMountedRef.current || !cameraRef.current) {
           console.warn('Camera session destroyed before capture completed.');
+          multiAngleCaptureInProgressRef.current = false;
           return null;
         }
         photo = await attemptCapture();
@@ -883,18 +877,22 @@ function CameraScreenInner() {
         if (photo?.uri) {
           import('expo-file-system/legacy').then((fs) => fs.deleteAsync(photo!.uri, { idempotent: true })).catch(() => {});
         }
+        multiAngleCaptureInProgressRef.current = false;
         return null;
       }
       if (!photo?.uri) {
         if (photo?.base64) {
           const cleanB64 = cleanBase64(photo.base64);
           photo = null;
+          multiAngleCaptureInProgressRef.current = false;
           return { base64: cleanB64, mimeType: 'image/jpeg' };
         }
+        multiAngleCaptureInProgressRef.current = false;
         return null;
       }
       if (!isMountedRef.current) {
         import('expo-file-system/legacy').then((fs) => fs.deleteAsync(photo!.uri, { idempotent: true })).catch(() => {});
+        multiAngleCaptureInProgressRef.current = false;
         return null;
       }
       const capturedUri = photo.uri;
@@ -902,6 +900,7 @@ function CameraScreenInner() {
       const flushed = await waitForUriFlush(capturedUri);
       if (!flushed || !isMountedRef.current) {
         import('expo-file-system/legacy').then((fs) => fs.deleteAsync(capturedUri, { idempotent: true })).catch(() => {});
+        multiAngleCaptureInProgressRef.current = false;
         return null;
       }
       // Defer heavy FileSystem I/O + base64 decode until after the camera
@@ -929,10 +928,12 @@ function CameraScreenInner() {
         PICK_TIMEOUT_MS,
         '이미지 압축',
       );
-      if (!isMountedRef.current) return null;
+      if (!isMountedRef.current) { multiAngleCaptureInProgressRef.current = false; return null; }
+      multiAngleCaptureInProgressRef.current = false;
       return { base64, mimeType, ...(compressedUri ? { uri: compressedUri } : {}) };
     } catch (err) {
       logError(err, { component: 'CameraScreen', action: 'handleMultiAngleCapture' });
+      multiAngleCaptureInProgressRef.current = false;
       return null;
     } finally {
       if (bufferReleaseTimerRef.current) clearTimeout(bufferReleaseTimerRef.current);
