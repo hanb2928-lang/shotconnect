@@ -95,7 +95,7 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 import { friendlyError } from '@/lib/errors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSafeTop } from '@/hooks/useSafeTop';
-import { isOnline } from '@/hooks/useNetworkStatus';
+import { isOnline, onNetworkRecovery } from '@/hooks/useNetworkStatus';
 import { LazySection } from '@/components/LazySection';
 import { ShortFormGuideCard } from '@/components/ShortFormGuideCard';
 import { TrendMatchCard } from '@/components/TrendMatchCard';
@@ -1605,12 +1605,24 @@ export default function ResultScreen() {
 
     connectChannel();
 
+    const unsubRecovery = onNetworkRecovery(() => {
+      if (!mountedRef.current) return;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
+      retryCount = 0;
+      connectChannel();
+    });
+
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
       bgVideoChannelRef.current = null;
+      unsubRecovery();
     };
   }, [scan, activePlatform]);
 
@@ -1770,11 +1782,23 @@ export default function ResultScreen() {
 
     connectChannel();
 
+    const unsubRecovery = onNetworkRecovery(() => {
+      if (!mountedRef.current) return;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
+      retryCount = 0;
+      connectChannel();
+    });
+
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
+      unsubRecovery();
     };
   }, [scan?.id]);
 

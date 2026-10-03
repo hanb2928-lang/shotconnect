@@ -4,28 +4,55 @@ import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 
 export type NetworkStatus = 'online' | 'offline' | 'unknown';
 
+type RecoveryListener = () => void;
+
 let currentStatus: NetworkStatus = 'unknown';
 let initialized = false;
 const listeners = new Set<(status: NetworkStatus) => void>();
+const recoveryListeners = new Set<RecoveryListener>();
 let probeTimer: ReturnType<typeof setInterval> | null = null;
 let probing = false;
 let activeProbeController: AbortController | null = null;
 let consecutiveProbeFailures = 0;
+let wasOffline = false;
 
 const PROBE_INTERVAL_MS = 15000;
 const PROBE_TIMEOUT_MS = 8000;
 
 function notify(status: NetworkStatus) {
-  if (status === currentStatus) return;
+  const changed = status !== currentStatus;
+  const previousStatus = currentStatus;
   currentStatus = status;
-  const snapshot = [...listeners];
-  for (const cb of snapshot) {
-    if (typeof cb === 'function') cb(status);
+  if (changed) {
+    const snapshot = [...listeners];
+    for (const cb of snapshot) {
+      if (typeof cb === 'function') cb(status);
+    }
+    if (status === 'online' && previousStatus === 'offline') {
+      const recoverySnapshot = [...recoveryListeners];
+      for (const cb of recoverySnapshot) {
+        try { cb(); } catch { /* listener error should not block others */ }
+      }
+    }
   }
 }
 
-const onlineHandler = () => notify('online');
-const offlineHandler = () => notify('offline');
+const onlineHandler = () => {
+  if (wasOffline) {
+    wasOffline = false;
+    notify('online');
+    const recoverySnapshot = [...recoveryListeners];
+    for (const cb of recoverySnapshot) {
+      try { cb(); } catch { /* ignore */ }
+    }
+  } else {
+    notify('online');
+  }
+};
+const offlineHandler = () => {
+  wasOffline = true;
+  notify('offline');
+};
 
 function abortActiveProbe() {
   if (activeProbeController) {
@@ -65,11 +92,23 @@ async function runProbe() {
   probing = false;
   if (reachable) {
     consecutiveProbeFailures = 0;
-    notify('online');
+    if (wasOffline) {
+      wasOffline = false;
+      notify('online');
+      const recoverySnapshot = [...recoveryListeners];
+      for (const cb of recoverySnapshot) {
+        try { cb(); } catch { /* ignore */ }
+      }
+    } else {
+      notify('online');
+    }
     return;
   }
   consecutiveProbeFailures += 1;
-  if (consecutiveProbeFailures >= 2) notify('offline');
+  if (consecutiveProbeFailures >= 2) {
+    wasOffline = true;
+    notify('offline');
+  }
 }
 
 function startProbing() {
@@ -154,4 +193,9 @@ export function waitForOnline(timeoutMs = 30000): Promise<boolean> {
     };
     listeners.add(check);
   });
+}
+
+export function onNetworkRecovery(listener: RecoveryListener): () => void {
+  recoveryListeners.add(listener);
+  return () => { recoveryListeners.delete(listener); };
 }

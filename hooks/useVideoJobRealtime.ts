@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { saveActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
+import { onNetworkRecovery } from '@/hooks/useNetworkStatus';
 
 type VideoJobStatus = 'idle' | 'processing' | 'completed' | 'failed';
 
@@ -180,10 +181,24 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
     };
     const appSub = AppState.addEventListener('change', handleAppState);
 
+    const unsubRecovery = onNetworkRecovery(() => {
+      if (settledRef.current) return;
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
+      retryCount = 0;
+      pollAttempt = 0;
+      checkDb();
+      connectChannel();
+      if (!pollTimer) schedulePoll();
+    });
+
     return () => {
       settledRef.current = true;
       cleanup();
       appSub.remove();
+      unsubRecovery();
     };
   }, [jobId, handleResult]);
 
