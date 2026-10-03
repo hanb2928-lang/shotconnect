@@ -118,6 +118,16 @@ function isNetworkError(err: unknown): boolean {
 
 const INVOKE_TIMEOUT_MS = 60_000;
 
+function compactBody(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'boolean' && value === false) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 function invokeWithTimeout(
   fnName: string,
   body: Record<string, unknown>,
@@ -216,7 +226,7 @@ export async function generateAiVideo(
     try {
       const result = await invokeWithNetworkRetry(
         'generate-video',
-        {
+        compactBody({
           mode: 'submit',
           prompt,
           durationSec: options.durationSec ?? 5,
@@ -229,9 +239,9 @@ export async function generateAiVideo(
           platform: options.platform ?? 'shorts',
           hookCategory: options.hookCategory ?? 'curiosity',
           cutCount: options.cutCount,
-          productVision: options.productVision ?? null,
+          productVision: options.productVision,
           draft: isDraft,
-          isCleanVideoMode: options.isCleanVideoMode ?? false,
+          isCleanVideoMode: options.isCleanVideoMode,
           promptStrength: options.promptStrength,
           negativePrompt: options.negativePrompt,
           bgStyle: options.bgStyle,
@@ -251,7 +261,7 @@ export async function generateAiVideo(
           enableCaustics: options.enableCaustics,
           enableVirtualFitting: options.enableVirtualFitting,
           enableFabricPhysics: options.enableFabricPhysics,
-        },
+        }),
         0,
         (retryAttempt) => report('submitting', 0.05 + retryAttempt * 0.02, `네트워크 복구 후 재시도 중 (${retryAttempt}/${SUBMIT_MAX_RETRIES})...`),
       );
@@ -739,7 +749,7 @@ export async function submitVideoJobAsync(
   const submitController = new AbortController();
   const submitTimeoutId = setTimeout(() => submitController.abort(), SUBMIT_TIMEOUT_MS);
   const invokePromise = supabase.functions.invoke('generate-video', {
-    body: {
+    body: compactBody({
       mode: 'submit',
       prompt,
       durationSec: options.durationSec ?? 5,
@@ -752,9 +762,9 @@ export async function submitVideoJobAsync(
       platform: options.platform ?? 'shorts',
       hookCategory: options.hookCategory ?? 'curiosity',
       cutCount: options.cutCount,
-      productVision: options.productVision ?? null,
-      draft: options.draft ?? false,
-      isCleanVideoMode: options.isCleanVideoMode ?? false,
+      productVision: options.productVision,
+      draft: options.draft,
+      isCleanVideoMode: options.isCleanVideoMode,
       promptStrength: options.promptStrength,
       negativePrompt: options.negativePrompt,
       bgStyle: options.bgStyle,
@@ -774,7 +784,7 @@ export async function submitVideoJobAsync(
       enableCaustics: options.enableCaustics,
       enableVirtualFitting: options.enableVirtualFitting,
       enableFabricPhysics: options.enableFabricPhysics,
-    },
+    }),
     signal: submitController.signal,
   });
 
@@ -954,7 +964,7 @@ export async function upgradeVideoToHd(
   const hdController = new AbortController();
   const hdTimeoutId = setTimeout(() => hdController.abort(), HD_SUBMIT_TIMEOUT_MS);
   const invokePromise = supabase.functions.invoke('generate-video', {
-    body: {
+    body: compactBody({
       mode: 'submit',
       prompt,
       durationSec: options.durationSec ?? 5,
@@ -967,9 +977,9 @@ export async function upgradeVideoToHd(
       platform: options.platform ?? 'shorts',
       hookCategory: options.hookCategory ?? 'curiosity',
       cutCount: options.cutCount,
-      productVision: options.productVision ?? null,
+      productVision: options.productVision,
       draft: false,
-      isCleanVideoMode: options.isCleanVideoMode ?? false,
+      isCleanVideoMode: options.isCleanVideoMode,
       promptStrength: options.promptStrength,
       negativePrompt: options.negativePrompt,
       bgStyle: options.bgStyle,
@@ -989,7 +999,7 @@ export async function upgradeVideoToHd(
       enableCaustics: options.enableCaustics,
       enableVirtualFitting: options.enableVirtualFitting,
       enableFabricPhysics: options.enableFabricPhysics,
-    },
+    }),
     signal: hdController.signal,
   });
 
