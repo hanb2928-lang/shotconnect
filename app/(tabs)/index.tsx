@@ -1063,7 +1063,7 @@ function CameraScreenInner() {
   // ─── Mode Selection Screen ───
   if (screenPhase === 'mode_select') {
     return (
-      <ScrollView style={styles.modeSelectContainer} contentContainerStyle={styles.modeSelectContent} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.modeSelectContainer} contentContainerStyle={[styles.modeSelectContent, { paddingBottom: tabBarHeight + theme.spacing.lg }]} showsVerticalScrollIndicator={false}>
         <View style={{ paddingTop: safeTop + theme.spacing.lg }} />
 
         <TriggerBanner />

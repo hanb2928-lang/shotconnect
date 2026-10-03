@@ -19,6 +19,8 @@ interface Props {
   fittingReady: boolean;
   onWebProductPick: () => void;
   onWebModelPick: () => void;
+  onNativeProductPick?: () => void;
+  onNativeModelPick?: () => void;
 }
 
 const ANGLE_LABELS = ['정면', '좌측', '우측', '후면', '상부'];
@@ -33,6 +35,8 @@ function SourceInputFittingPanelInner({
   fittingReady,
   onWebProductPick,
   onWebModelPick,
+  onNativeProductPick,
+  onNativeModelPick,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const modelInputRef = useRef<HTMLInputElement | null>(null);
@@ -76,6 +80,16 @@ function SourceInputFittingPanelInner({
     };
   }, []);
 
+  const handleProductPick = useCallback(() => {
+    if (Platform.OS === 'web') onWebProductPick();
+    else onNativeProductPick?.();
+  }, [onWebProductPick, onNativeProductPick]);
+
+  const handleModelPick = useCallback(() => {
+    if (Platform.OS === 'web') onWebModelPick();
+    else onNativeModelPick?.();
+  }, [onWebModelPick, onNativeModelPick]);
+
   const needsMoreImages = productImages.length < MIN_PRODUCT_IMAGES;
 
   return (
@@ -110,7 +124,7 @@ function SourceInputFittingPanelInner({
           {productImages.length < MAX_PRODUCT_IMAGES && (
             <TouchableOpacity
               style={styles.addSlot}
-              onPress={onWebProductPick}
+              onPress={handleProductPick}
               activeOpacity={0.7}
             >
               <Plus size={24} color={theme.colors.dark.textDim} strokeWidth={2} />
@@ -139,7 +153,7 @@ function SourceInputFittingPanelInner({
           ) : (
             <TouchableOpacity
               style={styles.modelAddSlot}
-              onPress={onWebModelPick}
+              onPress={handleModelPick}
               activeOpacity={0.7}
             >
               <UserSquare2 size={28} color={theme.colors.dark.textDim} strokeWidth={2} />

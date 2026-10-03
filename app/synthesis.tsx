@@ -10,6 +10,9 @@ import {
   ViewStyle,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system/legacy';
 import { ArrowLeft, Sparkles } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
@@ -39,6 +42,34 @@ import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
 import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
+
+const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
+
+async function uploadImageToStorage(uri: string): Promise<string> {
+  const compressed = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ resize: { width: 1080 } }],
+    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG },
+  );
+  const fileInfo = await FileSystem.getInfoAsync(compressed.uri);
+  if (!fileInfo.exists) throw new Error('이미지 파일을 찾을 수 없습니다.');
+  if (Platform.OS !== 'web' && fileInfo.size > MAX_NATIVE_IMAGE_BYTES) {
+    throw new Error('이미지가 너무 큽니다. 더 낮은 해상도로 다시 시도해주세요.');
+  }
+  const base64 = await FileSystem.readAsStringAsync(compressed.uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  const bytes = Platform.OS === 'web'
+    ? new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' })
+    : Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const fileName = `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { error } = await supabase.storage
+    .from('scans')
+    .upload(fileName, bytes, { contentType: 'image/jpeg', cacheControl: '360000' });
+  if (error) throw new Error(`이미지 업로드 실패: ${error.message}`);
+  const { data } = supabase.storage.from('scans').getPublicUrl(fileName);
+  return data.publicUrl;
+}
 
 export default function SynthesisScreen() {
   const router = useRouter();
@@ -99,6 +130,45 @@ export default function SynthesisScreen() {
   const handleWebModelPick = useCallback(() => {
     if (Platform.OS !== 'web' || !modelInputRef.current) return;
     modelInputRef.current.click();
+  }, []);
+
+  const handleNativeProductPick = useCallback(async () => {
+    if (Platform.OS === 'web') return;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      setError('사진 라이브러리 접근 권한이 필요합니다.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: 5 - productImages.length,
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const remaining = 5 - productImages.length;
+    const angleLabels = ['정면', '좌측', '우측', '후면', '상부'];
+    const newImages: SourceImage[] = result.assets.slice(0, remaining).map((asset, i) => ({
+      id: `prod-${Date.now()}-${i}`,
+      uri: asset.uri,
+      angle: angleLabels[productImages.length + i] || `사진 ${productImages.length + i + 1}`,
+    }));
+    if (newImages.length > 0) setProductImages((prev) => [...prev, ...newImages]);
+  }, [productImages.length]);
+
+  const handleNativeModelPick = useCallback(async () => {
+    if (Platform.OS === 'web') return;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      setError('사진 라이브러리 접근 권한이 필요합니다.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    setModelImage({ id: `model-${Date.now()}`, uri: result.assets[0].uri });
   }, []);
 
   const handleProductFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -193,13 +263,28 @@ export default function SynthesisScreen() {
       : `Cinematic ${modeLabel} product showcase. ${captionText || '시선 집중! 지금 바로 확인하세요'}`;
 
     try {
+      setVideoProgress({ phase: 'submitting', progress: 0.06, message: '이미지 업로드 중...', elapsedSec: 0 });
+
+      const uploadSingle = async (img: SourceImage): Promise<string> => {
+        if (img.uri.startsWith('http://') || img.uri.startsWith('https://')) return img.uri;
+        return uploadImageToStorage(img.uri);
+      };
+
+      const [mainUrl, ...restUrls] = await Promise.all(
+        productImages.map(uploadSingle),
+      );
+      const modelUrl = modelImage ? await uploadSingle(modelImage) : null;
+
+      if (!mountedRef.current) return;
+      setVideoProgress({ phase: 'submitting', progress: 0.08, message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 });
+
       const { data: scanData, error: scanError } = await supabase
         .from('scans')
         .insert({
-          image_url: productImages[0]?.uri ?? '',
+          image_url: mainUrl,
           scan_source: 'multi',
           product_name: productName,
-          additional_image_urls: productImages.slice(1).map((img) => img.uri),
+          additional_image_urls: restUrls,
         })
         .select('id')
         .single();
@@ -210,7 +295,6 @@ export default function SynthesisScreen() {
       scanIdRef.current = scanData.id;
 
       if (!mountedRef.current) return;
-      setVideoProgress({ phase: 'submitting', progress: 0.08, message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 });
 
       const submitResult = await submitVideoJobAsync(promptText, {
         durationSec: 5,
@@ -411,6 +495,8 @@ export default function SynthesisScreen() {
           fittingReady={fittingReady}
           onWebProductPick={handleWebProductPick}
           onWebModelPick={handleWebModelPick}
+          onNativeProductPick={handleNativeProductPick}
+          onNativeModelPick={handleNativeModelPick}
         />
 
         <GenerationModePanel
