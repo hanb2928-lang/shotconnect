@@ -122,10 +122,10 @@ export const UPLOAD_MAX_DIMENSION = 1080;
 export const UPLOAD_QUALITY = 0.68;
 const CAPTURE_MAX_DIMENSION = getAdaptiveImageMaxDimension();
 const CAPTURE_QUALITY = 0.78;
-const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
+const MAX_NATIVE_IMAGE_BYTES = 12_000_000;
 
 function assertNativeImageSize(size: number | undefined): void {
-  if (Platform.OS !== 'web' && (size === undefined || size > MAX_NATIVE_IMAGE_BYTES)) {
+  if (Platform.OS !== 'web' && size !== undefined && size > MAX_NATIVE_IMAGE_BYTES) {
     throw new Error('이미지가 너무 커서 안전하게 처리할 수 없습니다. 더 낮은 해상도로 다시 촬영해주세요.');
   }
 }
@@ -179,13 +179,22 @@ export async function compressBase64ForUpload(
   }
 }
 
+async function makeReadableNativeUri(uri: string): Promise<{ uri: string; temporary: boolean }> {
+  if (Platform.OS === 'web' || !uri.startsWith('content://')) return { uri, temporary: false };
+  if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
+  const target = `${FileSystem.cacheDirectory}shot-connect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  await FileSystem.copyAsync({ from: uri, to: target });
+  return { uri: target, temporary: true };
+}
+
 export async function compressImageToBase64(
   uri: string,
   maxDimension = getAdaptiveImageMaxDimension(),
   quality = 0.7,
 ): Promise<{ base64: string; mimeType: string }> {
+  const source = await makeReadableNativeUri(uri);
   try {
-    const { width: origW, height: origH } = await getImageSize(uri);
+    const { width: origW, height: origH } = await getImageSize(source.uri);
     const longer = Math.max(origW, origH);
     const actions =
       longer > maxDimension
@@ -193,30 +202,34 @@ export async function compressImageToBase64(
           ? [{ resize: { width: maxDimension } }]
           : [{ resize: { height: maxDimension } }]
         : [];
-    const manipulated = await ImageManipulator.manipulateAsync(
-      uri,
-      actions,
-      { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
-    );
-    registerTempFile(manipulated.uri, 'compressImageToBase64');
-    return await withFileLock(manipulated.uri, async () => {
-      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
-      if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+    try {
+      const manipulated = await ImageManipulator.manipulateAsync(
+        source.uri,
+        actions,
+        { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      registerTempFile(manipulated.uri, 'compressImageToBase64');
+      return await withFileLock(manipulated.uri, async () => {
+        const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+        if (!fileInfo.exists) throw new Error('이미지 변환 실패');
+        assertNativeImageSize(fileInfo.size);
+        const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        safeDeleteTempFile(manipulated.uri).catch(() => {});
+        return { base64, mimeType: 'image/jpeg' };
+      });
+    } catch {
+      const fileInfo = await FileSystem.getInfoAsync(source.uri);
+      if (!fileInfo.exists) throw new Error('이미지를 불러올 수 없습니다.');
       assertNativeImageSize(fileInfo.size);
-      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      const base64 = await FileSystem.readAsStringAsync(source.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      safeDeleteTempFile(manipulated.uri).catch(() => {});
       return { base64, mimeType: 'image/jpeg' };
-    });
-  } catch {
-    const fileInfo = await FileSystem.getInfoAsync(uri);
-    if (!fileInfo.exists) throw new Error('이미지를 불러올 수 없습니다.');
-    assertNativeImageSize(fileInfo.size);
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    return { base64, mimeType: 'image/jpeg' };
+    }
+  } finally {
+    if (source.temporary) await FileSystem.deleteAsync(source.uri, { idempotent: true }).catch(() => {});
   }
 }
 
@@ -645,12 +658,16 @@ export async function compressCaptureUriToBlob(
 }
 
 export async function waitForUriFlush(uri: string): Promise<boolean> {
-  try {
-    const info = await FileSystem.getInfoAsync(uri);
-    return info.exists;
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (info.exists && (info.size === undefined || info.size > 0)) return true;
+    } catch {
+      // The camera may still be committing the file on Android.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  return false;
 }
 
 export async function nativeHeapCooldownGuard(): Promise<void> {
