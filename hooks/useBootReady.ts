@@ -17,7 +17,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { initStorage, isStorageReady } from '@/lib/storage';
 
-const BOOT_READY_TIMEOUT_MS = 5000;
+const BOOT_READY_TIMEOUT_MS = 2500;
 
 interface BootReadyInputs {
   /** Whether fonts have loaded (or errored / timed out). */
@@ -69,7 +69,7 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
       // block boot forever.
       await Promise.race([
         initStorage(),
-        new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+        new Promise<void>((resolve) => setTimeout(resolve, 1000)),
       ]);
     })();
 
@@ -86,8 +86,8 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
       if (checkReady()) {
         setIsBootReady(true);
       } else {
-        // Poll for font readiness up to 2 more seconds.
-        const pollEnd = Date.now() + 2000;
+        // Poll for font readiness up to 1 more second.
+        const pollEnd = Date.now() + 1000;
         const pollId = setInterval(() => {
           if (cancelled) { clearInterval(pollId); return; }
           if (checkReady() || Date.now() > pollEnd) {
@@ -96,7 +96,7 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
             // system fonts than to hang on the splash forever.
             setIsBootReady(true);
           }
-        }, 100);
+        }, 50);
       }
     });
 

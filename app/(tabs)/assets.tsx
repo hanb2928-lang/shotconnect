@@ -20,8 +20,21 @@ import type { FlatList as FlatListType } from 'react-native';
 import { CachedImage } from '@/components/CachedImage';
 import { FolderOpen, Trash2, Download, Film, Image as ImageIcon, X, Calendar, Youtube, Instagram, FileText, Smartphone, Share2, CircleCheck as CheckCircle2, Clock, CircleDashed, Link2, Crop, Rocket, TrendingUp, Repeat2, ListFilter as Filter, ArrowDownUp, Music2, Sparkles, ArrowRight, Pin, Copy, Check, Zap, Lightbulb, Users, Volume2, Type, Flame, ChevronDown, ChevronUp, Hash, QrCode, Store, Settings, ChartBar as BarChart3 } from 'lucide-react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system/legacy';
+let _mediaLibrary: typeof import('expo-media-library') | null = null;
+async function getMediaLibrary() {
+  if (!_mediaLibrary) _mediaLibrary = await import('expo-media-library');
+  return _mediaLibrary;
+}
+let _fileSystem: typeof import('expo-file-system/legacy') | null = null;
+async function getFileSystem() {
+  if (!_fileSystem) _fileSystem = await import('expo-file-system/legacy');
+  return _fileSystem;
+}
+let _clipboard: typeof import('expo-clipboard') | null = null;
+async function getClipboard() {
+  if (!_clipboard) _clipboard = await import('expo-clipboard');
+  return _clipboard;
+}
 import { theme } from '@/lib/theme';
 import { fetchSavedAssets, deleteSavedAsset, updateAssetUploadStatus } from '@/lib/savedAssets';
 import type { SavedAsset } from '@/types/database';
@@ -34,7 +47,6 @@ import {
   type UploadPlatformKey,
 } from '@/lib/platformUpload';
 import { getTrendingSuggestions } from '@/lib/trendingHashtags';
-import * as Clipboard from 'expo-clipboard';
 
 
 const CARD_GAP = 12;
@@ -204,6 +216,8 @@ export default function AssetsScreen() {
       return;
     }
     try {
+      const MediaLibrary = await getMediaLibrary();
+      const FileSystem = await getFileSystem();
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(t('assets.alert.permission'), t('assets.alert.permission'));
@@ -265,6 +279,7 @@ export default function AssetsScreen() {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(text);
       } else {
+        const Clipboard = await getClipboard();
         await Clipboard.setStringAsync(text);
       }
       return true;
@@ -285,6 +300,8 @@ export default function AssetsScreen() {
     // 1. Download video to device gallery (skip on web)
     if (Platform.OS !== 'web') {
       try {
+        const MediaLibrary = await getMediaLibrary();
+        const FileSystem = await getFileSystem();
         const { status } = await MediaLibrary.requestPermissionsAsync();
         if (status === 'granted') {
           const ext = asset.asset_type === 'video' ? 'webm' : 'png';

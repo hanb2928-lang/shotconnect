@@ -28,7 +28,7 @@ export function isStorageReady(): boolean {
   return initDone;
 }
 
-const STORAGE_INIT_TIMEOUT_MS = 3000;
+const STORAGE_INIT_TIMEOUT_MS = 1500;
 
 // Lazy-load AsyncStorage so module-eval never touches the native binding.
 async function loadAsyncStorage(): Promise<typeof import('@react-native-async-storage/async-storage') | null> {

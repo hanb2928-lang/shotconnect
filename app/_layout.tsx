@@ -40,21 +40,35 @@ import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 
 installGlobalErrorHandlers();
-installMediaCacheLifecycleHook();
-startPressureMonitoring();
-registerDefaultFlushHandlers();
-installProactiveMemoryFlush();
 
-// Run all GC sweeps 5s after boot — non-blocking, best-effort.
-// Cleans up orphaned Blob URLs, temp files, stale IndexedDB media cache,
-// and stale LocalStorage offline cache from previous sessions.
-// The boot sweeper scans storage directly (not the in-memory registry)
-// to catch orphans left by force-killed sessions.
-setTimeout(() => {
+// Defer all heavy init to after first render so the splash → app
+// transition is not blocked by IndexedDB warmup, pressure monitoring
+// setup, or flush handler registration. requestIdleCallback schedules
+// the work in the browser's idle phase; setTimeout(0) is the fallback
+// for environments without ric (native, older browsers).
+function scheduleIdle(fn: () => void): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    (window as { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(fn);
+  } else {
+    setTimeout(fn, 0);
+  }
+}
+
+scheduleIdle(() => {
+  installMediaCacheLifecycleHook();
+  startPressureMonitoring();
+  registerDefaultFlushHandlers();
+  installProactiveMemoryFlush();
+});
+
+// GC sweeps run after the app is fully interactive. They clean up
+// orphaned Blob URLs, temp files, stale IndexedDB media cache, and
+// stale LocalStorage offline cache from previous sessions.
+scheduleIdle(() => {
   sweepTempFiles().catch(() => {});
   sweepStaleOfflineCache().catch(() => {});
   runBootSweep().catch(() => {});
-}, 5000);
+});
 
 if (Platform.OS === 'web' && typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
@@ -185,12 +199,29 @@ export default function RootLayout() {
     }
   }, []);
 
-  // Font timeout: if fonts don't resolve in 3s, proceed with system fonts
+  // Font timeout: if fonts don't resolve in 1s, proceed with system fonts.
+  // On web, font-display:swap (injected below) already lets text render
+  // with system fonts while the web font loads, so this timeout is a
+  // safety net rather than the primary strategy.
   useEffect(() => {
     if (fontsLoaded || fontError) return;
-    const id = setTimeout(() => setFontTimedOut(true), 3000);
+    const id = setTimeout(() => setFontTimedOut(true), 1000);
     return () => clearTimeout(id);
   }, [fontsLoaded, fontError]);
+
+  // Web: inject font-display:swap so the browser renders text with system
+  // fonts immediately and swaps in the custom font once it loads. This
+  // eliminates FOIT (flash of invisible text) and removes font loading
+  // from the critical boot path.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const styleId = 'font-display-swap';
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = '@font-face { font-display: swap; }';
+    document.head.appendChild(style);
+  }, []);
 
   // Init effect: runs exactly once. The finally block is the sole
   // trigger for setReady('app'). A hard 4s outer timeout prevents
@@ -205,7 +236,7 @@ export default function RootLayout() {
     const initPromise = (async () => {
       const storageTask = Promise.race([
         earlyStoragePromise,
-        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+        new Promise<void>((resolve) => setTimeout(resolve, 1000)),
       ]);
 
       const webTask = (async () => {
@@ -216,7 +247,7 @@ export default function RootLayout() {
       await Promise.all([storageTask, webTask]);
     })();
 
-    const hardTimeout = new Promise<void>((resolve) => setTimeout(resolve, 4000));
+    const hardTimeout = new Promise<void>((resolve) => setTimeout(resolve, 2000));
 
     Promise.race([initPromise, hardTimeout]).finally(() => {
       setReady('app');
@@ -251,18 +282,34 @@ export default function RootLayout() {
   const fontsReady = fontsLoaded || !!fontError || fontTimedOut;
   const { isBootReady } = useBootReady({ fontsReady, bootPhase });
 
-  // Hide splash only after all critical resources are confirmed ready.
-  // This prevents the splash from fading before fonts, storage, and
-  // other essentials are initialized, which would expose a blank or
-  // partially-rendered screen during preview updates.
-  useEffect(() => {
-    if (isBootReady && !bootReadyMarkedRef.current) {
-      bootReadyMarkedRef.current = true;
-      hideSplash();
-    }
-  }, [isBootReady, hideSplash]);
-
   const isReady = isBootReady && ready !== 'loading';
+
+  // Smooth splash → app transition using requestAnimationFrame.
+  // Without this, hiding the native splash and mounting AppShell happen
+  // in the same render cycle — the splash fade and the DOM reflow from
+  // AppShell's canvas/layout work compete for the same frame, causing a
+  // visible jank. Double rAF separates them into clean paint phases:
+  //   Frame 1: hide native splash → LoadingScreen is already painted underneath
+  //   Frame 2: browser has composited the frame without the splash overlay
+  //   Frame 3: mount AppShell — reflow happens on a settled compositor
+  const [shellReady, setShellReady] = useState(false);
+  useEffect(() => {
+    if (!isReady || shellReady) return;
+    if (bootReadyMarkedRef.current) return;
+    bootReadyMarkedRef.current = true;
+
+    if (Platform.OS === 'web' && typeof requestAnimationFrame !== 'undefined') {
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        hideSplash();
+        raf2 = requestAnimationFrame(() => setShellReady(true));
+      });
+      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+    }
+
+    hideSplash();
+    setShellReady(true);
+  }, [isReady, shellReady, hideSplash]);
 
   return (
     <ErrorBoundary>
@@ -272,8 +319,8 @@ export default function RootLayout() {
             <SafeAreaProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
                 <View key={bootKey} style={{ flex: 1 }}>
-                  {!isReady && <LoadingScreen fullScreen />}
-                  {isReady && (
+                  {!shellReady && <LoadingScreen fullScreen />}
+                  {shellReady && (
                     <>
                       <AppShell />
                       <Suspense fallback={<BootFallback />}><NetworkBanner /></Suspense>

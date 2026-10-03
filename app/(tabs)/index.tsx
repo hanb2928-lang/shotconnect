@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, lazy } from 'react';
+import { useRef, useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
   View,
   Text,
@@ -58,7 +58,10 @@ const MultiAngleCaptureGuide = lazy(() =>
   import('@/components/MultiAngleCaptureGuide').then((m) => ({ default: m.MultiAngleCaptureGuide })),
 );
 import { TriggerBanner } from '@/components/TriggerBanner';
-import { StudioPremiumAccordion, type StudioSliderValues } from '@/components/StudioPremiumPanel';
+import type { StudioSliderValues } from '@/components/StudioPremiumPanel';
+const StudioPremiumAccordion = lazy(() =>
+  import('@/components/StudioPremiumPanel').then((m) => ({ default: m.StudioPremiumAccordion })),
+);
 const PostCaptureWorkflow = lazy(() =>
   import('@/components/PostCaptureWorkflow').then((m) => ({ default: m.PostCaptureWorkflow })),
 );
@@ -1086,11 +1089,13 @@ function CameraScreenInner() {
           />
         </View>
 
-        <StudioPremiumAccordion
-          visible={contentTone === 'studio' && studioMode !== null}
-          mode={studioMode === 'ai-blend' ? 'ai-blend' : 'auto-3d'}
-          onValuesChange={(values) => setStudioSliders((prev) => ({ ...prev, ...values }))}
-        />
+        <Suspense fallback={null}>
+          <StudioPremiumAccordion
+            visible={contentTone === 'studio' && studioMode !== null}
+            mode={studioMode === 'ai-blend' ? 'ai-blend' : 'auto-3d'}
+            onValuesChange={(values) => setStudioSliders((prev) => ({ ...prev, ...values }))}
+          />
+        </Suspense>
 
         {contentTone === 'studio' && studioMode !== null && (
           <View style={styles.modeConfirmWrap}>

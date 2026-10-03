@@ -133,13 +133,13 @@ describe('useBootReady', () => {
     });
     expect(testRenderer.root.findByType('Text').props.children).toBe('false');
 
-    // Advance past the 5s hard timeout + 2s poll window.
+    // Advance past the 2.5s hard timeout + 1s poll window.
     // Advance in steps so the setInterval poll fires.
     await act(async () => {
-      jest.advanceTimersByTime(5100);
+      jest.advanceTimersByTime(2600);
     });
     await act(async () => {
-      jest.advanceTimersByTime(2100);
+      jest.advanceTimersByTime(1100);
     });
 
     expect(testRenderer.root.findByType('Text').props.children).toBe('true');

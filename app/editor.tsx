@@ -44,15 +44,38 @@ import {
   compressImage,
   compositeOnBackground,
 } from '@/lib/imageEdit';
-import { BackgroundPicker, type BackgroundStyle } from '@/components/BackgroundPicker';
-import { BgRemoveEditor } from '@/components/BgRemoveEditor';
-import { removeBackgroundOnDevice } from '@/lib/removeBgOnDevice';
+import type { BackgroundStyle } from '@/components/BackgroundPicker';
+const BackgroundPicker = lazy(() =>
+  import('@/components/BackgroundPicker').then((m) => ({ default: m.BackgroundPicker })),
+);
+const BgRemoveEditor = lazy(() =>
+  import('@/components/BgRemoveEditor').then((m) => ({ default: m.BgRemoveEditor })),
+);
 import { cleanBase64 } from '@/lib/base64';
-import { captureRef } from 'react-native-view-shot';
-import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system/legacy';
+let _removeBgOnDevice: typeof import('@/lib/removeBgOnDevice') | null = null;
+async function getRemoveBgOnDevice() {
+  if (!_removeBgOnDevice) _removeBgOnDevice = await import('@/lib/removeBgOnDevice');
+  return _removeBgOnDevice;
+}
+let _viewShot: typeof import('react-native-view-shot') | null = null;
+async function getViewShot() {
+  if (!_viewShot) _viewShot = await import('react-native-view-shot');
+  return _viewShot;
+}
+let _mediaLibrary: typeof import('expo-media-library') | null = null;
+async function getMediaLibrary() {
+  if (!_mediaLibrary) _mediaLibrary = await import('expo-media-library');
+  return _mediaLibrary;
+}
+let _fileSystem: typeof import('expo-file-system/legacy') | null = null;
+async function getFileSystem() {
+  if (!_fileSystem) _fileSystem = await import('expo-file-system/legacy');
+  return _fileSystem;
+}
 import type { Scan, CustomAffiliateLink } from '@/types/database';
 import { CachedImage } from '@/components/CachedImage';
+import { lazy, Suspense } from 'react';
+import { BootFallback } from '@/components/BootFallback';
 
 type EditMode = 'none' | 'text' | 'sticker';
 
@@ -126,6 +149,8 @@ async function saveImageToGallery(base64: string, mimeType: string, fileName: st
     return;
   }
 
+  const MediaLibrary = await getMediaLibrary();
+  const FileSystem = await getFileSystem();
   const permission = await MediaLibrary.requestPermissionsAsync();
   if (!permission.granted) throw new Error('사진 보관함 접근 권한이 필요합니다');
   const directory = FileSystem.cacheDirectory;
@@ -325,6 +350,7 @@ export default function EditorScreen() {
         dataUrl = `data:${detectedMime};base64,${base64}`;
       }
 
+      const { removeBackgroundOnDevice } = await getRemoveBgOnDevice();
       const result = await removeBackgroundOnDevice(dataUrl);
       if (!result.ok) throw new Error(result.error);
 
@@ -613,6 +639,7 @@ export default function EditorScreen() {
       const hasOverlays = textOverlays.length > 0 || stickers.length > 0;
 
       if (hasOverlays && imageWrapRef.current) {
+        const { captureRef } = await getViewShot();
         const capturedUri = await captureRef(imageWrapRef, {
           format: 'png',
           quality: 1,
@@ -971,22 +998,30 @@ export default function EditorScreen() {
         </TouchableOpacity>
       </View>
 
-      <BackgroundPicker
-        visible={bgPickerVisible}
-        onSelect={handleBgSelect}
-        onSkip={handleBgSkip}
-        processing={bgProcessing}
-      />
+      {bgPickerVisible && (
+        <Suspense fallback={<BootFallback />}>
+          <BackgroundPicker
+            visible={bgPickerVisible}
+            onSelect={handleBgSelect}
+            onSkip={handleBgSkip}
+            processing={bgProcessing}
+          />
+        </Suspense>
+      )}
 
-      <BgRemoveEditor
-        visible={bgEditorVisible}
-        imageDataUrl={bgEditorDataUrl}
-        initialMask={bgEditorMask}
-        imageWidth={imageSize.width || imageDisplayWidth}
-        imageHeight={imageSize.height || imageDisplayHeight}
-        onConfirm={handleBgEditorConfirm}
-        onCancel={handleBgEditorCancel}
-      />
+      {bgEditorVisible && (
+        <Suspense fallback={<BootFallback />}>
+          <BgRemoveEditor
+            visible={bgEditorVisible}
+            imageDataUrl={bgEditorDataUrl}
+            initialMask={bgEditorMask}
+            imageWidth={imageSize.width || imageDisplayWidth}
+            imageHeight={imageSize.height || imageDisplayHeight}
+            onConfirm={handleBgEditorConfirm}
+            onCancel={handleBgEditorCancel}
+          />
+        </Suspense>
+      )}
 
       {(textOverlays.length > 0 || stickers.length > 0) && editMode === 'none' && (
         <View style={styles.overlaySummary}>
