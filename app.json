@@ -56,7 +56,6 @@
       "expo-file-system",
       "expo-splash-screen",
       "expo-image-picker",
-      "expo-image",
       "expo-camera",
       "expo-video",
       "expo-media-library",
