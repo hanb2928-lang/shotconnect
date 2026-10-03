@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Platform } from 'react-native';
-import Animated, { useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, { useSharedValue, withRepeat, withSequence, withTiming, cancelAnimation } from 'react-native-reanimated';
 import { theme } from '@/lib/theme';
 import { Camera, RotateCcw, Zap, X, Image as ImageIcon, Sparkles, Check, ShieldAlert, Video, Square } from 'lucide-react-native';
 import { cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
@@ -419,6 +419,10 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       pulseScale.value = 1;
     }
   }, [autoSaving, pulseScale]);
+
+  useEffect(() => {
+    return () => { cancelAnimation(pulseScale); };
+  }, [pulseScale]);
 
   return (
     <View style={styles.container}>

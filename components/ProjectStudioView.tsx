@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -130,14 +130,17 @@ function IdleState({ onBack }: { onBack?: () => void }) {
 function UploadingState() {
   const shimmer = useSharedValue(0);
 
-  shimmer.value = withRepeat(
-    withSequence(
-      withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.sin) }),
-      withTiming(0, { duration: 1200, easing: Easing.inOut(Easing.sin) }),
-    ),
-    -1,
-    false,
-  );
+  useEffect(() => {
+    shimmer.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.sin) }),
+        withTiming(0, { duration: 1200, easing: Easing.inOut(Easing.sin) }),
+      ),
+      -1,
+      false,
+    );
+    return () => { cancelAnimation(shimmer); };
+  }, [shimmer]);
 
   const barStyle = useAnimatedStyle(() => ({
     opacity: 0.4 + shimmer.value * 0.6,

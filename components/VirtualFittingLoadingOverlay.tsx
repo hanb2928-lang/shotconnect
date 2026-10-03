@@ -240,7 +240,8 @@ function ActiveIndicator({ color }: { color: string }) {
       -1,
       false,
     );
-  }, []);
+    return () => { cancelAnimation(dotSV); };
+  }, [dotSV]);
   const dotStyle = useAnimatedStyle(() => ({
     opacity: dotSV.value,
     transform: [{ scale: interpolate(dotSV.value, [0, 1], [0.8, 1.2]) }],

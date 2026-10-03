@@ -7,6 +7,7 @@ import Animated, {
   withSequence,
   withRepeat,
   Easing,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import { Share2, Baby, ArrowRight, ExternalLink, Sparkles, Copy, Check } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -51,7 +52,13 @@ export function SocialShortFormShare({
   useEffect(() => {
     let mounted = true;
     getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {});
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+      cancelAnimation(expandAnim);
+      cancelAnimation(babyBounce);
+      cancelAnimation(sparkleRot);
+      cancelAnimation(introOpacity);
+    };
   }, []);
 
   const toggleExpand = useCallback(() => {

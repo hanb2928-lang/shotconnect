@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { CachedImage } from '@/components/CachedImage';
-import { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
+import { useSharedValue, useAnimatedStyle, withTiming, Easing, cancelAnimation } from 'react-native-reanimated';
 import { ShoppingBag, Send, Globe, Store, ExternalLink, TrendingUp, Link2, Copy, Check, Camera, Image as ImageIcon, Film, Sparkles, FileText, Hash, Type, Youtube, ChevronDown, Loader, Plus, X, Palette, Share2, ShieldCheck, TriangleAlert as AlertTriangle, ArrowRight, RefreshCw, Music2, Download, Video, Maximize2, Lock, Zap, Smile, Sun, Moon, Flame, Coffee } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -277,6 +277,13 @@ export default function AffiliateScreen() {
   const [stockVideoClip, setStockVideoClip] = useState<StockVideoClip | null>(null);
   const [videoEditPlan, setVideoEditPlan] = useState<EditPlan | null>(null);
   const renderProgress = useSharedValue(0);
+
+  useEffect(() => {
+    return () => {
+      cancelAnimation(videoPreviewProgress);
+      cancelAnimation(renderProgress);
+    };
+  }, []);
 
   const animatedProgressStyle = useAnimatedStyle(() => ({
     width: `${videoPreviewProgress.value * 100}%`,

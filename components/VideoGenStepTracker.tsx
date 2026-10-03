@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Easing } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -9,6 +9,7 @@ import Animated, {
   withDelay,
   cancelAnimation,
   interpolate,
+  Easing,
 } from 'react-native-reanimated';
 import { Check, Loader2 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -66,6 +67,10 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
       pulseSV.value = withTiming(0, { duration: 200 });
     }
   }, [activeIdx, progress?.phase, pulseSV]);
+
+  useEffect(() => {
+    return () => { cancelAnimation(pulseSV); };
+  }, [pulseSV]);
 
   const activePulseStyle = useAnimatedStyle(() => ({
     opacity: interpolate(pulseSV.value, [0, 1], [0, 0.6]),

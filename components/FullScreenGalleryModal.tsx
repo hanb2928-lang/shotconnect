@@ -15,6 +15,7 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   Easing,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import { X, ChevronLeft, ChevronRight, Download } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
@@ -95,7 +96,11 @@ export function FullScreenGalleryModal({
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      cancelAnimation(opacity);
+      cancelAnimation(slideProgress);
+    };
   }, []);
 
   const handleClose = useCallback(() => {

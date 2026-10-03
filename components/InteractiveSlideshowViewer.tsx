@@ -16,6 +16,7 @@ import Animated, {
   withTiming,
   Easing,
   runOnJS,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import {
   ChevronLeft,
@@ -73,7 +74,8 @@ export function InteractiveSlideshowViewer({
       duration: 300,
       easing: Easing.inOut(Easing.ease),
     });
-  }, [currentIdx, total]);
+    return () => { cancelAnimation(slideProgress); };
+  }, [currentIdx, total, slideProgress]);
 
   const goToSlide = useCallback((idx: number) => {
     if (idx < 0 || idx >= total) return;

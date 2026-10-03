@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Share, Platform, Linking, Mod
 import { CachedImage } from '@/components/CachedImage';
 import { Copy, Check, Clapperboard, Download, CloudUpload, Loader as Loader2, Instagram, MessageCircle, Globe, ClipboardCheck, ChevronDown, Share2, X, ExternalLink, Eye, ArrowLeft, Send } from 'lucide-react-native';
 import { useRef, useState, useCallback, useEffect } from 'react';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, withDelay, Easing } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, withDelay, Easing, cancelAnimation } from 'react-native-reanimated';
 import { theme } from '@/lib/theme';
 import { getShareDisclosureForPlatforms } from '@/lib/disclosure';
 import { smartRedirect } from '@/lib/smartRedirector';
@@ -44,7 +44,13 @@ export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName,
   useEffect(() => {
     let mounted = true;
     getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {});
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+      cancelAnimation(toastAnim);
+      cancelAnimation(accordionHeight);
+      cancelAnimation(accordionOpacity);
+      cancelAnimation(chevronRot);
+    };
   }, []);
 
   const toggleShareAccordion = useCallback(() => {

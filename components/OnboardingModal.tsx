@@ -17,6 +17,7 @@ import Animated, {
   withDelay,
   Easing,
   runOnJS,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import {
   Camera,
@@ -130,6 +131,11 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
     }
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      cancelAnimation(mountAnim);
+      cancelAnimation(contentOpacity);
+      cancelAnimation(contentTranslate);
+      cancelAnimation(progress);
+      cancelAnimation(demoProgressAnim);
     };
   }, [visible]);
 
