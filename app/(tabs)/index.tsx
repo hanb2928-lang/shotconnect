@@ -45,6 +45,7 @@ import { isLowEndDevice } from '@/lib/devicePerformance';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { getItem, setItem } from '@/lib/storage';
 const CreditPurchaseModal = lazy(() =>
   import('@/components/CreditPurchaseModal').then((m) => ({ default: m.CreditPurchaseModal })),
@@ -257,6 +258,16 @@ function CameraScreenInner() {
   const [stereoOverlayVisible, setStereoOverlayVisible] = useState(false);
 
   useBeforeUnloadGuard(processing || autoSaving || stereoOverlayVisible);
+
+  useEffect(() => {
+    const tag = 'camera-processing';
+    if (processing || autoSaving || stereoOverlayVisible) {
+      activateKeepAwakeAsync(tag).catch(() => {});
+    } else {
+      deactivateKeepAwake(tag).catch(() => {});
+    }
+    return () => { deactivateKeepAwake(tag).catch(() => {}); };
+  }, [processing, autoSaving, stereoOverlayVisible]);
   const [screenPhase, setScreenPhase] = useState<ScreenPhase>('mode_select');
   const [captureMode, setCaptureMode] = useState<CaptureMode>('single');
   const [contentTone, setContentTone] = useState<ContentTone>('raw');

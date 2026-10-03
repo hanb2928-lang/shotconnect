@@ -42,6 +42,7 @@ import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
 import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 import { getActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -105,6 +106,16 @@ export default function SynthesisScreen() {
   const mountedRef = useRef(true);
 
   useBeforeUnloadGuard(isGenerating || isExporting);
+
+  useEffect(() => {
+    const tag = 'synthesis-generating';
+    if (isGenerating || isExporting) {
+      activateKeepAwakeAsync(tag).catch(() => {});
+    } else {
+      deactivateKeepAwake(tag).catch(() => {});
+    }
+    return () => { deactivateKeepAwake(tag).catch(() => {}); };
+  }, [isGenerating, isExporting]);
 
   useEffect(() => {
     return () => { mountedRef.current = false; };

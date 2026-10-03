@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, ViewStyle, AppState, type AppStateStatus } from 'react-native';
 import { CameraView } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
@@ -14,6 +14,7 @@ import { theme } from '@/lib/theme';
 import { compressCaptureFrameToBlob, compressImageToBase64 } from '@/lib/imageEdit';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
 import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery';
+import * as FileSystem from 'expo-file-system/legacy';
 
 export interface InlineViewfinderHandle {
   capture: () => Promise<{ base64: string; mimeType: string; blob?: Blob } | null>;
@@ -42,11 +43,12 @@ export const InlineCameraViewfinder = forwardRef<
   const mountedRef = useRef(true);
   const streamGenRef = useRef(0);
   const captureLockRef = useRef(false);
-  const captureReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureInProgressRef = useRef(false);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
+  const [cameraKey, setCameraKey] = useState(0);
 
   const [permission, requestPermission] = useCameraPermissionsSafe();
 
@@ -131,6 +133,25 @@ export const InlineCameraViewfinder = forwardRef<
     stopStream,
   });
 
+  // On native: unmount CameraView when app goes to background so the
+  // OS can reclaim the camera hardware. Remount it when returning to
+  // active state. This prevents the permanent camera lock that blocks
+  // other apps and freezes the viewfinder.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!isActive) return;
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        setCameraReady(false);
+        setCameraKey((k) => k + 1);
+      } else if (nextState === 'active') {
+        setCameraKey((k) => k + 1);
+      }
+    };
+    const sub = AppState.addEventListener('change', handleAppState);
+    return () => sub.remove();
+  }, [isActive]);
+
   useEffect(() => {
     mountedRef.current = true;
     if (Platform.OS !== 'web') {
@@ -159,6 +180,8 @@ export const InlineCameraViewfinder = forwardRef<
 
   const captureWeb = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
     if (Platform.OS !== 'web' || !videoRef.current || !cameraReady) return null;
+    if (captureInProgressRef.current) return null;
+    captureInProgressRef.current = true;
     try {
       const video = videoRef.current;
       const rawW = video.videoWidth || 1080;
@@ -182,20 +205,47 @@ export const InlineCameraViewfinder = forwardRef<
     } catch (err) {
       console.error('[InlineCameraViewfinder] captureWeb failed:', err);
       return null;
+    } finally {
+      captureInProgressRef.current = false;
+      captureLockRef.current = false;
     }
   }, [cameraReady, facing]);
 
   const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
     if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady) return null;
+    if (captureInProgressRef.current) return null;
+    captureInProgressRef.current = true;
+    setCameraReady(false);
+    let capturedUri: string | null = null;
     try {
       const result = await nativeCameraRef.current.takePictureAsync({
-        quality: 0.7,
+        quality: 0.6,
       });
-      if (!result?.uri) return null;
-      return await compressImageToBase64(result.uri, 1080, 0.7);
+      if (!result?.uri) {
+        setCameraKey((k) => k + 1);
+        return null;
+      }
+      capturedUri = result.uri;
+      const compressed = await compressImageToBase64(capturedUri, 1080, 0.6);
+      // Delete the original full-res capture temp file to free native heap.
+      // compressImageToBase64 only cleans up its own manipulated copy;
+      // the source file from takePictureAsync must be explicitly removed.
+      FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+      capturedUri = null;
+      // Force a CameraView remount to reset the capture session.
+      setCameraKey((k) => k + 1);
+      return compressed;
     } catch (err) {
       console.error('[InlineCameraViewfinder] native capture failed:', err);
+      // Clean up the temp file even on failure to prevent native heap accumulation
+      if (capturedUri) {
+        FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+      }
+      setCameraKey((k) => k + 1);
       return null;
+    } finally {
+      captureInProgressRef.current = false;
+      captureLockRef.current = false;
     }
   }, [cameraReady]);
 
@@ -212,33 +262,11 @@ export const InlineCameraViewfinder = forwardRef<
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
   };
 
-  const releaseCaptureLock = useCallback(() => {
-    if (captureReleaseTimerRef.current) {
-      clearTimeout(captureReleaseTimerRef.current);
-      captureReleaseTimerRef.current = null;
-    }
-    captureLockRef.current = false;
-  }, []);
-
   const handleCapturePress = useCallback(() => {
-    if (captureLockRef.current || processing) return;
+    if (captureLockRef.current || captureInProgressRef.current || processing) return;
     captureLockRef.current = true;
-    captureReleaseTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) releaseCaptureLock();
-    }, 1200);
     onCapture?.();
-  }, [onCapture, processing, releaseCaptureLock]);
-
-  useEffect(() => {
-    if (!processing && captureLockRef.current) {
-      if (captureReleaseTimerRef.current) clearTimeout(captureReleaseTimerRef.current);
-      captureReleaseTimerRef.current = setTimeout(() => {
-        if (mountedRef.current) releaseCaptureLock();
-      }, 500);
-    }
-  }, [processing, releaseCaptureLock]);
-
-  useEffect(() => () => releaseCaptureLock(), [releaseCaptureLock]);
+  }, [onCapture, processing]);
 
   if (Platform.OS === 'web') {
     return (
@@ -365,6 +393,7 @@ export const InlineCameraViewfinder = forwardRef<
       <View style={styles.viewfinder}>
         {isActive && (
           <CameraView
+            key={cameraKey}
             ref={nativeCameraRef}
             style={StyleSheet.absoluteFillObject}
             facing={facing === 'environment' ? 'back' : 'front'}
