@@ -42,6 +42,7 @@ import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
 import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
+import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
 
@@ -534,6 +535,12 @@ export default function SynthesisScreen() {
           </View>
         )}
       </ScrollView>
+
+      <ProcessingBarrier
+        visible={isGenerating || isExporting}
+        label={isExporting ? '내보내는 중...' : 'AI 생성 중...'}
+        sublabel={videoProgress?.message ?? '완료될 때까지 화면이 잠겨 있어요'}
+      />
     </View>
   );
 }

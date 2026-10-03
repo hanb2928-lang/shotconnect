@@ -74,6 +74,7 @@ async function getStereoMod() {
 }
 import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
 import { SafeLazyLoad } from '@/components/ErrorBoundary';
+import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -1572,6 +1573,12 @@ function CameraScreenInner() {
           progress={stereoProgress}
           onDismiss={() => setStereoOverlayVisible(false)}
         />
+
+        <ProcessingBarrier
+          visible={processing && !autoSaving && !stereoOverlayVisible}
+          label="사진 분석 중..."
+          sublabel="완료될 때까지 화면이 잠겨 있어요"
+        />
       </View>
     );
   }
@@ -1730,6 +1737,12 @@ function CameraScreenInner() {
         visible={stereoOverlayVisible}
         progress={stereoProgress}
         onDismiss={() => setStereoOverlayVisible(false)}
+      />
+
+      <ProcessingBarrier
+        visible={processing && !autoSaving && !stereoOverlayVisible}
+        label="사진 분석 중..."
+        sublabel="완료될 때까지 화면이 잠겨 있어요"
       />
     </View>
   );

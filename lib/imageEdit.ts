@@ -9,7 +9,7 @@ import { withFileLock } from '@/lib/fileLock';
 import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
-import { analyzeAndDownscaleImage, cleanupSmartResizeTemp } from '@/lib/smartResize';
+import { analyzeAndDownscaleImage } from '@/lib/smartResize';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);

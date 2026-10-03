@@ -140,6 +140,7 @@ import { HumanTtsProfileCard } from '@/components/HumanTtsProfileCard';
 import { ViralFormulaCard } from '@/components/ViralFormulaCard';
 import { AutoHookSubtitleCard } from '@/components/AutoHookSubtitleCard';
 import { VirtualFittingLoadingOverlay } from '@/components/VirtualFittingLoadingOverlay';
+import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 import { useWebPush } from '@/hooks/useWebPush';
 import { DirectShareBridge } from '@/components/DirectShareBridge';
 import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
@@ -4709,6 +4710,12 @@ export default function ResultScreen() {
       />
 
       <VirtualFittingLoadingOverlay visible={fittingOverlayVisible} />
+
+      <ProcessingBarrier
+        visible={isRegenerating || isGeneratingImage || (analysisStatus === 'processing')}
+        label={isRegenerating ? '카피 재생성 중...' : isGeneratingImage ? 'AI 이미지 생성 중...' : '제품 분석 중...'}
+        sublabel="완료될 때까지 화면이 잠겨 있어요"
+      />
 
       <Modal visible={pushPromptVisible} transparent animationType="fade" onRequestClose={() => setPushPromptVisible(false)}>
         <View style={styles.pushPromptOverlay}>
