@@ -655,7 +655,7 @@ function CameraScreenInner() {
     }
   }, [processing, autoSaving]);
 
-  const handlePickImage = async () => {
+  const handlePickImage = useCallback(async () => {
     if (processingRef.current || processing || autoSaving || autoSavingRef.current || stereoOverlayRef.current || isPipelineLocked()) return;
     processingRef.current = true;
     setProcessing(true);
@@ -733,7 +733,7 @@ function CameraScreenInner() {
       processingRef.current = false;
       setProcessing(false);
     }
-  };
+  }, [processing, autoSaving]);
 
   const handleMultiAngleComplete = async (shots: AngleShot[]) => {
     if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;

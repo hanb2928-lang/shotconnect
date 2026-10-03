@@ -316,12 +316,14 @@ export default function SynthesisScreen() {
           const row = data as { status: string; video_url: string | null; error_message: string | null };
           if (row.status === 'SUCCESS' && row.video_url) {
             clearActiveVideoJob();
+            jobIdRef.current = null;
             setJobId(null);
             setIsGenerating(false);
             setResultVideoUrl(row.video_url);
             setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
           } else if (row.status === 'FAILED') {
             clearActiveVideoJob();
+            jobIdRef.current = null;
             setJobId(null);
             setIsGenerating(false);
             setVideoProgress(null);
@@ -337,10 +339,11 @@ export default function SynthesisScreen() {
   }, [jobId]);
 
   const generateLockRef = useRef(false);
+  const jobIdRef = useRef<string | null>(null);
   const handleGenerate = useCallback(async () => {
     if (generateLockRef.current) return;
     generateLockRef.current = true;
-    if (isGenerating) { generateLockRef.current = false; return; }
+    if (isGenerating || jobIdRef.current) { generateLockRef.current = false; return; }
     if (productImages.length < 3) {
       setError('제품 사진을 최소 3컷 등록해주세요.');
       generateLockRef.current = false;
@@ -422,10 +425,12 @@ export default function SynthesisScreen() {
         draft: true,
       });
       if (!mountedRef.current) return;
+      jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
       setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (!mountedRef.current) return;
+      jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress(null);
       setError(err instanceof Error ? err.message : 'AI 영상 생성 요청에 실패했습니다.');
@@ -438,6 +443,7 @@ export default function SynthesisScreen() {
     scanId: scanIdRef.current,
     onCompleted: (videoUrl) => {
       if (!mountedRef.current) return;
+      jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress((prev) => prev ? { ...prev, phase: 'completed', progress: 1.0, message: '영상 생성 완료' } : null);
       if (outputMode === 'image') {
@@ -449,6 +455,7 @@ export default function SynthesisScreen() {
     },
     onError: (errMsg) => {
       if (!mountedRef.current) return;
+      jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress((prev) => prev ? { ...prev, phase: 'error', progress: 0, message: errMsg } : null);
       setError(errMsg);
@@ -477,6 +484,7 @@ export default function SynthesisScreen() {
     }, 1000);
     const timeout = setTimeout(() => {
       if (!mountedRef.current) return;
+      jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress(null);
       setError('영상 생성 시간이 초과되었습니다. 다시 시도해주세요.');
