@@ -34,6 +34,8 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 
 const UPLOAD_TIMEOUT_MS = 15_000;
 const COMPRESS_TIMEOUT_MS = 20_000;
+const UPLOAD_RETRY_MAX = 3;
+const UPLOAD_RETRY_BASE_MS = 1000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -53,6 +55,33 @@ function withUploadTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promis
   });
   const base = signal ? raceWithAbort(promise, signal) : promise;
   return Promise.race([base, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Retry an upload with exponential backoff. Each image in a multi-angle
+ * chain uploads independently — a single timeout on a flaky network should
+ * not collapse the entire analysis pipeline.
+ */
+async function uploadWithRetry(
+  b64: string,
+  mimeType: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < UPLOAD_RETRY_MAX; attempt++) {
+    if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+    try {
+      return await uploadImage(b64, mimeType, signal);
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
+      if (attempt < UPLOAD_RETRY_MAX - 1) {
+        const delayMs = UPLOAD_RETRY_BASE_MS * Math.pow(2, attempt);
+        await new Promise<void>((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw lastError;
 }
 
 export async function uploadImage(
@@ -284,7 +313,7 @@ export async function analyzeMultiShot(
     const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
     const b64 = cleanBase64(compressed.dataUrl);
     imageHashes.push(hashObject({ b64 }).slice(0, 16));
-    const url = await uploadImage(b64, compressed.mimeType);
+    const url = await uploadWithRetry(b64, compressed.mimeType);
     imageUrls.push(url);
   }
 
@@ -755,7 +784,7 @@ export async function analyzeMultiShotQueued(
     const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
     const b64 = cleanBase64(compressed.dataUrl);
     imageHashes.push(hashObject({ b64 }).slice(0, 16));
-    const url = await uploadImage(b64, compressed.mimeType, signal);
+    const url = await uploadWithRetry(b64, compressed.mimeType, signal);
     imageUrls.push(url);
   }
 
