@@ -376,6 +376,7 @@ export async function sweepL2StaleEntries(maxAgeMs: number = L2_MAX_AGE_MS): Pro
 
 export function installMediaCacheLifecycleHook(): void {
   if (lifecycleHookInstalled || Platform.OS !== 'web') return;
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
   lifecycleHookInstalled = true;
 
   // Run a stale entry sweep on startup — non-blocking, best-effort.
