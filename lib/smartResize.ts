@@ -59,6 +59,52 @@ async function getImageDimensions(uri: string): Promise<{ width: number; height:
   return getImageSize(uri);
 }
 
+const BUSY_ERROR_PATTERNS = ['EBUSY', 'Resource busy', 'file is in use', 'already in use', 'EPERM', 'EACCES'];
+const SETTLE_MAX_ATTEMPTS = 4;
+const SETTLE_BASE_DELAY_MS = 80;
+
+function isBusyError(error: unknown): boolean {
+  const msg = String(error?.toString?.() ?? error ?? '');
+  return BUSY_ERROR_PATTERNS.some((p) => msg.includes(p));
+}
+
+async function settleDelay(attempt: number): Promise<void> {
+  const ms = SETTLE_BASE_DELAY_MS * Math.pow(2, attempt);
+  await new Promise<void>((r) => setTimeout(r, ms));
+}
+
+/**
+ * Retry a native file operation that may transiently fail with EBUSY/EPERM
+ * when the OS file channel handle is still settling after a copyAsync.
+ */
+export async function withFileSettle<T>(
+  label: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < SETTLE_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isBusyError(error) || attempt === SETTLE_MAX_ATTEMPTS - 1) throw error;
+      addBreadcrumb('file-settle', `${label} busy, retrying (${attempt + 1}/${SETTLE_MAX_ATTEMPTS})`, 'warning');
+      await settleDelay(attempt);
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Yield to the native event loop after a copyAsync so the OS file channel
+ * handle can fully flush before the next read/manipulate/delete hits it.
+ */
+export async function waitForFileChannelFlush(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  await new Promise<void>((r) => setTimeout(r, 0));
+  await new Promise<void>((r) => setTimeout(r, 0));
+}
+
 export async function analyzeAndDownscaleImage(uri: string): Promise<ImageAnalysisResult> {
   const limits = getDeviceMediaLimits();
   const { width: origW, height: origH } = await getImageDimensions(uri);
@@ -81,10 +127,12 @@ export async function analyzeAndDownscaleImage(uri: string): Promise<ImageAnalys
     : [{ resize: { height: limits.targetImageDimension } }];
 
   try {
-    const manipulated = await ImageManipulator.manipulateAsync(uri, actions, {
-      compress: 0.72,
-      format: ImageManipulator.SaveFormat.JPEG,
-    });
+    const manipulated = await withFileSettle('smartResize-manipulate', () =>
+      ImageManipulator.manipulateAsync(uri, actions, {
+        compress: 0.72,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }),
+    );
     registerTempFile(manipulated.uri, 'smartResize-image');
 
     const { width: newW, height: newH } = await getImageDimensions(manipulated.uri);

@@ -9,7 +9,7 @@ import { withFileLock } from '@/lib/fileLock';
 import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 import { registerTempFile, safeDeleteTempFile, unpinTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
-import { analyzeAndDownscaleImage } from '@/lib/smartResize';
+import { analyzeAndDownscaleImage, withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -325,12 +325,16 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
         timeoutId = setTimeout(() => reject(new Error('파일을 불러오는 시간이 초과되었습니다.')), NATIVE_URI_COPY_TIMEOUT_MS);
       }),
     ]);
+    // Yield to the native event loop so the OS file channel handle can
+    // fully flush before subsequent read/manipulate/delete operations
+    // hit the freshly-copied file (prevents EBUSY races on Android/iOS).
+    await waitForFileChannelFlush();
     // Register the copied file immediately so tempFileManager tracks it even
     // if the app is backgrounded or killed before we finish processing.
     registerTempFile(target, 'makeReadableNativeUri', { pin: true });
     // Strict post-copy validation: reject zombie/corrupt files before they
-    // enter the upload pipeline.
-    await validateCopiedFile(target);
+    // enter the upload pipeline. Retry on transient EBUSY.
+    await withFileSettle('validateCopiedFile', () => validateCopiedFile(target));
     // Smart resize: if the image exceeds device-safe pixel limits, downscale
     // immediately to prevent OOM during later base64 encoding or canvas ops.
     const resized = await analyzeAndDownscaleImage(target);
@@ -338,7 +342,9 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
       // The original cached copy is no longer needed; the downscaled temp
       // file becomes the active source.
       unpinTempFile(target);
-      await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
+      await withFileSettle('deleteOriginalCopy', () =>
+        FileSystem.deleteAsync(target, { idempotent: true }),
+      ).catch(() => {});
       return { uri: resized.uri, temporary: true };
     }
     unpinTempFile(target);
