@@ -163,6 +163,7 @@ async function runFittingPipeline(
 const CAPTURE_TIMEOUT_MS = 15000;
 const PICK_TIMEOUT_MS = 20000;
 const ANALYSIS_TIMEOUT_MS = 45000;
+const VIDEO_FRAME_TIMEOUT_MS = 120000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string, controller?: AbortController): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -534,7 +535,7 @@ function CameraScreenInner() {
         if (!videoUri) return;
         const frame = await withTimeout(
           extractVideoFrameBase64(videoUri, 1080, 0.7),
-          PICK_TIMEOUT_MS,
+          VIDEO_FRAME_TIMEOUT_MS,
           '동영상 프레임 추출',
         );
         if (!isMountedRef.current || controller.signal.aborted) return;

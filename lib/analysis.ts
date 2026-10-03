@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import type { AnalysisResult } from '@/types/database';
-import { supabase, ANALYSIS_FUNCTION_URL, TTS_FUNCTION_URL, supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
+import { supabase, ANALYSIS_FUNCTION_URL, TTS_FUNCTION_URL, supabaseAnonKey, supabaseUrl, EXTRACT_VIDEO_FRAME_URL } from '@/lib/supabase';
 import { safeFetch } from '@/lib/apiClient';
 import { generateAffiliateLinks } from '@/lib/affiliate';
 import { getUserSettings } from '@/lib/settings';
@@ -134,6 +134,79 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   const base64 = uint8ArrayToBase64(bytes);
   const mimeType = blob.type || 'image/jpeg';
   return `data:${mimeType};base64,${base64}`;
+}
+
+const VIDEO_UPLOAD_TIMEOUT_MS = 60_000;
+
+export async function uploadVideoBlob(
+  uri: string,
+  mimeType: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const ext = mimeType === 'video/quicktime' ? 'mov' : 'mp4';
+  const fileName = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+  let body: Uint8Array;
+  if (Platform.OS === 'web') {
+    const resp = await fetch(uri);
+    const buf = await resp.arrayBuffer();
+    body = new Uint8Array(buf);
+  } else {
+    const FileSystem = await import('expo-file-system/legacy');
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    body = base64ToUint8Array(base64);
+  }
+
+  const uploadPromise = supabase.storage
+    .from('scans')
+    .upload(fileName, body, { contentType: mimeType, cacheControl: '360000' });
+
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
+  });
+  const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
+  const { error } = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
+
+  if (error) throw new Error(`동영상 업로드 실패: ${error.message}`);
+
+  const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
+  return urlData.publicUrl;
+}
+
+export async function extractVideoFrameFromServer(
+  videoUrl: string,
+  maxDimension: number,
+  quality: number,
+  signal?: AbortSignal,
+): Promise<{ base64: string; mimeType: string; frameUrl?: string }> {
+  const response = await safeFetch(EXTRACT_VIDEO_FRAME_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${supabaseAnonKey}`,
+    },
+    body: JSON.stringify({ videoUrl, maxDimension, quality }),
+    timeoutMs: 90000,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({ error: '프레임 추출 서버 오류' }));
+    throw new Error(errData.error || `프레임 추출 실패 (${response.status})`);
+  }
+
+  const data = await response.json();
+  if (data?.error) throw new Error(data.error);
+  if (!data?.base64 && !data?.frameUrl) throw new Error('프레임 추출 결과가 없습니다.');
+
+  return {
+    base64: data.base64 || '',
+    mimeType: 'image/jpeg',
+    ...(data.frameUrl ? { frameUrl: data.frameUrl } : {}),
+  };
 }
 
 export async function analyzeImage(

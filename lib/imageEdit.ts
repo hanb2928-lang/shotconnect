@@ -591,6 +591,29 @@ export async function extractVideoFrameBase64(
     return { base64: cleanBase64(dataUrl), mimeType: 'image/jpeg' };
   }
 
+  if (Platform.OS !== 'web') {
+    const { uploadVideoBlob, extractVideoFrameFromServer } = await import('@/lib/analysis');
+    const source = await makeReadableNativeUri(videoUri);
+    try {
+      const videoUrl = await uploadVideoBlob(source.uri, 'video/mp4');
+      const result = await extractVideoFrameFromServer(videoUrl, maxDimension, quality);
+      if (result.frameUrl) {
+        const FileSystem2 = await import('expo-file-system/legacy');
+        const localPath = `${FileSystem2.cacheDirectory}server-frame-${Date.now()}.jpg`;
+        await FileSystem2.downloadAsync(result.frameUrl, localPath);
+        registerTempFile(localPath, 'extractVideoFrameBase64');
+        const base64 = await FileSystem2.readAsStringAsync(localPath, {
+          encoding: FileSystem2.EncodingType.Base64,
+        });
+        safeDeleteTempFile(localPath).catch(() => {});
+        return { base64, mimeType: 'image/jpeg' };
+      }
+      return { base64: result.base64, mimeType: result.mimeType };
+    } finally {
+      if (source.temporary) await FileSystem.deleteAsync(source.uri, { idempotent: true }).catch(() => {});
+    }
+  }
+
   throw new Error('이 플랫폼에서는 동영상 프레임 추출을 지원하지 않습니다');
 }
 

@@ -69,3 +69,4 @@ export const TREND_MATCH_URL = `${supabaseUrl}/functions/v1/trend-match`;
 export const PEXELS_VIDEO_SEARCH_URL = `${supabaseUrl}/functions/v1/search-pexels-videos`;
 export const VIDEO_EDIT_PLAN_URL = `${supabaseUrl}/functions/v1/generate-video-edit-plan`;
 export const GENERATE_IMAGE_URL = `${supabaseUrl}/functions/v1/generate-image`;
+export const EXTRACT_VIDEO_FRAME_URL = `${supabaseUrl}/functions/v1/extract-video-frame`;

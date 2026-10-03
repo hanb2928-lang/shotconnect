@@ -94,6 +94,9 @@ verify_jwt = false
 [functions.generate-video]
 verify_jwt = false
 
+[functions.extract-video-frame]
+verify_jwt = false
+
 [functions.send-push]
 verify_jwt = false
 
