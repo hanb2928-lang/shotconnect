@@ -47,25 +47,15 @@ interface MultiAngleCaptureGuideProps {
   visible: boolean;
   onClose: () => void;
   onComplete: (shots: AngleShot[]) => void;
-  /** Pick from gallery instead of camera */
   onPickImage?: (angleId: string) => Promise<{ base64: string; mimeType: string } | null>;
-  /** Capture from camera */
   onCaptureImage?: (angleId: string) => Promise<{ base64: string; mimeType: string } | null>;
-  /** Custom angle guides (defaults to 5-angle stereo cut) */
   guides?: AngleGuide[];
-  /** Minimum shots required before early completion is allowed (default: guides.length) */
   minShots?: number;
-  /** Custom header title */
   headerTitle?: string;
-  /** Custom intro title */
   introTitle?: string;
-  /** Custom intro description */
   introDesc?: string;
-  /** Accent color for active elements (defaults to primary) */
   accentColor?: string;
-  /** Label for the complete button when all shots done */
   completeLabelAll?: string;
-  /** Label for the early-complete button when minShots met but not all done */
   completeLabelEarly?: string;
 }
 
@@ -91,10 +81,11 @@ export function MultiAngleCaptureGuide({
   const [currentAngle, setCurrentAngle] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
   const pickLockRef = useRef(false);
   const isCapturingRef = useRef(false);
   const shotsRef = useRef<Record<string, AngleShot>>({});
-  const viewfinderRefs = useRef<Record<string, InlineViewfinderHandle | null>>({});
+  const viewfinderRef = useRef<InlineViewfinderHandle | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -108,7 +99,6 @@ export function MultiAngleCaptureGuide({
   const effectiveIntroDesc = introDesc ??
     '정면, 좌측, 우측, 후면, 상부를 순서대로 촬영하면 AI가 제품의 입체적 특성을 정밀하게 복원합니다. 5장의 사진으로 왜곡 없는 역동적인 숏폼을 생성합니다.';
 
-  // Keep ref in sync with state so async callbacks always see the latest shots
   useEffect(() => {
     shotsRef.current = shots;
   }, [shots]);
@@ -116,6 +106,9 @@ export function MultiAngleCaptureGuide({
   const completedCount = Object.keys(shots).length;
   const allDone = completedCount >= guides.length;
   const minMet = completedCount >= effectiveMinShots;
+
+  const currentGuide = guides[currentAngle];
+  const currentShot = currentGuide ? shots[currentGuide.id] : undefined;
 
   const handleAddShot = useCallback(
     async (angleId: string, base64: string, mimeType: string) => {
@@ -137,14 +130,12 @@ export function MultiAngleCaptureGuide({
         return next;
       });
 
-      // Auto-advance to next incomplete angle
       const nextIdx = guides.findIndex((g, i) => i > guideIndex && !shotsRef.current[g.id]);
       if (nextIdx !== -1) {
         setCurrentAngle(nextIdx);
       } else if (guideIndex < guides.length - 1) {
         setCurrentAngle(guideIndex + 1);
       }
-
     },
     [guides],
   );
@@ -167,10 +158,11 @@ export function MultiAngleCaptureGuide({
       } catch (err) {
         if (mountedRef.current) setCaptureError('갤러리에서 이미지를 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.');
         console.error('[MultiAngleGuide] gallery pick failed:', err);
+      } finally {
+        await nativeHeapCooldownGuard();
+        if (mountedRef.current) setProcessing(false);
+        setTimeout(() => { pickLockRef.current = false; }, 300);
       }
-      await nativeHeapCooldownGuard();
-      if (mountedRef.current) setProcessing(false);
-      setTimeout(() => { pickLockRef.current = false; }, 300);
     },
     [onPickImage, handleAddShot],
   );
@@ -183,7 +175,7 @@ export function MultiAngleCaptureGuide({
       setProcessing(true);
       setCaptureError(null);
       try {
-        const viewfinder = viewfinderRefs.current[angleId];
+        const viewfinder = viewfinderRef.current;
         let result: { base64: string; mimeType: string } | null = null;
         if (viewfinder?.isReady()) {
           result = await viewfinder.capture();
@@ -217,10 +209,11 @@ export function MultiAngleCaptureGuide({
       delete next[angleId];
       return next;
     });
-  }, []);
+    const idx = guides.findIndex((g) => g.id === angleId);
+    if (idx !== -1) setCurrentAngle(idx);
+  }, [guides]);
 
   const handleComplete = useCallback(() => {
-    // Use ref to avoid stale closure — always read the latest shots
     const currentShots = shotsRef.current;
     const ordered = guides.map((g, idx) => {
       const shot = currentShots[g.id];
@@ -240,8 +233,11 @@ export function MultiAngleCaptureGuide({
     shotsRef.current = {};
     setCurrentAngle(0);
     setCaptureError(null);
+    setCameraReady(false);
     onClose();
   }, [onClose]);
+
+  const canCapture = cameraReady && !processing && !isCapturingRef.current && !pickLockRef.current;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -280,81 +276,104 @@ export function MultiAngleCaptureGuide({
               <Text style={styles.introDesc}>{effectiveIntroDesc}</Text>
             </View>
 
-            {/* Angle cards */}
+            {/* Shared camera viewfinder for the current angle */}
+            {currentGuide && !currentShot && (
+              <View style={styles.activeCaptureCard}>
+                <View style={styles.angleHeader}>
+                  <Text style={styles.angleEmoji}>{currentGuide.emoji}</Text>
+                  <View style={styles.angleHeaderText}>
+                    <Text style={styles.angleLabel}>STEP {currentAngle + 1} · {currentGuide.label}</Text>
+                    <Text style={styles.angleHint}>{currentGuide.hint}</Text>
+                  </View>
+                </View>
+                <InlineCameraViewfinder
+                  ref={(r) => { viewfinderRef.current = r; }}
+                  isActive={visible}
+                  accentColor={effectiveAccent}
+                  onPickFromGallery={() => handlePickFromGallery(currentGuide.id)}
+                  onCapture={() => handleCaptureFromCamera(currentGuide.id)}
+                  processing={processing}
+                  onReadyChange={setCameraReady}
+                />
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: effectiveAccentBg }, !canCapture && styles.actionBtnDisabled]}
+                  onPress={() => {
+                    if (!canCapture) return;
+                    handleCaptureFromCamera(currentGuide.id);
+                  }}
+                  disabled={!canCapture}
+                  activeOpacity={0.6}
+                  hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+                >
+                  {processing ? (
+                    <>
+                      <Loader size={16} color="#fff" strokeWidth={2} />
+                      <Text style={styles.actionBtnText}>촬영 중...</Text>
+                    </>
+                  ) : !cameraReady ? (
+                    <>
+                      <Loader size={16} color="#fff" strokeWidth={2} />
+                      <Text style={styles.actionBtnText}>카메라 준비 중...</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Camera size={18} color="#fff" strokeWidth={2} />
+                      <Text style={styles.actionBtnText}>촬영하기</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Completed angle thumbnails */}
             {guides.map((guide, idx) => {
               const shot = shots[guide.id];
-              const isActive = idx === currentAngle;
+              if (!shot?.base64) return null;
               return (
-                <View key={guide.id} style={[styles.angleCard, isActive && { ...styles.angleCardActive, borderColor: effectiveAccent }]}>
+                <View key={guide.id} style={[styles.angleCard, idx === currentAngle && { ...styles.angleCardActive, borderColor: effectiveAccent }]}>
                   <View style={styles.angleHeader}>
                     <Text style={styles.angleEmoji}>{guide.emoji}</Text>
                     <View style={styles.angleHeaderText}>
                       <Text style={styles.angleLabel}>STEP {idx + 1} · {guide.label}</Text>
                       <Text style={styles.angleHint}>{guide.hint}</Text>
                     </View>
-                    {shot && (
-                      <View style={styles.doneBadge}>
-                        <Check size={12} color="#fff" strokeWidth={2.5} />
-                      </View>
-                    )}
-                  </View>
-
-                  {shot?.base64 ? (
-                    <View style={styles.shotPreview}>
-                      <RNImage source={{ uri: `data:${shot.mimeType};base64,${shot.base64}` }} style={styles.shotImage} resizeMode="cover" />
-                      <View style={styles.shotIndexBadge}>
-                        <Text style={styles.shotIndexText}>{String(idx + 1).padStart(2, '0')}</Text>
-                      </View>
-                      <View style={styles.shotActions}>
-                        <TouchableOpacity
-                          style={styles.retakeBtn}
-                          onPress={() => {
-                            handleRetake(guide.id);
-                            setCurrentAngle(idx);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <RotateCcw size={13} color={theme.colors.dark.text} strokeWidth={2} />
-                          <Text style={styles.retakeText}>다시 촬영</Text>
-                        </TouchableOpacity>
-                      </View>
+                    <View style={styles.doneBadge}>
+                      <Check size={12} color="#fff" strokeWidth={2.5} />
                     </View>
-                  ) : (
-                    <View style={styles.shotPlaceholder}>
-                      <InlineCameraViewfinder
-                        ref={(r) => { viewfinderRefs.current[guide.id] = r; }}
-                        isActive={isActive}
-                        accentColor={effectiveAccent}
-                        onPickFromGallery={() => handlePickFromGallery(guide.id)}
-                        onCapture={() => handleCaptureFromCamera(guide.id)}
-                        processing={processing}
-                      />
-                      {/* Capture button */}
+                  </View>
+                  <View style={styles.shotPreview}>
+                    <RNImage source={{ uri: `data:${shot.mimeType};base64,${shot.base64}` }} style={styles.shotImage} resizeMode="cover" />
+                    <View style={styles.shotIndexBadge}>
+                      <Text style={styles.shotIndexText}>{String(idx + 1).padStart(2, '0')}</Text>
+                    </View>
+                    <View style={styles.shotActions}>
                       <TouchableOpacity
-                        style={[styles.actionBtn, { backgroundColor: effectiveAccentBg }, !onCaptureImage && styles.actionBtnHidden]}
-                        onPress={() => {
-                          if (pickLockRef.current || processing || isCapturingRef.current) return;
-                          setCurrentAngle(idx);
-                          handleCaptureFromCamera(guide.id);
-                        }}
-                        disabled={processing}
-                        activeOpacity={0.6}
-                        hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+                        style={styles.retakeBtn}
+                        onPress={() => handleRetake(guide.id)}
+                        activeOpacity={0.7}
                       >
-                        {processing ? (
-                          <>
-                            <Loader size={16} color="#fff" strokeWidth={2} />
-                            <Text style={styles.actionBtnText}>촬영 중...</Text>
-                          </>
-                        ) : (
-                          <>
-                            <Camera size={18} color="#fff" strokeWidth={2} />
-                            <Text style={styles.actionBtnText}>촬영하기</Text>
-                          </>
-                        )}
+                        <RotateCcw size={13} color={theme.colors.dark.text} strokeWidth={2} />
+                        <Text style={styles.retakeText}>다시 촬영</Text>
                       </TouchableOpacity>
                     </View>
-                  )}
+                  </View>
+                </View>
+              );
+            })}
+
+            {/* Pending angle placeholders */}
+            {guides.map((guide, idx) => {
+              if (shots[guide.id]) return null;
+              if (idx === currentAngle) return null;
+              return (
+                <View key={guide.id} style={styles.angleCard}>
+                  <View style={styles.angleHeader}>
+                    <Text style={styles.angleEmoji}>{guide.emoji}</Text>
+                    <View style={styles.angleHeaderText}>
+                      <Text style={styles.angleLabel}>STEP {idx + 1} · {guide.label}</Text>
+                      <Text style={styles.angleHint}>{guide.hint}</Text>
+                    </View>
+                  </View>
                 </View>
               );
             })}
@@ -480,6 +499,14 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.textDim,
     lineHeight: 19,
   },
+  activeCaptureCard: {
+    backgroundColor: theme.colors.dark.surface,
+    borderRadius: theme.radius.lg,
+    padding: theme.spacing.md,
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary[400],
+    gap: theme.spacing.sm,
+  },
   angleCard: {
     backgroundColor: theme.colors.dark.surface,
     borderRadius: theme.radius.lg,
@@ -564,16 +591,6 @@ const styles = StyleSheet.create({
     fontFamily: theme.typography.fontFamily.medium,
     color: '#fff',
   },
-  shotPlaceholder: {
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.dark.surfaceLight,
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-  },
-  actionBtnHidden: {
-    opacity: 0,
-  },
   actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -586,6 +603,9 @@ const styles = StyleSheet.create({
     minHeight: 48,
     zIndex: 5,
     elevation: 5,
+  },
+  actionBtnDisabled: {
+    backgroundColor: theme.colors.dark.surfaceLight,
   },
   actionBtnText: {
     fontSize: 14,

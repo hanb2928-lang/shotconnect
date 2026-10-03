@@ -27,13 +27,14 @@ interface InlineCameraViewfinderProps {
   onPickFromGallery?: () => void;
   onCapture?: () => void;
   processing?: boolean;
+  onReadyChange?: (ready: boolean) => void;
 }
 
 export const InlineCameraViewfinder = forwardRef<
   InlineViewfinderHandle,
   InlineCameraViewfinderProps
 >(function InlineCameraViewfinder(
-  { isActive, accentColor, onPickFromGallery, onCapture, processing },
+  { isActive, accentColor, onPickFromGallery, onCapture, processing, onReadyChange },
   ref,
 ) {
   const accent = accentColor ?? theme.colors.primary[400];
@@ -49,6 +50,10 @@ export const InlineCameraViewfinder = forwardRef<
   const [error, setError] = useState<string | null>(null);
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
   const [cameraKey, setCameraKey] = useState(0);
+
+  useEffect(() => {
+    onReadyChange?.(cameraReady);
+  }, [cameraReady, onReadyChange]);
 
   const [permission, requestPermission] = useCameraPermissionsSafe();
 
@@ -215,32 +220,25 @@ export const InlineCameraViewfinder = forwardRef<
     if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady) return null;
     if (captureInProgressRef.current) return null;
     captureInProgressRef.current = true;
-    setCameraReady(false);
     let capturedUri: string | null = null;
     try {
       const result = await nativeCameraRef.current.takePictureAsync({
         quality: 0.6,
       });
       if (!result?.uri) {
-        setCameraKey((k) => k + 1);
         return null;
       }
       capturedUri = result.uri;
       const compressed = await compressImageToBase64(capturedUri, 1080, 0.6);
-      // Delete the original full-res capture temp file to free native heap.
-      // compressImageToBase64 only cleans up its own manipulated copy;
-      // the source file from takePictureAsync must be explicitly removed.
       FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
       capturedUri = null;
-      // Force a CameraView remount to reset the capture session.
-      setCameraKey((k) => k + 1);
       return compressed;
     } catch (err) {
       console.error('[InlineCameraViewfinder] native capture failed:', err);
-      // Clean up the temp file even on failure to prevent native heap accumulation
       if (capturedUri) {
         FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
       }
+      // Only remount on actual failure — the camera session may be in a bad state
       setCameraKey((k) => k + 1);
       return null;
     } finally {
