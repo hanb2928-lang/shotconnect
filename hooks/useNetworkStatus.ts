@@ -10,6 +10,7 @@ const listeners = new Set<(status: NetworkStatus) => void>();
 let probeTimer: ReturnType<typeof setInterval> | null = null;
 let probing = false;
 let activeProbeController: AbortController | null = null;
+let consecutiveProbeFailures = 0;
 
 const PROBE_INTERVAL_MS = 15000;
 const PROBE_TIMEOUT_MS = 8000;
@@ -40,12 +41,14 @@ async function probeConnectivity(): Promise<boolean> {
   activeProbeController = controller;
   const timeoutId = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
-    const res = await fetch(`${supabaseUrl}/functions/v1/analyze-photo`, {
-      method: 'HEAD',
+    const res = await fetch(`${supabaseUrl}/auth/v1/health`, {
+      method: 'GET',
+      headers: { apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '' },
+      cache: 'no-store',
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-    return res.ok || res.status === 405 || res.status === 401;
+    return res.ok || res.status === 401;
   } catch {
     clearTimeout(timeoutId);
     return false;
@@ -61,7 +64,13 @@ async function runProbe() {
   probing = true;
   const reachable = await probeConnectivity();
   probing = false;
-  notify(reachable ? 'online' : 'offline');
+  if (reachable) {
+    consecutiveProbeFailures = 0;
+    notify('online');
+    return;
+  }
+  consecutiveProbeFailures += 1;
+  if (consecutiveProbeFailures >= 2) notify('offline');
 }
 
 function startProbing() {
@@ -76,6 +85,7 @@ function stopProbing() {
     probeTimer = null;
   }
   abortActiveProbe();
+  consecutiveProbeFailures = 0;
 }
 
 function handleAppStateChange(nextState: AppStateStatus) {
