@@ -43,6 +43,8 @@ import { supabase } from '@/lib/supabase';
 import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
+import { getActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
+import { AppState, type AppStateStatus } from 'react-native';
 
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
 
@@ -231,6 +233,76 @@ export default function SynthesisScreen() {
   }, []);
 
   const [jobId, setJobId] = useState<string | null>(null);
+
+  // Restore jobId from persistent storage after OS cold-start kill
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const active = await getActiveVideoJob();
+      if (cancelled || !active || !active.jobId) return;
+      // Verify the job still exists in the DB before resuming polling
+      try {
+        const { data, error } = await supabase
+          .from('video_jobs')
+          .select('status')
+          .eq('id', active.jobId)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error || !data) {
+          clearActiveVideoJob();
+          return;
+        }
+        const status = (data as { status: string }).status;
+        if (status === 'SUCCESS' || status === 'FAILED') {
+          clearActiveVideoJob();
+          return;
+        }
+        // Job is still in-progress — restore it so polling resumes
+        setJobId(active.jobId);
+        setIsGenerating(true);
+        setVideoProgress({ phase: 'generating', progress: 0.5, message: '이전 생성 작업을 복구하는 중...', elapsedSec: 0 });
+      } catch {
+        // DB unreachable — don't resume, user can retry manually
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Force-sync job status from DB when app returns to foreground after OS kill
+  useEffect(() => {
+    if (!jobId) return;
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState !== 'active') return;
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('video_jobs')
+            .select('status, video_url, error_message')
+            .eq('id', jobId)
+            .maybeSingle();
+          if (error || !data) return;
+          const row = data as { status: string; video_url: string | null; error_message: string | null };
+          if (row.status === 'SUCCESS' && row.video_url) {
+            clearActiveVideoJob();
+            setJobId(null);
+            setIsGenerating(false);
+            setResultVideoUrl(row.video_url);
+            setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+          } else if (row.status === 'FAILED') {
+            clearActiveVideoJob();
+            setJobId(null);
+            setIsGenerating(false);
+            setVideoProgress(null);
+            setError(row.error_message ?? '영상 생성에 실패했습니다.');
+          }
+        } catch {
+          // ignore — polling will catch up
+        }
+      })();
+    };
+    const sub = AppState.addEventListener('change', handleAppState);
+    return () => sub.remove();
+  }, [jobId]);
 
   const generateLockRef = useRef(false);
   const handleGenerate = useCallback(async () => {
