@@ -18,6 +18,8 @@ interface ProductVisionResult {
   colorPalette: string[];
   shapeDescription: string;
   materialGuess: string;
+  materialFinish?: string;
+  colorName?: string;
   keyAngles: { angle: string; description: string }[];
   orbitalFocusPoint: string;
   parallaxDepthLayers: string[];
@@ -26,6 +28,8 @@ interface ProductVisionResult {
     secondary: string;
     tertiary: string;
   };
+  structuralDescription?: string;
+  marketingDescription?: string[];
 }
 
 Deno.serve(async (req: Request) => {
@@ -95,18 +99,27 @@ async function analyzeProductVision(
     image_url: { url },
   }));
 
-  const systemPrompt = `You are an expert product vision analyst for AI video ad production.
-Analyze the provided ${images.length} product photos (taken from multiple angles) and extract:
+  const systemPrompt = `You are an expert computer vision and AI cataloging specialist for e-commerce and AR 3D modeling. You are given ${images.length} product photos taken from multiple angles (front, side, back, top, etc.).
+
+## Multi-View Analysis Rules
+1. MULTI-VIEW CONSISTENCY: Cross-reference all angles to accurately determine the product's 3D structure (shape, depth, volume). Hidden details visible only from certain angles (logos, port placements, back panels, stitching, labels) MUST be identified and incorporated.
+2. NOISE & BACKGROUND FILTERING: Disregard shadows, light reflections, surrounding background elements, and shooting environment. Extract ONLY the product's intrinsic physical data.
+
+## Extraction Requirements
 1. Product name and category (in Korean if possible)
-2. Key visual features (shape, texture, color, finish, design details)
+2. Key visual features confirmed through multi-angle cross-referencing (stitching, button layout, port placement, etc.)
 3. Marketing points that would appeal to consumers
 4. Texture and material description for 3D rendering reference
-5. Color palette (hex codes or descriptive)
+5. Color palette (hex codes)
 6. Shape/form description for orbital camera path planning
-7. Per-angle description (what each angle reveals)
+7. Per-angle description (what each angle reveals that others don't)
 8. Orbital focus point — the most visually striking feature to orbit around
-9. Parallax depth layers — foreground/midground/background separation for parallax
+9. Parallax depth layers — foreground/midground/background separation
 10. Suggested 3-layer copywriting: primary (hook), secondary (benefit), tertiary (CTA)
+11. Material & finish: primary material AND surface finish (e.g. matte aluminum, natural leather, glossy polycarbonate)
+12. Color name: representative color using KS standard color name (한국산업표준색상명) if applicable, otherwise descriptive Korean
+13. Structural description: 1-2 objective sentences describing the product's 3D form and spatial characteristics in Korean
+14. Marketing description: 2 Korean sentences that elevate the product's appeal and emphasize visual quality for shopping/content use
 
 Return ONLY a JSON object with this exact shape:
 {
@@ -118,11 +131,19 @@ Return ONLY a JSON object with this exact shape:
   "colorPalette": string[],
   "shapeDescription": string,
   "materialGuess": string,
+  "materialFinish": string,
+  "colorName": string,
   "keyAngles": [{ "angle": string, "description": string }],
   "orbitalFocusPoint": string,
   "parallaxDepthLayers": string[],
-  "suggestedCopyLayers": { "primary": string, "secondary": string, "tertiary": string }
+  "suggestedCopyLayers": { "primary": string, "secondary": string, "tertiary": string },
+  "structuralDescription": string,
+  "marketingDescription": string[]
 }
+
+## Constraints
+- Do NOT guess. Base all analysis ONLY on visual evidence from the uploaded images.
+- All description sentences must be natural Korean.
 
 ${productName ? `The user suggests the product name is "${productName}". Verify and refine.` : ""}
 Respond in Korean for all text fields except colorPalette and materialGuess.`;
@@ -142,7 +163,7 @@ Respond in Korean for all text fields except colorPalette and materialGuess.`;
       body: JSON.stringify({
         model: "gpt-4o",
         messages: [{ role: "user", content: contentParts }],
-        max_tokens: 2000,
+        max_tokens: 2500,
         temperature: 0.4,
         response_format: { type: "json_object" },
       }),
@@ -186,14 +207,18 @@ Respond in Korean for all text fields except colorPalette and materialGuess.`;
       colorPalette: parsed.colorPalette ?? [],
       shapeDescription: parsed.shapeDescription ?? "",
       materialGuess: parsed.materialGuess ?? "",
+      materialFinish: parsed.materialFinish ?? "",
+      colorName: parsed.colorName ?? "",
       keyAngles: parsed.keyAngles ?? [],
       orbitalFocusPoint: parsed.orbitalFocusPoint ?? "",
       parallaxDepthLayers: parsed.parallaxDepthLayers ?? [],
       suggestedCopyLayers: {
         primary: rawCopyLayers.primary || "시선 집중! 지금 바로 확인하세요",
-        secondary: rawCopyLayers.secondary || "왜 다들 이걸 찾는지 알겠더라고요",
+        secondary: rawCopyLayers.secondary || "왜 다들 이걸 찾는지 알겠더리고요",
         tertiary: rawCopyLayers.tertiary || "지금 확인하고 놓치지 마세요",
       },
+      structuralDescription: parsed.structuralDescription ?? "",
+      marketingDescription: Array.isArray(parsed.marketingDescription) ? parsed.marketingDescription.map(String).filter(Boolean) : [],
     };
   } finally {
     clearTimeout(timeoutId);

@@ -14,6 +14,8 @@ export interface ProductVisionResult {
   colorPalette: string[];
   shapeDescription: string;
   materialGuess: string;
+  materialFinish?: string;
+  colorName?: string;
   keyAngles: { angle: string; description: string }[];
   orbitalFocusPoint: string;
   parallaxDepthLayers: string[];
@@ -22,6 +24,8 @@ export interface ProductVisionResult {
     secondary: string;
     tertiary: string;
   };
+  structuralDescription?: string;
+  marketingDescription?: string[];
 }
 
 const VISION_MAX_RETRIES = 2;
@@ -31,6 +35,7 @@ export async function analyzeProductVision(
   images: string[],
   productName?: string,
   scanId?: string,
+  signal?: AbortSignal,
 ): Promise<ProductVisionResult> {
   const cacheInput: Record<string, unknown> = {
     task: 'product-vision',
@@ -52,6 +57,7 @@ export async function analyzeProductVision(
       // native heap pressure on Android. OpenAI Vision accepts HTTPS URLs.
       const uploadedUrls: string[] = [];
       for (let i = 0; i < images.length; i++) {
+        if (signal?.aborted) throw new Error('Vision AI 분석이 취소되었습니다.');
         try {
           const b64 = cleanBase64(images[i]);
           const fileName = `vision-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.jpg`;
@@ -67,7 +73,7 @@ export async function analyzeProductVision(
         }
       }
       const inputs = uploadedUrls.length === images.length ? uploadedUrls : await compressImagesInParallel(images).then((cs) => cs.map((c) => c.dataUrl));
-      return fetchVisionFromApi(inputs, productName, scanId);
+      return fetchVisionFromApi(inputs, productName, scanId, signal);
     },
     'gpt-4o',
   );
@@ -79,10 +85,12 @@ async function fetchVisionFromApi(
   images: string[],
   productName?: string,
   scanId?: string,
+  signal?: AbortSignal,
 ): Promise<ProductVisionResult> {
   let lastErr: Error | null = null;
 
   for (let attempt = 0; attempt <= VISION_MAX_RETRIES; attempt++) {
+    if (signal?.aborted) throw new Error('Vision AI 분석이 취소되었습니다.');
     try {
       const data = await Promise.race([
         safeInvoke(() => supabase.functions.invoke('analyze-product-vision', {

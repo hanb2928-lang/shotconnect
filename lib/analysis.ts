@@ -60,7 +60,7 @@ export async function uploadImage(
   mimeType: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  // Compress before upload: resize to max 1280px, convert to WebP at quality 0.75
+  // Compress before upload: resize to max 1080px, quality 0.68
   const { base64: compressedBase64, mimeType: compressedMime } = await compressBase64ForUpload(base64, mimeType);
   if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
 
@@ -502,6 +502,7 @@ export async function analyzeImageWithProductContext(
   mimeType: string,
   mode: 'single' | 'multi' = 'multi',
   productContext?: { productName?: string; description?: string; price?: string; brand?: string; platform?: string },
+  signal?: AbortSignal,
 ): Promise<AnalysisResult> {
   const compressed = await withTimeout(compressForEdgeFunction(imageDataUrl), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const b64 = cleanBase64(compressed.dataUrl);
@@ -518,13 +519,14 @@ export async function analyzeImageWithProductContext(
     async () => {
       await deductCredits('photo_analysis');
       try {
+      const imageUrl = await uploadImage(b64, compressed.mimeType, signal);
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${supabaseAnonKey}`,
         },
-        body: JSON.stringify({ imageDataUrl: compressed.dataUrl, fileName, mimeType: compressed.mimeType, mode, productContext }),
+        body: JSON.stringify({ imageUrl, fileName, mimeType: compressed.mimeType, mode, productContext }),
         timeoutMs: 115000,
       });
 
@@ -594,6 +596,7 @@ export async function analyzeImageQueued(
   mimeType: string,
   mode: 'single' | 'multi' = 'multi',
   preferredStyle?: string,
+  signal?: AbortSignal,
 ): Promise<AnalysisResult> {
   const compressed = await withTimeout(compressForEdgeFunction(imageDataUrl), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const b64 = cleanBase64(compressed.dataUrl);
@@ -610,9 +613,10 @@ export async function analyzeImageQueued(
     async () => {
       await deductCredits('photo_analysis');
       try {
+      const imageUrl = await uploadImage(b64, compressed.mimeType, signal);
       const result = await enqueueAndWait<Record<string, unknown>>(
         'analyze-photo',
-        { imageDataUrl: compressed.dataUrl, fileName, mimeType: compressed.mimeType, mode, ...(preferredStyle ? { preferredStyle } : {}) },
+        { imageUrl, fileName, mimeType: compressed.mimeType, mode, ...(preferredStyle ? { preferredStyle } : {}) },
         { timeoutMs: 115000 },
       );
 
@@ -633,6 +637,7 @@ export async function analyzeImageQueued(
 export async function analyzeMultiShotQueued(
   base64Images: string[],
   fileName: string,
+  signal?: AbortSignal,
 ): Promise<AnalysisResult> {
   const dataUrls = await withTimeout(compressBase64ArrayForEdgeFunction(base64Images, 'image/jpeg'), COMPRESS_TIMEOUT_MS, '이미지 압축');
   const cacheInput = {
@@ -646,9 +651,15 @@ export async function analyzeMultiShotQueued(
     async () => {
       await deductCredits('multi_shot_analysis');
       try {
+      const imageUrls: string[] = [];
+      for (let i = 0; i < dataUrls.length; i++) {
+        if (signal?.aborted) throw new Error('다각도 분석이 취소되었습니다.');
+        const url = await uploadImage(cleanBase64(dataUrls[i]), 'image/jpeg', signal);
+        imageUrls.push(url);
+      }
       const result = await enqueueAndWait<Record<string, unknown>>(
         'analyze-photo',
-        { images: dataUrls, fileName, mode: 'multi-shot' },
+        { images: imageUrls, fileName, mode: 'multi-shot' },
         { timeoutMs: 115000 },
       );
 

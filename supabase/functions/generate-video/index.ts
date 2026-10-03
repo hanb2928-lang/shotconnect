@@ -297,9 +297,13 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   const variationSeed = body.variationSeed ?? 0;
 
   const hdUpscale = body.hdUpscale === true;
-  const qualityTier = hdUpscale ? 'pro' : (body.qualityTier ?? 'standard');
-  const resolution = body.resolution ?? (hdUpscale ? '1080p' : '720p');
-  const fps = body.fps ?? (hdUpscale ? 30 : 24);
+  // Drafts always render at 720p/24fps regardless of HD settings — the HD
+  // upgrade stage handles the high-res pass. This cuts draft render time
+  // roughly in half so users see a result much sooner.
+  const effectiveHd = isDraft ? false : hdUpscale;
+  const qualityTier = effectiveHd ? 'pro' : (body.qualityTier ?? 'standard');
+  const resolution = isDraft ? '720p' : (body.resolution ?? (hdUpscale ? '1080p' : '720p'));
+  const fps = isDraft ? 24 : (body.fps ?? (hdUpscale ? 30 : 24));
 
   const runwayPrompt = buildCompactRunwayPrompt({
     userPrompt: effectivePrompt,
@@ -328,6 +332,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
     enableCaustics: body.enableCaustics,
     enableVirtualFitting: body.enableVirtualFitting,
     enableFabricPhysics: body.enableFabricPhysics,
+    isDraft,
   });
   console.log("[generate-video] Final runway prompt length:", runwayPrompt.length, "| mode tokens injected:", modeTokens.length, "| prompt preview:", runwayPrompt.slice(0, 200));
 
@@ -415,8 +420,10 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
   const durationSec = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 10);
   const isDraft = body.draft === true;
   const hdUpscale = body.hdUpscale === true;
-  const resolution = body.resolution ?? (hdUpscale ? "1080p" : "720p");
-  const fps = body.fps ?? (hdUpscale ? 30 : 24);
+  // Drafts always use 720p/24fps even when HD is requested — the HD upgrade
+  // stage handles the high-res pass separately.
+  const resolution = isDraft ? "720p" : (body.resolution ?? (hdUpscale ? "1080p" : "720p"));
+  const fps = isDraft ? 24 : (body.fps ?? (hdUpscale ? 30 : 24));
 
   try {
     const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
@@ -429,7 +436,7 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
     console.log("[generate-video] runway-submit: Fetched scan image:", promptImage ? "found" : "not found");
 
     const runwayTaskId = await submitWithRetry(
-      () => submitRunwayTask(runwayPrompt, runwayKey, aspectRatio, durationSec, isDraft, webhookUrl, scanId, promptImage, hdUpscale, resolution, fps),
+      () => submitRunwayTask(runwayPrompt, runwayKey, aspectRatio, durationSec, isDraft, webhookUrl, scanId, promptImage, isDraft ? false : hdUpscale, resolution, fps),
       MAX_RETRIES,
     );
 
@@ -1457,6 +1464,7 @@ type CompactPromptParams = {
   enableCaustics?: boolean;
   enableVirtualFitting?: boolean;
   enableFabricPhysics?: boolean;
+  isDraft?: boolean;
 };
 
 const PLATFORM_STYLE: Record<string, { camera: string; lighting: string; grade: string }> = {
@@ -1805,16 +1813,17 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   // Transition effect
   const transTag = p.transitionEffect && TRANSITION_MAP[p.transitionEffect] ? `transitions=${TRANSITION_MAP[p.transitionEffect]}` : "";
 
-  const modeTokens = buildModeRenderingTokens(p.selectedMode, p.enableOrbit360, p.enableCaustics, p.enableVirtualFitting, p.enableFabricPhysics, p.orbitSpeed);
+  const skipPhysics = p.isDraft === true;
+  const modeTokens = buildModeRenderingTokens(p.selectedMode, p.enableOrbit360, skipPhysics ? false : p.enableCaustics, p.enableVirtualFitting, skipPhysics ? false : p.enableFabricPhysics, p.orbitSpeed);
 
   if (p.isCleanVideoMode) {
     const v = p.productVision;
     const tokens: string[] = [
       `luxury showcase ${name} ${orientation}`,
-      "cam=smooth gimbal dolly + gentle orbit + macro push-in",
+      skipPhysics ? "cam=smooth gimbal dolly + macro push-in" : "cam=smooth gimbal dolly + gentle orbit + macro push-in",
       "light=professional 3-point studio + softbox + rim light",
       "grade=filmic luxury, shallow DOF, color-graded, premium look",
-      "quality=top 1% commercial, ultra-premium, high-end brand film",
+      skipPhysics ? "quality=premium commercial look" : "quality=top 1% commercial, ultra-premium, high-end brand film",
       `prompt_strength=${strength}/10, ${strengthTag}`,
     ];
     if (userDirectiveTag) tokens.push(userDirectiveTag);
@@ -1822,31 +1831,35 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
       const feats = v.visualFeatures.slice(0, 2).join(",");
       tokens.push(`product=${v.shapeDescription},${v.materialGuess}${feats ? "," + feats : ""}`);
       if (v.textureDescription) tokens.push(`texture=${v.textureDescription}`);
-      const matTag = buildMaterialPhysicsTag(v.materialGuess);
-      if (matTag) tokens.push(matTag);
-      const fabTag = buildFabricPhysicsTag(v.materialGuess, v.productCategory);
-      if (fabTag) tokens.push(fabTag);
-      const colTag = buildCollisionTag(v.materialGuess, v.productCategory);
-      if (colTag) tokens.push(colTag);
-      const skinTag = buildSkinResponseTag(v.materialGuess, v.productCategory);
-      if (skinTag) tokens.push(skinTag);
+      if (!skipPhysics) {
+        const matTag = buildMaterialPhysicsTag(v.materialGuess);
+        if (matTag) tokens.push(matTag);
+        const fabTag = buildFabricPhysicsTag(v.materialGuess, v.productCategory);
+        if (fabTag) tokens.push(fabTag);
+        const colTag = buildCollisionTag(v.materialGuess, v.productCategory);
+        if (colTag) tokens.push(colTag);
+        const skinTag = buildSkinResponseTag(v.materialGuess, v.productCategory);
+        if (skinTag) tokens.push(skinTag);
+      }
     }
     if (bgTag) tokens.push(bgTag);
-    const envLightTag = buildEnvLightingTag(p.bgStyle);
-    if (envLightTag) tokens.push(envLightTag);
-    if (v) {
-      const shadowTag = buildShadowReflectionTag(v.materialGuess, v.productCategory);
-      if (shadowTag) tokens.push(shadowTag);
-    }
-    const dofTag = buildDofFocusTag(p.bgStyle, true);
-    if (dofTag) tokens.push(dofTag);
-    if (v) {
-      const beautyTag = buildBeautySmoothTag(v.materialGuess, v.productCategory);
-      if (beautyTag) tokens.push(beautyTag);
-    }
-    if (v) {
-      const jewelryMacroTag = buildJewelryMacroTag(v.materialGuess, v.productCategory);
-      if (jewelryMacroTag) tokens.push(jewelryMacroTag);
+    if (!skipPhysics) {
+      const envLightTag = buildEnvLightingTag(p.bgStyle);
+      if (envLightTag) tokens.push(envLightTag);
+      if (v) {
+        const shadowTag = buildShadowReflectionTag(v.materialGuess, v.productCategory);
+        if (shadowTag) tokens.push(shadowTag);
+      }
+      const dofTag = buildDofFocusTag(p.bgStyle, true);
+      if (dofTag) tokens.push(dofTag);
+      if (v) {
+        const beautyTag = buildBeautySmoothTag(v.materialGuess, v.productCategory);
+        if (beautyTag) tokens.push(beautyTag);
+      }
+      if (v) {
+        const jewelryMacroTag = buildJewelryMacroTag(v.materialGuess, v.productCategory);
+        if (jewelryMacroTag) tokens.push(jewelryMacroTag);
+      }
     }
     tokens.push(buildOpeningHookSequenceTag(true, p.productVision ?? null));
     if (outfitTag) tokens.push(outfitTag);
@@ -1884,14 +1897,16 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
     const v = p.productVision;
     const feats = v.visualFeatures.slice(0, 2).join(",");
     tokens.push(`product=${v.shapeDescription},${v.materialGuess}${feats ? "," + feats : ""}`);
-    const matTag = buildMaterialPhysicsTag(v.materialGuess);
-    if (matTag) tokens.push(matTag);
-    const fabTag = buildFabricPhysicsTag(v.materialGuess, v.productCategory);
-    if (fabTag) tokens.push(fabTag);
-    const colTag = buildCollisionTag(v.materialGuess, v.productCategory);
-    if (colTag) tokens.push(colTag);
-    const skinTag = buildSkinResponseTag(v.materialGuess, v.productCategory);
-    if (skinTag) tokens.push(skinTag);
+    if (!skipPhysics) {
+      const matTag = buildMaterialPhysicsTag(v.materialGuess);
+      if (matTag) tokens.push(matTag);
+      const fabTag = buildFabricPhysicsTag(v.materialGuess, v.productCategory);
+      if (fabTag) tokens.push(fabTag);
+      const colTag = buildCollisionTag(v.materialGuess, v.productCategory);
+      if (colTag) tokens.push(colTag);
+      const skinTag = buildSkinResponseTag(v.materialGuess, v.productCategory);
+      if (skinTag) tokens.push(skinTag);
+    }
   }
 
   if (p.captionText && p.captionText.trim()) {
@@ -1899,17 +1914,19 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   }
 
   if (bgTag) tokens.push(bgTag);
-  const envLightTag = buildEnvLightingTag(p.bgStyle);
-  if (envLightTag) tokens.push(envLightTag);
-  if (p.productVision) {
-    const shadowTag = buildShadowReflectionTag(p.productVision.materialGuess, p.productVision.productCategory);
-    if (shadowTag) tokens.push(shadowTag);
-  }
-  const dofTag = buildDofFocusTag(p.bgStyle, false);
-  if (dofTag) tokens.push(dofTag);
-  if (p.productVision) {
-    const beautyTag = buildBeautySmoothTag(p.productVision.materialGuess, p.productVision.productCategory);
-    if (beautyTag) tokens.push(beautyTag);
+  if (!skipPhysics) {
+    const envLightTag = buildEnvLightingTag(p.bgStyle);
+    if (envLightTag) tokens.push(envLightTag);
+    if (p.productVision) {
+      const shadowTag = buildShadowReflectionTag(p.productVision.materialGuess, p.productVision.productCategory);
+      if (shadowTag) tokens.push(shadowTag);
+    }
+    const dofTag = buildDofFocusTag(p.bgStyle, false);
+    if (dofTag) tokens.push(dofTag);
+    if (p.productVision) {
+      const beautyTag = buildBeautySmoothTag(p.productVision.materialGuess, p.productVision.productCategory);
+      if (beautyTag) tokens.push(beautyTag);
+    }
   }
   tokens.push(buildOpeningHookSequenceTag(false, p.productVision ?? null));
   if (outfitTag) tokens.push(outfitTag);
