@@ -9,6 +9,7 @@ import { withFileLock } from '@/lib/fileLock';
 import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
+import { analyzeAndDownscaleImage, cleanupSmartResizeTemp } from '@/lib/smartResize';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -181,6 +182,22 @@ export async function compressBase64ForUpload(
 
 const NATIVE_URI_COPY_TIMEOUT_MS = 60_000;
 
+async function validateCopiedFile(path: string): Promise<void> {
+  let info: { exists: boolean; size?: number } | null = null;
+  try {
+    info = await FileSystem.getInfoAsync(path);
+  } catch {
+    throw new Error('지원하지 않거나 손상된 파일입니다.');
+  }
+  if (!info || !info.exists) {
+    throw new Error('지원하지 않거나 손상된 파일입니다.');
+  }
+  if (info.size === undefined || info.size <= 0) {
+    await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+    throw new Error('지원하지 않거나 손상된 파일입니다.');
+  }
+}
+
 async function makeReadableNativeUri(uri: string): Promise<{ uri: string; temporary: boolean }> {
   if (Platform.OS === 'web' || !uri.startsWith('content://')) return { uri, temporary: false };
   if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
@@ -193,6 +210,18 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
         timeoutId = setTimeout(() => reject(new Error('파일을 불러오는 시간이 초과되었습니다.')), NATIVE_URI_COPY_TIMEOUT_MS);
       }),
     ]);
+    // Strict post-copy validation: reject zombie/corrupt files before they
+    // enter the upload pipeline.
+    await validateCopiedFile(target);
+    // Smart resize: if the image exceeds device-safe pixel limits, downscale
+    // immediately to prevent OOM during later base64 encoding or canvas ops.
+    const resized = await analyzeAndDownscaleImage(target);
+    if (resized.downscaled && resized.uri !== target) {
+      // The original cached copy is no longer needed; the downscaled temp
+      // file becomes the active source.
+      await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
+      return { uri: resized.uri, temporary: true };
+    }
     return { uri: target, temporary: true };
   } catch (error) {
     await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
