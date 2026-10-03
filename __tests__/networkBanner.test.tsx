@@ -29,7 +29,18 @@ Object.defineProperty(global, 'window', {
 // Mock react-native BEFORE requiring the hook
 jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
+  AppState: {
+    addEventListener: () => ({ remove: () => {} }),
+  },
 }));
+
+// Mock fetch and AbortController so the probe doesn't hang
+global.AbortController = class {
+  signal = { aborted: false };
+  abort() { (this as any).signal.aborted = true; }
+} as any;
+
+global.fetch = jest.fn(() => Promise.resolve({ ok: true, status: 200 } as any)) as any;
 
 // Require AFTER all mocks are in place so init() sees them
 const { useNetworkStatus, isOnline } = require('@/hooks/useNetworkStatus');

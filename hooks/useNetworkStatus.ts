@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Platform, AppState, type AppStateStatus } from 'react-native';
-import { supabaseUrl } from '@/lib/supabase';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 
 export type NetworkStatus = 'online' | 'offline' | 'unknown';
 
@@ -43,8 +43,7 @@ async function probeConnectivity(): Promise<boolean> {
   try {
     const res = await fetch(`${supabaseUrl}/auth/v1/health`, {
       method: 'GET',
-      headers: { apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '' },
-      cache: 'no-store',
+      headers: { apikey: supabaseAnonKey },
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
