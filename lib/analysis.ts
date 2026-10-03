@@ -70,7 +70,7 @@ export async function uploadImage(
 
   const uploadPromise = supabase.storage
     .from('scans')
-    .upload(fileName, base64ToUint8Array(compressedBase64), { contentType: uploadMime, cacheControl: '360000' });
+    .upload(fileName, base64ToBlob(compressedBase64, uploadMime), { contentType: uploadMime, cacheControl: '360000' });
 
   const { error } = await withUploadTimeout(uploadPromise, signal);
 
@@ -225,13 +225,14 @@ export async function analyzeImage(
     async () => {
       await deductCredits('photo_analysis');
       try {
+      const imageUrl = await uploadImage(b64, compressed.mimeType);
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${supabaseAnonKey}`,
     },
-      body: JSON.stringify({ imageDataUrl: compressed.dataUrl, fileName, mimeType: compressed.mimeType, mode }),
+    body: JSON.stringify({ imageUrl, fileName, mimeType: compressed.mimeType, mode }),
       timeoutMs: 115000,
     });
 
@@ -270,13 +271,18 @@ export async function analyzeMultiShot(
     async () => {
       await deductCredits('multi_shot_analysis');
       try {
+      const imageUrls: string[] = [];
+      for (let i = 0; i < dataUrls.length; i++) {
+        const url = await uploadImage(cleanBase64(dataUrls[i]), 'image/jpeg');
+        imageUrls.push(url);
+      }
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${supabaseAnonKey}`,
         },
-        body: JSON.stringify({ images: dataUrls, fileName, mode: 'multi-shot' }),
+        body: JSON.stringify({ images: imageUrls, fileName, mode: 'multi-shot' }),
         timeoutMs: 115000,
       });
 
