@@ -12,6 +12,7 @@ import { Camera, Check, X, RotateCcw, ChevronRight, Loader } from 'lucide-react-
 import { theme } from '@/lib/theme';
 import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
 import { useSafeTop } from '@/hooks/useSafeTop';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   InlineCameraViewfinder,
   type InlineViewfinderHandle,
@@ -84,6 +85,8 @@ export function MultiAngleCaptureGuide({
   completeLabelEarly,
 }: MultiAngleCaptureGuideProps) {
   const safeTop = useSafeTop();
+  const safeInsets = useSafeAreaInsets();
+  const bottomInset = Math.max(safeInsets.bottom, 0);
   const [shots, setShots] = useState<Record<string, AngleShot>>({});
   const [currentAngle, setCurrentAngle] = useState(0);
   const [processing, setProcessing] = useState(false);
@@ -261,7 +264,11 @@ export function MultiAngleCaptureGuide({
             <Text style={styles.progressText}>{completedCount}/{guides.length} 완료</Text>
           </View>
 
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 120 + bottomInset }]}
+            showsVerticalScrollIndicator={false}
+          >
             {captureError && (
               <View style={styles.captureErrorBox}>
                 <Text style={styles.captureErrorText}>{captureError}</Text>
@@ -354,7 +361,7 @@ export function MultiAngleCaptureGuide({
           </ScrollView>
 
           {/* Bottom action */}
-          <View style={styles.bottomBar}>
+          <View style={[styles.bottomBar, { paddingBottom: Math.max(bottomInset + 32, 32) }]}>
             {minMet && !allDone && (
               <TouchableOpacity
                 style={[styles.completeBtn, { backgroundColor: effectiveAccent, marginBottom: 8 }]}
@@ -453,7 +460,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: theme.spacing.md,
-    paddingBottom: theme.spacing.lg,
+    paddingBottom: 120,
     gap: theme.spacing.md,
   },
   introBox: {
