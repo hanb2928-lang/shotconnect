@@ -1,13 +1,13 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Platform, Image as RNImage } from 'react-native';
+import { Platform, Image as RNImage, AppState, type AppStateStatus } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
 import { isLowEndDevice, getAdaptiveImageMaxDimension } from '@/lib/devicePerformance';
 import { withFileLock } from '@/lib/fileLock';
 import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
-import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
+import { registerTempFile, safeDeleteTempFile, unpinTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
 import { analyzeAndDownscaleImage } from '@/lib/smartResize';
 
@@ -260,6 +260,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+function createBackgroundAbort(): AbortController | null {
+  if (Platform.OS === 'web') return null;
+  const controller = new AbortController();
+  let listener: { remove: () => void } | null = null;
+  const handler = (state: AppStateStatus) => {
+    if (state === 'background' || state === 'inactive') {
+      controller.abort();
+      listener?.remove();
+      listener = null;
+    }
+  };
+  listener = AppState.addEventListener('change', handler);
+  // Auto-cleanup if the controller is never explicitly aborted
+  const originalAbort = controller.abort.bind(controller);
+  controller.abort = () => {
+    listener?.remove();
+    listener = null;
+    originalAbort();
+  };
+  return controller;
+}
+
 async function validateCopiedFile(path: string): Promise<void> {
   let info: { exists: boolean; size?: number } | null = null;
   try {
@@ -281,14 +303,27 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
   if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
   const target = `${FileSystem.cacheDirectory}shot-connect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let bgAbortController: AbortController | null = null;
   const releaseSlot = await acquireNativeCopySlot();
   try {
+    bgAbortController = createBackgroundAbort();
+    const copyPromise = FileSystem.copyAsync({ from: uri, to: target });
+    const bgRejectPromise = new Promise<never>((_, reject) => {
+      if (!bgAbortController) return;
+      bgAbortController.signal.addEventListener('abort', () => {
+        reject(new Error('앱이 백그라운드로 전환되어 파일 복사가 중단되었습니다.'));
+      }, { once: true });
+    });
     await Promise.race([
-      FileSystem.copyAsync({ from: uri, to: target }),
+      copyPromise,
+      bgRejectPromise,
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error('파일을 불러오는 시간이 초과되었습니다.')), NATIVE_URI_COPY_TIMEOUT_MS);
       }),
     ]);
+    // Register the copied file immediately so tempFileManager tracks it even
+    // if the app is backgrounded or killed before we finish processing.
+    registerTempFile(target, 'makeReadableNativeUri', { pin: true });
     // Strict post-copy validation: reject zombie/corrupt files before they
     // enter the upload pipeline.
     await validateCopiedFile(target);
@@ -298,15 +333,19 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
     if (resized.downscaled && resized.uri !== target) {
       // The original cached copy is no longer needed; the downscaled temp
       // file becomes the active source.
+      unpinTempFile(target);
       await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
       return { uri: resized.uri, temporary: true };
     }
+    unpinTempFile(target);
     return { uri: target, temporary: true };
   } catch (error) {
+    unregisterTempFile(target);
     await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
     throw error;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    if (bgAbortController) bgAbortController.abort();
     releaseSlot();
   }
 }

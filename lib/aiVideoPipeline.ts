@@ -506,6 +506,7 @@ function waitForVideoCompletion(
       cleanup();
       if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
       if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
+      if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
       appSub?.remove();
     };
 
@@ -792,6 +793,24 @@ function waitForVideoCompletion(
       }, BG_MAX_WAIT_MS);
     };
 
+    // Resume burst: run a short sequence of fast polls immediately after
+    // resume so the UI catches up on missed server state without waiting
+    // for the realtime socket to reconnect (which can take several seconds).
+    const RESUME_BURST_INTERVAL_MS = 1500;
+    const RESUME_BURST_COUNT = 3;
+    let resumeBurstCount = 0;
+    let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+    const runResumeBurst = () => {
+      if (settled || resumeBurstCount >= RESUME_BURST_COUNT) {
+        resumeBurstTimer = null;
+        return;
+      }
+      resumeBurstCount++;
+      checkDb();
+      checkScanVideoUrl();
+      resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
+    };
+
     const resumeBackground = () => {
       if (!isBackgrounded || settled) return;
       isBackgrounded = false;
@@ -803,6 +822,9 @@ function waitForVideoCompletion(
       checkDb();
       checkScanVideoUrl();
       runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
+      if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+      resumeBurstCount = 0;
+      runResumeBurst();
     };
 
     const handleAppState = (nextState: AppStateStatus) => {
@@ -966,10 +988,25 @@ export function subscribeVideoJob(
     }
   };
 
+  let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+  let resumeBurstCount = 0;
+  const RESUME_BURST_INTERVAL_MS = 1500;
+  const RESUME_BURST_COUNT = 3;
+  const runResumeBurst = () => {
+    if (settled || resumeBurstCount >= RESUME_BURST_COUNT) {
+      resumeBurstTimer = null;
+      return;
+    }
+    resumeBurstCount++;
+    checkAndNotify();
+    resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
+  };
+
   const cleanup = () => {
     if (channel) supabase.removeChannel(channel);
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
   };
 
   const scheduleReconnect = () => {
@@ -1067,6 +1104,9 @@ export function subscribeVideoJob(
       setupChannel();
       scheduleNextPoll();
       checkAndNotify();
+      if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+      resumeBurstCount = 0;
+      runResumeBurst();
     },
     onBackgroundTimeout: () => {
       settled = true;
@@ -1217,10 +1257,23 @@ export function subscribeHdUpgrade(
     }
   };
 
+  let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+  let resumeBurstCount = 0;
+  const runResumeBurst = () => {
+    if (settled || resumeBurstCount >= 3) {
+      resumeBurstTimer = null;
+      return;
+    }
+    resumeBurstCount++;
+    checkAndNotify();
+    resumeBurstTimer = setTimeout(runResumeBurst, 1500);
+  };
+
   const cleanup = () => {
     if (channel) supabase.removeChannel(channel);
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
   };
 
   const scheduleReconnect = () => {
@@ -1319,6 +1372,9 @@ export function subscribeHdUpgrade(
       setupChannel();
       scheduleNextPoll();
       checkAndNotify();
+      if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+      resumeBurstCount = 0;
+      runResumeBurst();
     },
     onBackgroundTimeout: () => {
       settled = true;

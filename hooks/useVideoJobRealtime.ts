@@ -84,6 +84,7 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (bgTimer) clearTimeout(bgTimer);
+      if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
     };
 
     const checkDb = async () => {
@@ -165,6 +166,30 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
       handleResult('failed', undefined, '비디오 생성 시간이 초과되었습니다. 잠시 후 다시 확인해주세요.');
     }, TIMEOUT_MS);
 
+    // On resume from background, the realtime socket takes several seconds to
+    // reconnect. Run an immediate DB check plus a short burst of fast polls so
+    // the UI reflects the current server state without waiting for the socket.
+    const RESUME_BURST_INTERVAL_MS = 1500;
+    const RESUME_BURST_COUNT = 3;
+    let resumeBurstCount = 0;
+    let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const runResumeBurst = () => {
+      if (settledRef.current || resumeBurstCount >= RESUME_BURST_COUNT) {
+        resumeBurstTimer = null;
+        return;
+      }
+      resumeBurstCount++;
+      checkDb();
+      resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
+    };
+
+    const startResumeBurst = () => {
+      if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+      resumeBurstCount = 0;
+      runResumeBurst();
+    };
+
     // Pause polling and realtime when backgrounded to avoid zombie requests.
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
@@ -172,10 +197,12 @@ export function useVideoJobRealtime({ jobId, onCompleted, onError }: UseVideoJob
         if (!settledRef.current) {
           pollAttempt = 0;
           checkDb();
+          startResumeBurst();
           if (!pollTimer) schedulePoll();
           if (!channel) connectChannel();
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
+        if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
         if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
         if (channel) {
           try { supabase.removeChannel(channel); } catch { /* ignore */ }
