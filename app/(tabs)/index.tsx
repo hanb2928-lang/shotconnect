@@ -14,6 +14,7 @@ import {
   AppState,
   AppStateStatus,
   InteractionManager,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -49,6 +50,7 @@ const CreditPurchaseModal = lazy(() =>
   import('@/components/CreditPurchaseModal').then((m) => ({ default: m.CreditPurchaseModal })),
 );
 import { pickImageWeb, isWebPlatform } from '@/lib/webImagePicker';
+import { checkVideoAssetSpecs } from '@/lib/smartResize';
 import type { WebCameraHandle } from '@/components/WebCameraView';
 const WebCameraView = lazy(() =>
   import('@/components/WebCameraView').then((m) => ({ default: m.WebCameraView })),
@@ -615,6 +617,29 @@ function CameraScreenInner() {
       );
       if (!isMountedRef.current || result.canceled || !result.assets?.[0]?.uri) return;
       const asset = result.assets[0];
+      const specCheck = checkVideoAssetSpecs({
+        duration: asset.duration ?? null,
+        width: asset.width ?? null,
+        height: asset.height ?? null,
+        fileSize: asset.fileSize ?? null,
+      });
+      if (specCheck.action === 'reject') {
+        if (isMountedRef.current) setError(specCheck.message);
+        return;
+      }
+      if (specCheck.action === 'warn') {
+        const shouldProceed = await new Promise<boolean>((resolve) => {
+          if (Platform.OS === 'web') {
+            resolve(window.confirm(specCheck.message));
+          } else {
+            Alert.alert('권장 사양 초과', specCheck.message, [
+              { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+              { text: '그래도 진행', style: 'destructive', onPress: () => resolve(true) },
+            ]);
+          }
+        });
+        if (!shouldProceed) return;
+      }
       const mimeType = asset.mimeType?.startsWith('video/') ? asset.mimeType : 'video/mp4';
       setPostCaptureBase64(null);
       postCaptureBase64Ref.current = null;

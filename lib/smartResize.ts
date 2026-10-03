@@ -149,6 +149,71 @@ export async function analyzeVideoFile(uri: string, temporary: boolean): Promise
   return { uri, temporary, fileBytes, exceedsLimit: false, recommendedAction: 'proceed', reason: 'Within limits' };
 }
 
+export interface VideoAssetSpecCheck {
+  action: 'proceed' | 'warn' | 'reject';
+  message: string;
+}
+
+const RECOMMENDED_MAX_DURATION_SEC = 180;
+const RECOMMENDED_MAX_RESOLUTION = 1080;
+const REJECT_DURATION_SEC = 600;
+const REJECT_RESOLUTION = 2160;
+
+/**
+ * Check a picked video asset against recommended specs (1080p, ≤3min).
+ * Uses the asset metadata from expo-image-picker (duration, width, height).
+ * Returns whether to proceed, warn, or reject — plus a user-facing message.
+ */
+export function checkVideoAssetSpecs(asset: {
+  duration?: number | null;
+  width?: number | null;
+  height?: number | null;
+  fileSize?: number | null;
+}): VideoAssetSpecCheck {
+  const durationSec = asset.duration ? Math.round(asset.duration / 1000) : null;
+  const longestSide = asset.width && asset.height ? Math.max(asset.width, asset.height) : null;
+  const fileMB = asset.fileSize ? asset.fileSize / 1_000_000 : null;
+
+  const issues: string[] = [];
+
+  if (longestSide && longestSide > REJECT_RESOLUTION) {
+    return {
+      action: 'reject',
+      message: `해상도가 ${longestSide}px로 권장 사양을 크게 초과했습니다. 1080p 이하, 3분 이내 영상을 선택해주세요. 기기 메모리 한계로 앱이 강제 종료될 수 있습니다.`,
+    };
+  }
+
+  if (durationSec && durationSec > REJECT_DURATION_SEC) {
+    return {
+      action: 'reject',
+      message: `영상 길이가 ${Math.round(durationSec / 60)}분으로 너무 깁니다. 3분 이내의 짧은 영상을 선택해주세요. 기기 메모리 한계로 앱이 강제 종료될 수 있습니다.`,
+    };
+  }
+
+  if (fileMB && fileMB > 500) {
+    return {
+      action: 'reject',
+      message: `파일 크기가 ${fileMB.toFixed(0)}MB로 너무 큽니다. 더 가볍게 압축된 영상을 선택해주세요.`,
+    };
+  }
+
+  if (longestSide && longestSide > RECOMMENDED_MAX_RESOLUTION) {
+    issues.push(`해상도 ${longestSide}px (권장: 1080p 이하)`);
+  }
+  if (durationSec && durationSec > RECOMMENDED_MAX_DURATION_SEC) {
+    issues.push(`길이 ${Math.round(durationSec / 60)}분 (권장: 3분 이내)`);
+  }
+
+  if (issues.length > 0) {
+    return {
+      action: 'warn',
+      message: `권장 사양을 초과했습니다: ${issues.join(', ')}. 압축 후 진행하거나 더 짧은 영상을 선택해주세요. 그대로 진행할 수도 있지만, 기기 성능에 따라 처리가 느려지거나 앱이 종료될 수 있습니다.`,
+    };
+  }
+
+  return { action: 'proceed', message: '' };
+}
+
 export function getSmartResizeImageMaxDimension(): number {
   return getDeviceMediaLimits().targetImageDimension;
 }

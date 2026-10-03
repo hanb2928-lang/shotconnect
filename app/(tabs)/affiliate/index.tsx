@@ -9,6 +9,7 @@ import {
   TextInput,
   Linking,
   Platform,
+  Alert,
 } from 'react-native';
 import { CachedImage } from '@/components/CachedImage';
 import { useSharedValue, useAnimatedStyle, withTiming, Easing, cancelAnimation } from 'react-native-reanimated';
@@ -29,6 +30,7 @@ import { ShortLinkCopyBar } from '@/components/ShortLinkCopyBar';
 import { buildDataUrl, cleanBase64, urlToDataUrl } from '@/lib/base64';
 import { compressImageToBase64 } from '@/lib/imageEdit';
 import { pickImageWeb, isWebPlatform } from '@/lib/webImagePicker';
+import { checkVideoAssetSpecs } from '@/lib/smartResize';
 import { saveManualScan, uploadImage, analyzeImage, analyzeImageWithProductContext, extractProductMeta, updateScanWithAnalysis } from '@/lib/analysis';
 import { validateAffiliateUrl } from '@/lib/affiliate';
 import { friendlyError } from '@/lib/errors';
@@ -1021,10 +1023,34 @@ export default function AffiliateScreen() {
             quality: 0.9,
           });
           if (!result.canceled && result.assets[0]) {
+            const asset = result.assets[0];
+            const specCheck = checkVideoAssetSpecs({
+              duration: asset.duration ?? null,
+              width: asset.width ?? null,
+              height: asset.height ?? null,
+              fileSize: asset.fileSize ?? null,
+            });
+            if (specCheck.action === 'reject') {
+              setImportError(specCheck.message);
+              return;
+            }
+            if (specCheck.action === 'warn') {
+              const shouldProceed = await new Promise<boolean>((resolve) => {
+                if (Platform.OS === 'web') {
+                  resolve(window.confirm(specCheck.message));
+                } else {
+                  Alert.alert('권장 사양 초과', specCheck.message, [
+                    { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+                    { text: '그래도 진행', style: 'destructive', onPress: () => resolve(true) },
+                  ]);
+                }
+              });
+              if (!shouldProceed) return;
+            }
             setImportedMedia({
-              uri: result.assets[0].uri,
+              uri: asset.uri,
               type: 'video',
-              name: result.assets[0].fileName ?? `imported_${Date.now()}.mp4`,
+              name: asset.fileName ?? `imported_${Date.now()}.mp4`,
             });
           }
         }
