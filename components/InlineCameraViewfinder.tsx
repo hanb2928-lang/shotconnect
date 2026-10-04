@@ -12,6 +12,7 @@ import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { compressCaptureFrameToBlob, compressImageToBase64 } from '@/lib/imageEdit';
+import { debugSaveRawCapture, debugSaveNormalizedCapture } from '@/lib/debugCapture';
 import { withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
 import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery';
@@ -208,7 +209,10 @@ export const InlineCameraViewfinder = forwardRef<
       const rawBase64 = dataUrl.split(',')[1];
       canvas.width = 0;
       canvas.height = 0;
-      return await compressCaptureFrameToBlob(rawBase64, 'image/jpeg');
+      await debugSaveRawCapture(rawBase64, 'image/jpeg', w, h, 'inline-web-raw');
+      const result = await compressCaptureFrameToBlob(rawBase64, 'image/jpeg');
+      await debugSaveNormalizedCapture(result.base64, result.mimeType, w, h, 'inline-web-normalized');
+      return result;
     } catch (err) {
       console.error('[InlineCameraViewfinder] captureWeb failed:', err);
       return null;
@@ -245,6 +249,7 @@ export const InlineCameraViewfinder = forwardRef<
         capturedUri = result.uri;
         const uriToDelete = capturedUri;
         const compressed = await compressImageToBase64(uriToDelete, 720, 0.8);
+        await debugSaveNormalizedCapture(compressed.base64, compressed.mimeType, 720, 720, 'inline-native-normalized');
         // Wait for temp file cleanup to finish before releasing the lock.
         // Use withFileSettle to retry on transient EBUSY from the camera
         // session still holding the file handle.

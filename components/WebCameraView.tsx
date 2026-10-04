@@ -4,6 +4,7 @@ import Animated, { useSharedValue, withRepeat, withSequence, withTiming, cancelA
 import { theme } from '@/lib/theme';
 import { Camera, RotateCcw, Zap, X, Image as ImageIcon, Sparkles, Check, ShieldAlert, Video, Square } from 'lucide-react-native';
 import { cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
+import { debugSaveRawCapture, debugSaveNormalizedCapture } from '@/lib/debugCapture';
 import { startVideoRecording, stopVideoRecording, blobToBase64, type VideoRecordingResult } from '@/lib/videoRecorder';
 import { getSafeVideoConstraints, clampCaptureDimensions, CAPTURE_MAX_WIDTH } from '@/lib/captureConstraints';
 import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery';
@@ -257,6 +258,8 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       if (!mountedRef.current) return null;
       const b64 = cleanBase64(compressed);
       const mime = getMimeTypeFromDataUrl(compressed);
+      await debugSaveRawCapture(b64, mime, w, h, 'webcam-raw');
+      await debugSaveNormalizedCapture(b64, mime, w, h, 'webcam-normalized');
       return `${mime}|${b64}`;
     } catch {
       setError('촬영에 실패했습니다. 다시 시도해주세요.');
