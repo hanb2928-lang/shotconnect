@@ -413,22 +413,48 @@ export async function uploadVideoBlob(
         fileSize: info.size,
       });
 
-      const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
-        httpMethod: 'POST',
-        headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          'Content-Type': mimeType,
-          'x-upsert': 'false',
-        },
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-      });
+      // Primary: BINARY_CONTENT. Fallback: MULTIPART for OEM stacks that
+      // mishandle raw binary POST bodies (same rationale as uploadUriToBucket).
+      let result: { status: number; body?: string } | null = null;
+      try {
+        const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
+          httpMethod: 'POST',
+          headers: {
+            Authorization: `Bearer ${supabaseAnonKey}`,
+            'Content-Type': mimeType,
+            'x-upsert': 'false',
+          },
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        });
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
+        });
+        const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
+        result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
+        if (result.status >= 400) result = null;
+      } catch {
+        result = null;
+      }
 
-      let timer: ReturnType<typeof setTimeout>;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
-      });
-      const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
-      const result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
+      if (!result) {
+        const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
+          httpMethod: 'POST',
+          headers: {
+            Authorization: `Bearer ${supabaseAnonKey}`,
+          },
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName: 'file',
+          mimeType,
+          parameters: { upsert: 'false' },
+        });
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
+        });
+        const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
+        result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
+      }
 
       if (result.status >= 400) {
         finishLog({ error: `HTTP ${result.status}` });
