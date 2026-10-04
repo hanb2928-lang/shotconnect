@@ -541,29 +541,46 @@ function CameraScreenInner() {
     const controller = new AbortController();
     autoAnalysisAbortRef.current = controller;
     try {
-      // Native heap cooldown before heavy upload/frame extraction: prevents
-      // native heap double-burst → LMK SIGKILL after photo capture.
       await nativeHeapCooldownGuard();
       if (!isMountedRef.current || controller.signal.aborted) return;
-      if (!base64) {
-        if (!videoUri) return;
-        const frame = await withTimeout(
-          extractVideoFrameBase64(videoUri, 1080, 0.7),
-          VIDEO_FRAME_TIMEOUT_MS,
-          '동영상 프레임 추출',
-        );
-        if (!isMountedRef.current || controller.signal.aborted) return;
-        const imageUrl = await uploadImage(frame.base64, frame.mimeType, controller.signal, true);
-        if (!isMountedRef.current || controller.signal.aborted) return;
-        const scanId = await saveManualScan(imageUrl);
-        if (!isMountedRef.current || controller.signal.aborted) return;
-        router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
-        return;
+
+      const uploadAndSave = async (): Promise<string> => {
+        if (!base64) {
+          if (!videoUri) throw new Error('촬영된 미디어가 없습니다.');
+          const frame = await withTimeout(
+            extractVideoFrameBase64(videoUri, 1080, 0.7),
+            VIDEO_FRAME_TIMEOUT_MS,
+            '동영상 프레임 추출',
+          );
+          if (!isMountedRef.current || controller.signal.aborted) throw new Error('aborted');
+          const imageUrl = await uploadImage(frame.base64, frame.mimeType, controller.signal, true);
+          if (!isMountedRef.current || controller.signal.aborted) throw new Error('aborted');
+          return await saveManualScan(imageUrl);
+        }
+        const imageUrl = await uploadImage(base64, mimeType, controller.signal, true);
+        if (!isMountedRef.current || controller.signal.aborted) throw new Error('aborted');
+        return await saveManualScan(imageUrl);
+      };
+
+      let scanId: string | null = null;
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (controller.signal.aborted) break;
+        try {
+          scanId = await uploadAndSave();
+          break;
+        } catch (err) {
+          if (controller.signal.aborted || !isMountedRef.current) return;
+          lastErr = err;
+          if (attempt === 0) {
+            await new Promise<void>((r) => setTimeout(r, 2000));
+            await nativeHeapCooldownGuard();
+          }
+        }
       }
-      const imageUrl = await uploadImage(base64, mimeType, controller.signal, true);
+
       if (!isMountedRef.current || controller.signal.aborted) return;
-      const scanId = await saveManualScan(imageUrl);
-      if (!isMountedRef.current || controller.signal.aborted) return;
+      if (!scanId) throw lastErr ?? new Error('업로드에 실패했습니다.');
       router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
     } catch (err) {
       if (!isMountedRef.current || controller.signal.aborted) return;

@@ -589,7 +589,7 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
 export async function saveManualScan(
   imageUrl: string,
 ): Promise<string> {
-  const DB_TIMEOUT_MS = 30_000;
+  const DB_TIMEOUT_MS = 45_000;
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('스캔 저장 시간이 초과되었습니다.')), DB_TIMEOUT_MS);
