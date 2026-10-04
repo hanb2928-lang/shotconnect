@@ -15,6 +15,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { compressDataUrlToMaxBytes } from '@/lib/imageEdit';
 import { cleanBase64 } from '@/lib/base64';
+import { registerTempFile, unpinTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
+import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
 import { ArrowLeft, Sparkles } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
@@ -54,50 +56,135 @@ import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/li
 import { AppState, type AppStateStatus } from 'react-native';
 
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
+const UPLOAD_MAX_RETRIES = 3;
+const UPLOAD_INITIAL_DIM = 720;
+const UPLOAD_INITIAL_QUALITY = 0.7;
+
+function isUploadNetworkError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return msg.includes('network') || msg.includes('failed to fetch') || msg.includes('timeout') || msg.includes('abort');
+  }
+  return false;
+}
+
+async function compressForUpload(dataUrl: string, maxDim: number, quality: number): Promise<string> {
+  if (isWorkerPoolAvailable()) {
+    try {
+      return await compressImageInWorker(dataUrl, maxDim, quality);
+    } catch {
+      // fall through to main-thread compression
+    }
+  }
+  const { prepareImageForApi } = await import('@/lib/imageEdit');
+  return prepareImageForApi(dataUrl, maxDim, quality);
+}
 
 async function uploadImageToStorage(uri: string): Promise<string> {
-  let compressedUri = uri;
-  let quality = 0.7;
-  const dimSteps = [1080, 900, 720, 540];
-  const qualitySteps = [0.7, 0.55, 0.42, 0.3];
+  // Ghost URI defense: verify the source file exists before any processing.
+  if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
+    let srcInfo: { exists: boolean } | null = null;
+    try {
+      srcInfo = await FileSystem.getInfoAsync(uri);
+    } catch {
+      throw new Error('이미지 파일을 확인할 수 없습니다. 다시 촬영해주세요.');
+    }
+    if (!srcInfo || !srcInfo.exists) {
+      throw new Error('촬영된 이미지가 만료되었거나 삭제되었습니다. 다시 촬영해주세요.');
+    }
+  }
 
-  for (let pass = 0; pass < dimSteps.length; pass++) {
-    const manipulated = await ImageManipulator.manipulateAsync(
-      compressedUri,
-      [{ resize: { width: dimSteps[pass] } }],
-      { compress: qualitySteps[pass], format: ImageManipulator.SaveFormat.JPEG },
-    );
-    compressedUri = manipulated.uri;
+  // Pin the source URI so the TTL sweep cannot delete it mid-upload.
+  // On native, file:// URIs from the camera are in the temp cache and can
+  // be collected by sweepTempFiles if the upload takes longer than the TTL.
+  if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
+    registerTempFile(uri, 'synthesis-upload', { pin: true });
+  }
+
+  try {
+    // 720px normalization + 2MB hard cap via iterative compression.
+    // On web, compression runs in a Web Worker so the UI thread stays free.
+    let compressedUri = uri;
+    const dimSteps = [UPLOAD_INITIAL_DIM, 600, 480, 360];
+    const qualitySteps = [UPLOAD_INITIAL_QUALITY, 0.55, 0.42, 0.3];
+
+    for (let pass = 0; pass < dimSteps.length; pass++) {
+      if (Platform.OS === 'web' && uri.startsWith('data:')) {
+        // Web data URL: compress via worker (or main-thread fallback)
+        const compressed = await compressForUpload(uri, dimSteps[pass], qualitySteps[pass]);
+        const byteLen = Math.floor((cleanBase64(compressed).length * 3) / 4);
+        if (byteLen <= MAX_NATIVE_IMAGE_BYTES) {
+          const finalBase64 = cleanBase64(compressed);
+          return await performUpload(finalBase64);
+        }
+        continue;
+      }
+      const manipulated = await ImageManipulator.manipulateAsync(
+        compressedUri,
+        [{ resize: { width: dimSteps[pass] } }],
+        { compress: qualitySteps[pass], format: ImageManipulator.SaveFormat.JPEG },
+      );
+      compressedUri = manipulated.uri;
+      const fileInfo = await FileSystem.getInfoAsync(compressedUri);
+      if (fileInfo.exists && fileInfo.size <= MAX_NATIVE_IMAGE_BYTES) break;
+    }
+
     const fileInfo = await FileSystem.getInfoAsync(compressedUri);
-    if (fileInfo.exists && fileInfo.size <= MAX_NATIVE_IMAGE_BYTES) break;
+    if (!fileInfo.exists) throw new Error('이미지 파일을 찾을 수 없습니다.');
+
+    const base64 = await FileSystem.readAsStringAsync(compressedUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    // Enforce 2MB payload via iterative data-URL compression
+    let finalBase64 = base64;
+    const payloadBytes = Math.floor((base64.length * 3) / 4);
+    if (payloadBytes > MAX_NATIVE_IMAGE_BYTES) {
+      const dataUrl = `data:image/jpeg;base64,${base64}`;
+      const compressed = await compressDataUrlToMaxBytes(dataUrl, MAX_NATIVE_IMAGE_BYTES, 540, 0.3);
+      finalBase64 = cleanBase64(compressed);
+    }
+
+    return await performUpload(finalBase64);
+  } finally {
+    // Release the pin so the temp file can be cleaned up after upload
+    if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
+      unpinTempFile(uri);
+      await safeDeleteTempFile(uri).catch(() => {});
+    }
   }
+}
 
-  const fileInfo = await FileSystem.getInfoAsync(compressedUri);
-  if (!fileInfo.exists) throw new Error('이미지 파일을 찾을 수 없습니다.');
-
-  const base64 = await FileSystem.readAsStringAsync(compressedUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-
-  // Enforce 2MB payload on all platforms via iterative data-URL compression
-  let finalBase64 = base64;
-  const payloadBytes = Math.floor((base64.length * 3) / 4);
-  if (payloadBytes > MAX_NATIVE_IMAGE_BYTES) {
-    const dataUrl = `data:image/jpeg;base64,${base64}`;
-    const compressed = await compressDataUrlToMaxBytes(dataUrl, MAX_NATIVE_IMAGE_BYTES, 540, 0.3);
-    finalBase64 = cleanBase64(compressed);
-  }
-
+async function performUpload(finalBase64: string): Promise<string> {
   const bytes = Platform.OS === 'web'
     ? new Blob([Uint8Array.from(atob(finalBase64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' })
     : Uint8Array.from(atob(finalBase64), (c) => c.charCodeAt(0));
   const fileName = `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-  const { error } = await supabase.storage
-    .from('scans')
-    .upload(fileName, bytes, { contentType: 'image/jpeg', cacheControl: '360000' });
-  if (error) throw new Error(`이미지 업로드 실패: ${error.message}`);
-  const { data } = supabase.storage.from('scans').getPublicUrl(fileName);
-  return data.publicUrl;
+
+  // Exponential backoff retry with jitter for transient network failures
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    const { error: uploadError } = await supabase.storage
+      .from('scans')
+      .upload(fileName, bytes, { contentType: 'image/jpeg', cacheControl: '360000' });
+
+    if (!uploadError) {
+      const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
+      return urlData.publicUrl;
+    }
+
+    lastError = uploadError instanceof Error ? uploadError : new Error(String(uploadError));
+
+    if (attempt < UPLOAD_MAX_RETRIES && isUploadNetworkError(uploadError)) {
+      const baseDelay = 1000 * Math.pow(2, attempt);
+      const jitter = 0.5 + Math.random() * 0.5;
+      await new Promise((resolve) => setTimeout(resolve, baseDelay * jitter));
+      continue;
+    }
+    break;
+  }
+
+  throw new Error(`이미지 업로드 실패: ${lastError?.message ?? '알 수 없는 오제'}`);
 }
 
 export default function SynthesisScreen() {
@@ -456,9 +543,16 @@ export default function SynthesisScreen() {
         return uploadImageToStorage(img.uri);
       };
 
-      const [mainUrl, ...restUrls] = await Promise.all(
-        productImages.map(uploadSingle),
-      );
+      // Sequential upload to prevent memory spikes (OOM) and respect server
+      // payload limits — each image is compressed, read, and uploaded one at
+      // a time so peak memory stays bounded to a single image's data.
+      const uploadedUrls: string[] = [];
+      for (const img of productImages) {
+        const url = await uploadSingle(img);
+        uploadedUrls.push(url);
+      }
+      const mainUrl = uploadedUrls[0];
+      const restUrls = uploadedUrls.slice(1);
       const modelUrl = modelImage ? await uploadSingle(modelImage) : null;
 
       if (!mountedRef.current) return;
