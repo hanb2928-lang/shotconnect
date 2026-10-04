@@ -1,19 +1,15 @@
-import { getDeviceTier, isMobileWebView } from '@/lib/devicePerformance';
+import { isMobileWebView } from '@/lib/devicePerformance';
 
-export const CAPTURE_MAX_WIDTH = 1280;
-export const CAPTURE_MAX_HEIGHT = 1280;
-export const CAPTURE_IDEAL_WIDTH = 1080;
-export const CAPTURE_IDEAL_HEIGHT = 1920;
+export const CAPTURE_MAX_WIDTH = 720;
+export const CAPTURE_MAX_HEIGHT = 720;
+export const CAPTURE_IDEAL_WIDTH = 720;
+export const CAPTURE_IDEAL_HEIGHT = 1280;
 
-// Low-end devices (≤2 cores or ≤2GB RAM) use 720p to avoid OOM kills.
-// Mid-tier devices cap at 1080p. High-end devices get the full ideal.
-const LOW_END_MAX_WIDTH = 720;
-const LOW_END_MAX_HEIGHT = 720;
-const LOW_END_IDEAL_WIDTH = 720;
-const LOW_END_IDEAL_HEIGHT = 1280;
-
-const MID_TIER_MAX_WIDTH = 1080;
-const MID_TIER_MAX_HEIGHT = 1080;
+// Single standard: all devices use 720px max dimension for capture.
+const STANDARD_MAX_WIDTH = 720;
+const STANDARD_MAX_HEIGHT = 720;
+const STANDARD_IDEAL_WIDTH = 720;
+const STANDARD_IDEAL_HEIGHT = 1280;
 
 export interface SafeVideoConstraints {
   facingMode?: 'user' | 'environment';
@@ -22,29 +18,19 @@ export interface SafeVideoConstraints {
 }
 
 function resolveIdealWidth(): number {
-  const tier = getDeviceTier();
-  if (tier === 'low') return LOW_END_IDEAL_WIDTH;
-  return CAPTURE_IDEAL_WIDTH;
+  return STANDARD_IDEAL_WIDTH;
 }
 
 function resolveIdealHeight(): number {
-  const tier = getDeviceTier();
-  if (tier === 'low') return LOW_END_IDEAL_HEIGHT;
-  return CAPTURE_IDEAL_HEIGHT;
+  return STANDARD_IDEAL_HEIGHT;
 }
 
 function resolveMaxWidth(): number {
-  const tier = getDeviceTier();
-  if (tier === 'low') return LOW_END_MAX_WIDTH;
-  if (tier === 'mid') return MID_TIER_MAX_WIDTH;
-  return CAPTURE_MAX_WIDTH;
+  return STANDARD_MAX_WIDTH;
 }
 
 function resolveMaxHeight(): number {
-  const tier = getDeviceTier();
-  if (tier === 'low') return LOW_END_MAX_HEIGHT;
-  if (tier === 'mid') return MID_TIER_MAX_HEIGHT;
-  return CAPTURE_MAX_HEIGHT;
+  return STANDARD_MAX_HEIGHT;
 }
 
 export function getSafeVideoConstraints(facing?: 'user' | 'environment'): SafeVideoConstraints {

@@ -36,6 +36,6 @@ describe('captureConstraints', () => {
   it('accepts optional facingMode', () => {
     const constraints = getSafeVideoConstraints();
     expect(constraints.facingMode).toBeUndefined();
-    expect(constraints.width.ideal).toBe(1080);
+    expect(constraints.width.ideal).toBe(720);
   });
 });

@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-import { getDeviceTier, detectRuntimePressure } from '@/lib/devicePerformance';
+import { getDeviceTier } from '@/lib/devicePerformance';
 import { addBreadcrumb, logWarning } from '@/lib/errorLogger';
 import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 
@@ -12,26 +12,9 @@ interface DeviceMediaLimits {
 }
 
 function getDeviceMediaLimits(): DeviceMediaLimits {
-  const tier = getDeviceTier();
-  const pressure = detectRuntimePressure();
-
-  if (tier === 'low' || pressure === 'severe') {
-    return {
-      maxImagePixels: 720 * 720,
-      targetImageDimension: 720,
-      maxVideoFileBytes: 50_000_000,
-    };
-  }
-  if (tier === 'mid' || pressure === 'moderate') {
-    return {
-      maxImagePixels: 1080 * 1080,
-      targetImageDimension: 1080,
-      maxVideoFileBytes: 120_000_000,
-    };
-  }
   return {
-    maxImagePixels: 1440 * 1440,
-    targetImageDimension: 1440,
+    maxImagePixels: 720 * 720,
+    targetImageDimension: 720,
     maxVideoFileBytes: 250_000_000,
   };
 }

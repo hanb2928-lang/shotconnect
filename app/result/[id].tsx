@@ -2003,7 +2003,7 @@ export default function ResultScreen() {
     (async () => {
       try {
         const dataUrl = await urlToDataUrl(url);
-        const compressed = await prepareImageForApi(dataUrl, 1024, 0.8);
+        const compressed = await prepareImageForApi(dataUrl, 720, 0.8);
         if (!cancelled) {
           if (!mountedRef.current) return;
           setCaptureImageUrl(compressed);

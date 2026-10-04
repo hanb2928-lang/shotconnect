@@ -40,8 +40,6 @@ import { isOnline } from '@/hooks/useNetworkStatus';
 import { buildDataUrl, cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
 import { prepareImageForApi, compressImageToBase64, compressImageToBase64WithUri, compressCaptureUriToBlob, extractVideoFrameBase64, waitForUriFlush, nativeHeapCooldownGuard } from '@/lib/imageEdit';
 import type { MoodFilterType } from '@/lib/imageEdit';
-import { getDeviceCaptureMaxDim } from '@/lib/captureConstraints';
-import { isLowEndDevice } from '@/lib/devicePerformance';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
@@ -548,7 +546,7 @@ function CameraScreenInner() {
       if (!base64) {
         if (!videoUri) return;
         const frame = await withTimeout(
-          extractVideoFrameBase64(videoUri, 1080, 0.7),
+          extractVideoFrameBase64(videoUri, 720, 0.8),
           VIDEO_FRAME_TIMEOUT_MS,
           '동영상 프레임 추출',
         );
@@ -669,7 +667,7 @@ function CameraScreenInner() {
             new Promise<string>((resolve, reject) => {
               InteractionManager.runAfterInteractions(async () => {
                 try {
-                  const r = await prepareImageForApi(buildDataUrl(cleanBase64(images[0].base64), images[0].mimeType), getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7, 'none' as MoodFilterType);
+                  const r = await prepareImageForApi(buildDataUrl(cleanBase64(images[0].base64), images[0].mimeType), 720, 0.8, 'none' as MoodFilterType);
                   resolve(r);
                 } catch (err) { reject(err); }
               });
@@ -710,7 +708,7 @@ function CameraScreenInner() {
         new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
           InteractionManager.runAfterInteractions(async () => {
             try {
-              const r = await compressImageToBase64(asset.uri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
+              const r = await compressImageToBase64(asset.uri, 720, 0.8);
               resolve(r);
             } catch (err) { reject(err); }
           });
@@ -847,7 +845,7 @@ function CameraScreenInner() {
         try { await cam.resumePreview(); } catch { /* non-fatal */ }
         return await withTimeout(
           cam.takePictureAsync({
-            quality: isLowEndDevice() ? 0.5 : 0.7,
+            quality: 0.6,
             shutterSound: false,
             ...({ mute: true } as Record<string, unknown>),
           }) as Promise<{ base64?: string; uri: string }>,
@@ -914,7 +912,7 @@ function CameraScreenInner() {
             for (let attempt = 0; attempt < 2; attempt++) {
               if (!isMountedRef.current) { reject(new Error('unmounted')); return; }
               try {
-                const r = await compressImageToBase64WithUri(capturedUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
+                const r = await compressImageToBase64WithUri(capturedUri, 720, 0.8);
                 resolve(r);
                 return;
               } catch (err) {
@@ -972,7 +970,7 @@ function CameraScreenInner() {
         new Promise<{ base64: string; mimeType: string; compressedUri: string | null }>((resolve, reject) => {
           InteractionManager.runAfterInteractions(async () => {
             try {
-              const r = await compressImageToBase64WithUri(assetUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
+              const r = await compressImageToBase64WithUri(assetUri, 720, 0.8);
               resolve(r);
             } catch (err) { reject(err); }
           });
@@ -1007,8 +1005,8 @@ function CameraScreenInner() {
             try {
               const r = await prepareImageForApi(
                 buildDataUrl(cleanBase64(payload), mimeType),
-                getDeviceCaptureMaxDim(),
-                isLowEndDevice() ? 0.6 : 0.7,
+                720,
+                0.8,
                 'none' as MoodFilterType,
               );
               resolve(r);

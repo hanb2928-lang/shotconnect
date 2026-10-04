@@ -4,7 +4,7 @@ import { Platform, Image as RNImage, AppState, type AppStateStatus } from 'react
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
-import { isLowEndDevice, getAdaptiveImageMaxDimension } from '@/lib/devicePerformance';
+import { isLowEndDevice } from '@/lib/devicePerformance';
 import { withFileLock } from '@/lib/fileLock';
 import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 import { registerTempFile, safeDeleteTempFile, unpinTempFile, unregisterTempFile } from '@/lib/tempFileManager';
@@ -114,7 +114,7 @@ export function base64ToBlob(base64: string, mimeType: string): Blob | Uint8Arra
   return new Blob([bytes.buffer as ArrayBuffer], { type: mimeType });
 }
 
-export async function compressImage(uri: string, maxWidth = 1080, quality = 0.8): Promise<string> {
+export async function compressImage(uri: string, maxWidth = 720, quality = 0.8): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(
     uri,
     [{ resize: { width: maxWidth } }],
@@ -123,10 +123,12 @@ export async function compressImage(uri: string, maxWidth = 1080, quality = 0.8)
   return result.uri;
 }
 
-export const UPLOAD_MAX_DIMENSION = 1080;
-export const UPLOAD_QUALITY = 0.68;
-const CAPTURE_MAX_DIMENSION = getAdaptiveImageMaxDimension();
-const CAPTURE_QUALITY = 0.78;
+export const STANDARD_MAX_DIMENSION = 720;
+export const STANDARD_QUALITY = 0.8;
+export const UPLOAD_MAX_DIMENSION = 720;
+export const UPLOAD_QUALITY = 0.8;
+const CAPTURE_MAX_DIMENSION = 720;
+const CAPTURE_QUALITY = 0.8;
 const MAX_NATIVE_IMAGE_BYTES = 12_000_000;
 export const UPLOAD_MAX_PAYLOAD_BYTES = 2_000_000;
 
@@ -142,8 +144,8 @@ export async function compressDataUrlToMaxBytes(
   initialQuality = UPLOAD_QUALITY,
 ): Promise<string> {
   let current = dataUrl;
-  const dimSteps = [initialMaxDimension, 900, 720, 540];
-  const qualitySteps = [initialQuality, 0.55, 0.42, 0.3];
+  const dimSteps = [initialMaxDimension, 600, 480, 360];
+  const qualitySteps = [initialQuality, 0.65, 0.5, 0.35];
 
   for (let pass = 0; pass < dimSteps.length; pass++) {
     const dim = dimSteps[pass];
@@ -362,8 +364,8 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
 
 export async function compressImageToBase64(
   uri: string,
-  maxDimension = getAdaptiveImageMaxDimension(),
-  quality = 0.7,
+  maxDimension = STANDARD_MAX_DIMENSION,
+  quality = STANDARD_QUALITY,
 ): Promise<{ base64: string; mimeType: string }> {
   const source = await makeReadableNativeUri(uri);
   try {
@@ -572,8 +574,8 @@ function applyMoodOverlay(
 
 export async function prepareImageForApi(
   dataUrl: string,
-  maxDimension = getAdaptiveImageMaxDimension(),
-  quality = 0.8,
+  maxDimension = STANDARD_MAX_DIMENSION,
+  quality = STANDARD_QUALITY,
   moodFilter: MoodFilterType = 'none',
 ): Promise<string> {
   const normalizedDataUrl = normalizeImageDataUrl(dataUrl);
@@ -651,7 +653,7 @@ export async function prepareImageForApi(
 
 export async function prepareImageForEdit(
   dataUrl: string,
-  maxDimension = getAdaptiveImageMaxDimension(),
+  maxDimension = STANDARD_MAX_DIMENSION,
 ): Promise<string> {
   const normalizedDataUrl = normalizeImageDataUrl(dataUrl);
   if (Platform.OS !== 'web') {
@@ -737,8 +739,8 @@ export function normalizeImageDataUrl(dataUrl: string): string {
 
 export async function extractVideoFrameBase64(
   videoUri: string,
-  maxDimension = getAdaptiveImageMaxDimension(),
-  quality = 0.7,
+  maxDimension = STANDARD_MAX_DIMENSION,
+  quality = STANDARD_QUALITY,
 ): Promise<{ base64: string; mimeType: string }> {
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
     const video = document.createElement('video');
@@ -843,8 +845,8 @@ export async function readUriAsBase64(uri: string): Promise<{ base64: string; mi
 
 export async function compressImageToBase64WithUri(
   uri: string,
-  maxDimension = getAdaptiveImageMaxDimension(),
-  quality = 0.7,
+  maxDimension = STANDARD_MAX_DIMENSION,
+  quality = STANDARD_QUALITY,
 ): Promise<{ base64: string; mimeType: string; compressedUri: string | null }> {
   try {
     const { width: origW, height: origH } = await getImageSize(uri);
@@ -882,8 +884,8 @@ export async function compressImageToBase64WithUri(
 
 export async function compressCaptureUriToBlob(
   uri: string,
-  maxDimension = getAdaptiveImageMaxDimension(),
-  quality = 0.7,
+  maxDimension = STANDARD_MAX_DIMENSION,
+  quality = STANDARD_QUALITY,
 ): Promise<{ blob: Blob | Uint8Array; base64: string; mimeType: string }> {
   const { base64, mimeType } = await compressImageToBase64(uri, maxDimension, quality);
   const blob = base64ToBlob(base64, mimeType);

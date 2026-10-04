@@ -2,10 +2,10 @@ import { Platform } from 'react-native';
 import { prepareImageForApi } from './imageEdit';
 import { cleanBase64, getMimeTypeFromDataUrl, buildDataUrl } from './base64';
 import { compressImageInWorker, isWorkerPoolAvailable } from './workerPool';
-import { getAdaptiveImageMaxDimension } from './devicePerformance';
+import { STANDARD_MAX_DIMENSION, STANDARD_QUALITY } from './imageEdit';
 
-const EDGE_FN_MAX_DIMENSION = getAdaptiveImageMaxDimension();
-const EDGE_FN_QUALITY = 0.72;
+const EDGE_FN_MAX_DIMENSION = STANDARD_MAX_DIMENSION;
+const EDGE_FN_QUALITY = STANDARD_QUALITY;
 const PARALLEL_BATCH_SIZE = Platform.OS === 'web' ? 5 : 1;
 
 export interface CompressedImage {

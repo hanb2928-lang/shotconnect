@@ -193,7 +193,7 @@ export const InlineCameraViewfinder = forwardRef<
       const video = videoRef.current;
       const rawW = video.videoWidth || 1080;
       const rawH = video.videoHeight || 1920;
-      const { width: w, height: h } = clampCaptureDimensions(rawW, rawH, 1080);
+      const { width: w, height: h } = clampCaptureDimensions(rawW, rawH, 720);
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
@@ -244,7 +244,7 @@ export const InlineCameraViewfinder = forwardRef<
         }
         capturedUri = result.uri;
         const uriToDelete = capturedUri;
-        const compressed = await compressImageToBase64(uriToDelete, 1080, 0.6);
+        const compressed = await compressImageToBase64(uriToDelete, 720, 0.8);
         // Wait for temp file cleanup to finish before releasing the lock.
         // Use withFileSettle to retry on transient EBUSY from the camera
         // session still holding the file handle.

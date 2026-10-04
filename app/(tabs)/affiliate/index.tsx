@@ -468,7 +468,7 @@ export default function AffiliateScreen() {
           setMediaLoading(false);
           return;
         }
-        const { base64, mimeType } = await compressImageToBase64(result.assets[0].uri, 1280, 0.7);
+        const { base64, mimeType } = await compressImageToBase64(result.assets[0].uri, 720, 0.8);
         if (!mounted.current) return;
         setPreviewCapture({ base64, mimeType });
       }
@@ -632,7 +632,7 @@ export default function AffiliateScreen() {
         }
         const compressed: { base64: string; mimeType: string }[] = [];
         for (const asset of result.assets.slice(0, 4)) {
-          const c = await compressImageToBase64(asset.uri, 1280, 0.7);
+          const c = await compressImageToBase64(asset.uri, 720, 0.8);
           compressed.push(c);
         }
         const newImages = compressed.map((c) => ({ uri: buildDataUrl(c.base64, c.mimeType), mime: c.mimeType }));
