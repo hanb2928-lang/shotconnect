@@ -589,36 +589,44 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
 export async function saveManualScan(
   imageUrl: string,
 ): Promise<string> {
-  const { data, error } = await supabase
-    .from('scans')
-    .insert({
-      image_url: imageUrl,
-      scan_source: 'template',
-      title: '직접 만든 템플릿',
-      summary: '',
-      contacts: [],
-      tags: [],
-      product_name: '',
-      product_category: '',
-      price_estimate: '',
-      one_liner: '',
-      shopping_matches: [],
-      affiliate_links: [],
-      template_data: {
-        priceLabel: '',
-        oneLiner: '',
-        category: '',
-        accentColor: '#2f9dff',
-        hook: '',
-        hashtags: [],
-        productAdvantages: [],
-        caption: '',
-        psychologyInsight: null,
-      },
-      detected_products: [],
-    })
-    .select('id')
-    .single();
+  const DB_TIMEOUT_MS = 30_000;
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('스캔 저장 시간이 초과되었습니다.')), DB_TIMEOUT_MS);
+  });
+  const { data, error } = await Promise.race([
+    supabase
+      .from('scans')
+      .insert({
+        image_url: imageUrl,
+        scan_source: 'template',
+        title: '직접 만든 템플릿',
+        summary: '',
+        contacts: [],
+        tags: [],
+        product_name: '',
+        product_category: '',
+        price_estimate: '',
+        one_liner: '',
+        shopping_matches: [],
+        affiliate_links: [],
+        template_data: {
+          priceLabel: '',
+          oneLiner: '',
+          category: '',
+          accentColor: '#2f9dff',
+          hook: '',
+          hashtags: [],
+          productAdvantages: [],
+          caption: '',
+          psychologyInsight: null,
+        },
+        detected_products: [],
+      })
+      .select('id')
+      .single(),
+    timeout,
+  ]).finally(() => clearTimeout(timer!));
 
   if (error) throw new Error(`Failed to save scan: ${error.message}`);
   return data.id;

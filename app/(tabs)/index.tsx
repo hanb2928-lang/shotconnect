@@ -553,14 +553,14 @@ function CameraScreenInner() {
           '동영상 프레임 추출',
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
-        const imageUrl = await uploadImage(frame.base64, frame.mimeType, controller.signal);
+        const imageUrl = await uploadImage(frame.base64, frame.mimeType, controller.signal, true);
         if (!isMountedRef.current || controller.signal.aborted) return;
         const scanId = await saveManualScan(imageUrl);
         if (!isMountedRef.current || controller.signal.aborted) return;
         router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
         return;
       }
-      const imageUrl = await uploadImage(base64, mimeType, controller.signal);
+      const imageUrl = await uploadImage(base64, mimeType, controller.signal, true);
       if (!isMountedRef.current || controller.signal.aborted) return;
       const scanId = await saveManualScan(imageUrl);
       if (!isMountedRef.current || controller.signal.aborted) return;
