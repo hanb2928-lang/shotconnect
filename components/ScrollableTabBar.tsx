@@ -15,6 +15,7 @@ import { useI18n } from '@/hooks/useI18n';
 import {
   Camera,
   Wand2,
+  Film,
   Folder,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -22,12 +23,14 @@ import {
 const TAB_ICONS: Record<string, LucideIcon> = {
   index: Camera,
   marketing: Wand2,
+  videos: Film,
   assets: Folder,
 };
 
 const TAB_KEYS: Record<string, string> = {
   index: 'tab.camera',
   marketing: 'tab.create',
+  videos: 'tab.videos',
   assets: 'tab.library',
 };
 

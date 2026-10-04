@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
@@ -6,11 +6,12 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   RefreshControl,
+  Platform,
+  Alert,
 } from 'react-native';
-import { Film, Download, Share2, ChevronRight, Inbox } from 'lucide-react-native';
+import { Film, Download, Share2, ChevronRight, Inbox, Play } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { theme } from '@/lib/theme';
 import {
@@ -22,8 +23,31 @@ import {
 } from '@/lib/archive';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { CachedImage } from '@/components/CachedImage';
+import { VideoReplayModal } from '@/components/VideoReplayModal';
+import { friendlyError } from '@/lib/errors';
 
-export function ArchiveSection() {
+let _mediaLibrary: typeof import('expo-media-library') | null = null;async function getMediaLibrary() {
+  if (!_mediaLibrary) _mediaLibrary = await import('expo-media-library');
+  return _mediaLibrary;
+}
+
+let _fileSystem: typeof import('expo-file-system/legacy') | null = null;
+async function getFileSystem() {
+  if (!_fileSystem) _fileSystem = await import('expo-file-system/legacy');
+  return _fileSystem;
+}
+
+let _sharing: typeof import('expo-sharing') | null = null;
+async function getSharing() {
+  if (!_sharing) _sharing = await import('expo-sharing');
+  return _sharing;
+}
+
+interface ArchiveSectionProps {
+  embedded?: boolean;
+}
+
+export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
   const router = useRouter();
   const tabBarHeight = useTabBarHeight();
   const mounted = useMountedRef();
@@ -36,6 +60,23 @@ export function ArchiveSection() {
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<ArchiveSort>('recent');
   const [error, setError] = useState<string | null>(null);
+  const [replayItem, setReplayItem] = useState<ArchiveItem | null>(null);
+  const [replayVisible, setReplayVisible] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }, []);
 
   const loadFirstPage = useCallback(async (showRefreshing = false) => {
     try {
@@ -85,7 +126,6 @@ export function ArchiveSection() {
       setHasMore(result.hasMore);
       setPage(next);
     } catch {
-      // stop pagination on error
       setHasMore(false);
     } finally {
       setLoadingMore(false);
@@ -94,9 +134,87 @@ export function ArchiveSection() {
 
   const handleRefresh = () => loadFirstPage(true);
 
-  const handleItemPress = (id: string) => {
-    router.push({ pathname: '/result/[id]', params: { id } });
+  const handleReplay = (item: ArchiveItem) => {
+    setReplayItem(item);
+    setReplayVisible(true);
   };
+
+  const handleCloseReplay = () => {
+    setReplayVisible(false);
+    setReplayItem(null);
+  };
+
+  const handleDownload = useCallback(async (item: ArchiveItem) => {
+    if (!item.videoUrl) return;
+    setDownloadingId(item.id);
+    try {
+      if (Platform.OS === 'web') {
+        const a = document.createElement('a');
+        a.href = item.videoUrl;
+        a.download = `${item.productName || item.title || 'shortform'}-${item.id.slice(0, 8)}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast('다운로드를 시작했습니다.');
+        return;
+      }
+      const MediaLibrary = await getMediaLibrary();
+      const FileSystem = await getFileSystem();
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('권한 필요', '기기 갤러리 저장을 위해 권한을 허용해주세요.');
+        return;
+      }
+      const localUri = `${FileSystem.cacheDirectory}shortform-${item.id.slice(0, 8)}-${Date.now()}.mp4`;
+      const downloadRes = await FileSystem.downloadAsync(item.videoUrl, localUri);
+      if (downloadRes.status !== 200) {
+        throw new Error(`다운로드 실패 (${downloadRes.status})`);
+      }
+      const mediaAsset = await MediaLibrary.createAssetAsync(downloadRes.uri);
+      try {
+        await MediaLibrary.createAlbumAsync('숏커넥트 영상', mediaAsset, false);
+      } catch { /* scoped storage */ }
+      showToast('기기 갤러리에 저장되었습니다.');
+    } catch (err) {
+      showToast(friendlyError(err, '다운로드에 실패했습니다.'));
+    } finally {
+      setDownloadingId(null);
+    }
+  }, [showToast]);
+
+  const handleShare = useCallback(async (item: ArchiveItem) => {
+    if (!item.videoUrl) return;
+    try {
+      if (Platform.OS === 'web') {
+        const a = document.createElement('a');
+        a.href = item.videoUrl;
+        a.download = `${item.productName || item.title || 'shortform'}-${item.id.slice(0, 8)}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast('영상을 다운로드하여 공유할 수 있습니다.');
+        return;
+      }
+      const Sharing = await getSharing();
+      const FileSystem = await getFileSystem();
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        showToast('이 기기에서는 공유를 지원하지 않습니다.');
+        return;
+      }
+      const localUri = `${FileSystem.cacheDirectory}share-${item.id.slice(0, 8)}-${Date.now()}.mp4`;
+      const downloadRes = await FileSystem.downloadAsync(item.videoUrl, localUri);
+      if (downloadRes.status !== 200) {
+        throw new Error(`파일 준비 실패 (${downloadRes.status})`);
+      }
+      await Sharing.shareAsync(downloadRes.uri, {
+        mimeType: 'video/mp4',
+        dialogTitle: `${item.productName || item.title || '숏폼'} 공유`,
+      });
+    } catch (err) {
+      showToast(friendlyError(err, '공유에 실패했습니다.'));
+    }
+  }, [showToast]);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
@@ -133,33 +251,61 @@ export function ArchiveSection() {
     );
   }
 
+  const bottomPad = (embedded ? tabBarHeight : tabBarHeight) + 24;
+
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <View style={styles.titleWrap}>
-          <Film size={18} color={theme.colors.primary[400]} strokeWidth={2} />
-          <Text style={styles.title}>숏폼 보관함</Text>
-          {total > 0 && <Text style={styles.countBadge}>{total}</Text>}
+      {!embedded && (
+        <View style={styles.headerRow}>
+          <View style={styles.titleWrap}>
+            <Film size={18} color={theme.colors.primary[400]} strokeWidth={2} />
+            <Text style={styles.title}>숏폼 보관함</Text>
+            {total > 0 && <Text style={styles.countBadge}>{total}</Text>}
+          </View>
+          <View style={styles.sortRow}>
+            <TouchableOpacity
+              style={[styles.sortBtn, sort === 'recent' && styles.sortBtnActive]}
+              onPress={() => { setSort('recent'); }}
+              disabled={sort === 'recent'}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.sortText, sort === 'recent' && styles.sortTextActive]}>최신순</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortBtn, sort === 'oldest' && styles.sortBtnActive]}
+              onPress={() => { setSort('oldest'); }}
+              disabled={sort === 'oldest'}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.sortText, sort === 'oldest' && styles.sortTextActive]}>오래된순</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={styles.sortRow}>
-          <TouchableOpacity
-            style={[styles.sortBtn, sort === 'recent' && styles.sortBtnActive]}
-            onPress={() => { setSort('recent'); }}
-            disabled={sort === 'recent'}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.sortText, sort === 'recent' && styles.sortTextActive]}>최신순</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.sortBtn, sort === 'oldest' && styles.sortBtnActive]}
-            onPress={() => { setSort('oldest'); }}
-            disabled={sort === 'oldest'}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.sortText, sort === 'oldest' && styles.sortTextActive]}>오래된순</Text>
-          </TouchableOpacity>
+      )}
+
+      {embedded && (
+        <View style={styles.sortBar}>
+          <View style={styles.sortRow}>
+            <TouchableOpacity
+              style={[styles.sortBtn, sort === 'recent' && styles.sortBtnActive]}
+              onPress={() => { setSort('recent'); }}
+              disabled={sort === 'recent'}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.sortText, sort === 'recent' && styles.sortTextActive]}>최신순</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortBtn, sort === 'oldest' && styles.sortBtnActive]}
+              onPress={() => { setSort('oldest'); }}
+              disabled={sort === 'oldest'}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.sortText, sort === 'oldest' && styles.sortTextActive]}>오래된순</Text>
+            </TouchableOpacity>
+          </View>
+          {total > 0 && <Text style={styles.countText}>총 {total}개</Text>}
         </View>
-      </View>
+      )}
 
       {error && (
         <View style={styles.errorRow}>
@@ -174,46 +320,65 @@ export function ArchiveSection() {
         data={items}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            onPress={() => handleItemPress(item.id)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.thumbnailWrap}>
-              <CachedImage uri={item.imageUrl} style={styles.thumbnail} />
-              <View style={styles.playOverlay}>
-                <Film size={16} color="#fff" strokeWidth={2} />
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.cardMain}
+              onPress={() => handleReplay(item)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.thumbnailWrap}>
+                <CachedImage uri={item.imageUrl} style={styles.thumbnail} />
+                <View style={styles.playOverlay}>
+                  <Play size={14} color="#fff" strokeWidth={2.5} fill="#fff" />
+                </View>
               </View>
-            </View>
-            <View style={styles.cardBody}>
-              <Text style={styles.cardTitle} numberOfLines={1}>
-                {item.productName || item.title || '제품'}
-              </Text>
-              {item.oneLiner ? (
-                <Text style={styles.cardDesc} numberOfLines={2}>
-                  {item.oneLiner}
+              <View style={styles.cardBody}>
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {item.productName || item.title || '제품'}
                 </Text>
-              ) : null}
-              <Text style={styles.cardDate}>{formatDate(item.createdAt)}</Text>
-            </View>
+                {item.oneLiner ? (
+                  <Text style={styles.cardDesc} numberOfLines={2}>
+                    {item.oneLiner}
+                  </Text>
+                ) : null}
+                {item.motionTemplate ? (
+                  <Text style={styles.cardTemplate} numberOfLines={1}>
+                    {item.motionTemplate}
+                  </Text>
+                ) : null}
+                <Text style={styles.cardDate}>{formatDate(item.createdAt)}</Text>
+              </View>
+            </TouchableOpacity>
             <View style={styles.cardActions}>
               <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => handleItemPress(item.id)}
+                onPress={() => handleDownload(item)}
+                disabled={downloadingId === item.id || !item.videoUrl}
                 activeOpacity={0.7}
               >
-                <Download size={16} color={theme.colors.primary[400]} strokeWidth={2} />
+                {downloadingId === item.id ? (
+                  <ActivityIndicator size="small" color={theme.colors.primary[400]} />
+                ) : (
+                  <Download size={16} color={theme.colors.primary[400]} strokeWidth={2} />
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => handleItemPress(item.id)}
+                onPress={() => handleShare(item)}
+                disabled={!item.videoUrl}
                 activeOpacity={0.7}
               >
                 <Share2 size={16} color={theme.colors.accent[400]} strokeWidth={2} />
               </TouchableOpacity>
-              <ChevronRight size={18} color={theme.colors.dark.textFaint} strokeWidth={2} />
+              <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={() => router.push({ pathname: '/result/[id]', params: { id: item.id } })}
+                activeOpacity={0.7}
+              >
+                <ChevronRight size={18} color={theme.colors.dark.textFaint} strokeWidth={2} />
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
         )}
         refreshControl={
           <RefreshControl
@@ -226,9 +391,21 @@ export function ArchiveSection() {
         onEndReachedThreshold={0.3}
         ListFooterComponent={renderFooter}
         ListEmptyComponent={renderEmpty}
-        contentContainerStyle={{ paddingBottom: tabBarHeight + 24 }}
+        contentContainerStyle={{ paddingBottom: bottomPad }}
         showsVerticalScrollIndicator={false}
       />
+
+      <VideoReplayModal
+        visible={replayVisible}
+        item={replayItem}
+        onClose={handleCloseReplay}
+      />
+
+      {toast && (
+        <View style={styles.toastContainer}>
+          <Text style={styles.toastText}>{toast}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -271,6 +448,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
+  sortBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
   sortRow: {
     flexDirection: 'row',
     gap: 4,
@@ -290,6 +474,10 @@ const styles = StyleSheet.create({
   },
   sortTextActive: {
     color: theme.colors.primary[300],
+  },
+  countText: {
+    fontSize: 12,
+    color: theme.colors.dark.textFaint,
   },
   errorRow: {
     flexDirection: 'row',
@@ -318,6 +506,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 14,
     padding: 10,
+    gap: 12,
+  },
+  cardMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
   },
   thumbnailWrap: {
@@ -354,6 +548,11 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.textDim,
     lineHeight: 16,
   },
+  cardTemplate: {
+    fontSize: 10,
+    color: theme.colors.primary[300],
+    marginTop: 1,
+  },
   cardDate: {
     fontSize: 11,
     color: theme.colors.dark.textFaint,
@@ -389,5 +588,23 @@ const styles = StyleSheet.create({
   emptySubtext: {
     fontSize: 13,
     color: theme.colors.dark.textFaint,
+  },
+  toastContainer: {
+    position: 'absolute',
+    bottom: 80,
+    left: 24,
+    right: 24,
+    backgroundColor: 'rgba(20, 20, 22, 0.95)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  toastText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: theme.colors.dark.text,
+    textAlign: 'center',
   },
 });
