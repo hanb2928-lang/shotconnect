@@ -51,3 +51,44 @@ export function hashObject(obj: Record<string, unknown>): string {
   }
   return contentHash(parts.join('|'), 2048);
 }
+
+/**
+ * Builds a deterministic hash for the motion template / generation parameters
+ * that affect video output beyond the image set + tone. This includes style
+ * preset, duration, aspect ratio, hook category, camera settings, etc.
+ *
+ * The same combination of parameters always yields the same hash, enabling
+ * cache hits when a user regenerates with identical settings.
+ */
+export function hashMotionTemplate(params: {
+  stylePreset?: string;
+  durationSec?: number;
+  aspectRatio?: string;
+  hookCategory?: string;
+  cameraRotation?: number;
+  zoomSpeed?: number;
+  transitionEffect?: string;
+  enableOrbit360?: boolean;
+  orbitSpeed?: number;
+  enableCaustics?: boolean;
+  enableVirtualFitting?: boolean;
+  enableFabricPhysics?: boolean;
+  isCleanVideoMode?: boolean;
+  promptStrength?: number;
+  negativePrompt?: string;
+  bgStyle?: string;
+  outfitIntensity?: number;
+  detailRestoration?: boolean;
+  qualityTier?: string;
+  resolution?: string;
+  fps?: number;
+  selectedMode?: string;
+}): string {
+  const filtered: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(params)) {
+    if (val === undefined || val === null) continue;
+    if (typeof val === 'boolean' && val === false) continue;
+    filtered[key] = val;
+  }
+  return hashObject(filtered);
+}

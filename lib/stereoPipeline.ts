@@ -13,6 +13,8 @@ import { nativeHeapCooldownGuard } from './imageEdit';
 import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
 import { logError, addBreadcrumb } from './errorLogger';
 import { safeInvoke } from './apiClient';
+import { hashObject } from './contentHash';
+import { aiCachedCall } from './aiCache';
 
 const UPLOAD_MAX_RETRIES = 3;
 const UPLOAD_RETRY_DELAY_MS = 1500;
@@ -201,21 +203,40 @@ async function invokeStereoCutAuto(
   signal?: AbortSignal,
 ): Promise<CloudPipelineResult | null> {
   if (signal?.aborted) return null;
+
+  // Build a cache key from the angle metadata (keys, orderIndex) + context + style.
+  // The actual image URLs are already content-addressed in Supabase Storage,
+  // so hashing the metadata alone is sufficient to detect duplicate requests.
+  const cacheInput = {
+    task: 'stereo-cut-auto',
+    angles: payloads.map((p) => ({ key: p.key, orderIndex: p.orderIndex })),
+    context,
+    style,
+  };
+
   try {
-    const data = await safeInvoke<{ result?: CloudPipelineResult }>(() =>
-      supabase.functions.invoke('stereo-cut-auto', {
-        body: {
-          scanId,
-          angles: payloads,
-          customPrompt: context,
-          productName: style === 'studio' ? '프리미엄 스튜디오 제품' : '프리미엄 추천 상품',
-          targetPlatforms: ['youtube', 'instagram', 'tiktok'],
-        },
-        signal,
-      }) as Promise<{ data: { result?: CloudPipelineResult } | null; error: { message: string; status?: number } | null }>,
+    const { data } = await aiCachedCall<CloudPipelineResult | null>(
+      'stereo-cut-auto',
+      cacheInput,
+      async () => {
+        const data = await safeInvoke<{ result?: CloudPipelineResult }>(() =>
+          supabase.functions.invoke('stereo-cut-auto', {
+            body: {
+              scanId,
+              angles: payloads,
+              customPrompt: context,
+              productName: style === 'studio' ? '프리미엄 스튜디오 제품' : '프리미엄 추천 상품',
+              targetPlatforms: ['youtube', 'instagram', 'tiktok'],
+            },
+            signal,
+          }) as Promise<{ data: { result?: CloudPipelineResult } | null; error: { message: string; status?: number } | null }>,
+        );
+        if (!data) return null;
+        return data.result ?? (data as unknown as CloudPipelineResult);
+      },
+      'stereo-cut-auto',
     );
-    if (!data) return null;
-    return data.result ?? (data as unknown as CloudPipelineResult);
+    return data;
   } catch (err) {
     logError(err, { component: 'stereoPipeline', action: 'invokeStereoCutAuto' });
     return null;

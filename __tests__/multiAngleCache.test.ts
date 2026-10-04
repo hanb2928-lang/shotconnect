@@ -29,7 +29,7 @@ jest.mock('@/lib/supabase', () => {
     };
   });
   return {
-    supabase: { from: mockFrom },
+    supabase: { from: mockFrom, rpc: jest.fn().mockResolvedValue({ error: null }) },
   };
 });
 
@@ -37,14 +37,14 @@ import { getMultiAngleCache, setMultiAngleCache } from '@/lib/aiCache';
 
 describe('getMultiAngleCache', () => {
   it('returns null when no cache entry exists', async () => {
-    const result = await getMultiAngleCache('nonexistent-hash', 'studio');
+    const result = await getMultiAngleCache('nonexistent-hash', 'studio', 'template-hash-1');
     expect(result).toBeNull();
   });
 
   it('returns parsed cache entry when found and not expired', async () => {
     // The mock returns null by default, so we test the data shape logic
     // by verifying the function handles the null case gracefully
-    const result = await getMultiAngleCache('some-hash', 'raw');
+    const result = await getMultiAngleCache('some-hash', 'raw', 'template-hash-2');
     expect(result).toBeNull();
   });
 });
@@ -58,6 +58,7 @@ describe('setMultiAngleCache', () => {
         { category: 'cosmetics' },
         { hooks: ['hook1', 'hook2'] },
         'https://example.com/video.mp4',
+        'template-hash-3',
       ),
     ).resolves.not.toThrow();
   });

@@ -54,7 +54,7 @@ describe('Cache hit flow — generateAiVideo returns cached video', () => {
     expect(result.videoUrl).toBe('https://example.com/cached-video.mp4');
     expect(result.provider).toBe('cache');
     expect(result.persisted).toBe(true);
-    expect(getMultiAngleCache).toHaveBeenCalledWith('hash-abc', 'studio');
+    expect(getMultiAngleCache).toHaveBeenCalledWith('hash-abc', 'studio', expect.any(String));
     expect(setMultiAngleCache).not.toHaveBeenCalled();
     expect(progressCalls.some((p) => p.phase === 'completed')).toBe(true);
   });
@@ -72,7 +72,7 @@ describe('Cache miss flow — falls through to pipeline', () => {
       // Expected — mock invoke rejects
     }
 
-    expect(getMultiAngleCache).toHaveBeenCalledWith('hash-xyz', 'raw');
+    expect(getMultiAngleCache).toHaveBeenCalledWith('hash-xyz', 'raw', expect.any(String));
   }, 15000);
 });
 

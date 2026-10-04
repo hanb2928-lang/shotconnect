@@ -177,19 +177,27 @@ export interface MultiAngleCacheEntry {
 export async function getMultiAngleCache(
   imageHash: string,
   toneManner: string,
+  motionTemplateHash = '',
 ): Promise<MultiAngleCacheEntry | null> {
   try {
     const { data, error } = await supabase
       .from('ai_analysis_cache')
       .select('product_context, hook_options, rendered_video_url, expires_at')
       .eq('image_hash', imageHash)
-      .eq('tone_manner', toneManner)
+      .eq('motion_template_hash', motionTemplateHash)
       .maybeSingle();
 
     if (error || !data) return null;
 
     const expiresAt = new Date(data.expires_at as string).getTime();
     if (Date.now() > expiresAt) return null;
+
+    supabase
+      .rpc('increment_analysis_cache_hit', {
+        p_image_hash: imageHash,
+        p_motion_template_hash: motionTemplateHash,
+      })
+      .then(() => {}, () => {});
 
     return {
       productContext: data.product_context as Record<string, unknown>,
@@ -211,18 +219,20 @@ export async function setMultiAngleCache(
   productContext: Record<string, unknown>,
   hookOptions: Record<string, unknown>,
   renderedVideoUrl: string,
+  motionTemplateHash = '',
 ): Promise<void> {
   try {
     await supabase
       .from('ai_analysis_cache')
       .upsert({
         image_hash: imageHash,
+        motion_template_hash: motionTemplateHash,
         tone_manner: toneManner,
         product_context: productContext,
         hook_options: hookOptions,
         rendered_video_url: renderedVideoUrl,
         expires_at: new Date(Date.now() + L2_TTL_MS).toISOString(),
-      }, { onConflict: 'image_hash' });
+      }, { onConflict: 'image_hash,motion_template_hash' });
   } catch {
     // best-effort
   }

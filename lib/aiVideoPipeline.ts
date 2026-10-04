@@ -3,6 +3,7 @@ import { supabase, ensureFreshSession } from './supabase';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { getMultiAngleCache, setMultiAngleCache } from './aiCache';
+import { hashMotionTemplate } from './contentHash';
 import { stepToProgress } from './videoGenSteps';
 import { logError, addBreadcrumb } from './errorLogger';
 
@@ -247,8 +248,35 @@ export async function generateAiVideo(
   // Cache hit check: if we have an imageHash + contentTone, look up
   // ai_analysis_cache before submitting to the render queue. On a hit,
   // skip the entire LLM + rendering pipeline and return the cached video.
+  // The cache key includes a motion_template_hash so the same images with
+  // different style/duration/camera settings produce separate entries.
+  const motionTemplateHash = hashMotionTemplate({
+    stylePreset: options.stylePreset,
+    durationSec: options.durationSec,
+    aspectRatio: options.aspectRatio,
+    hookCategory: options.hookCategory,
+    cameraRotation: options.cameraRotation,
+    zoomSpeed: options.zoomSpeed,
+    transitionEffect: options.transitionEffect,
+    enableOrbit360: options.enableOrbit360,
+    orbitSpeed: options.orbitSpeed,
+    enableCaustics: options.enableCaustics,
+    enableVirtualFitting: options.enableVirtualFitting,
+    enableFabricPhysics: options.enableFabricPhysics,
+    isCleanVideoMode: options.isCleanVideoMode,
+    promptStrength: options.promptStrength,
+    negativePrompt: options.negativePrompt,
+    bgStyle: options.bgStyle,
+    outfitIntensity: options.outfitIntensity,
+    detailRestoration: options.detailRestoration,
+    qualityTier: options.qualityTier,
+    resolution: options.resolution,
+    fps: options.fps,
+    selectedMode: options.selectedMode,
+  });
+
   if (options.imageHash && options.contentTone && !isDraft) {
-    const cached = await getMultiAngleCache(options.imageHash, options.contentTone);
+    const cached = await getMultiAngleCache(options.imageHash, options.contentTone, motionTemplateHash);
     if (cached) {
       report('completed', 1.0, '캐시된 영상을 불러왔습니다.');
       return {
@@ -375,6 +403,7 @@ export async function generateAiVideo(
         hookCategory: options.hookCategory ?? '',
       },
       result.videoUrl,
+      motionTemplateHash,
     ).catch(() => {});
   }
 

@@ -9,7 +9,7 @@
  * 5. Empty additional images falls back to single-image hash
  */
 
-import { hashImage, hashMultiAngle, contentHash } from '@/lib/contentHash';
+import { hashImage, hashMultiAngle, contentHash, hashMotionTemplate } from '@/lib/contentHash';
 
 describe('hashMultiAngle', () => {
   const img1 = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD';
@@ -99,5 +99,50 @@ describe('contentHash — base function', () => {
     const h1 = contentHash('hello');
     const h2 = contentHash('world');
     expect(h1).not.toBe(h2);
+  });
+});
+
+describe('hashMotionTemplate — video generation params', () => {
+  it('is deterministic for the same params', () => {
+    const h1 = hashMotionTemplate({ stylePreset: 'cinematic', durationSec: 15, aspectRatio: '9:16' });
+    const h2 = hashMotionTemplate({ stylePreset: 'cinematic', durationSec: 15, aspectRatio: '9:16' });
+    expect(h1).toBe(h2);
+  });
+
+  it('produces different hashes for different style presets', () => {
+    const h1 = hashMotionTemplate({ stylePreset: 'cinematic', durationSec: 15 });
+    const h2 = hashMotionTemplate({ stylePreset: 'realistic', durationSec: 15 });
+    expect(h1).not.toBe(h2);
+  });
+
+  it('produces different hashes for different durations', () => {
+    const h1 = hashMotionTemplate({ stylePreset: 'cinematic', durationSec: 15 });
+    const h2 = hashMotionTemplate({ stylePreset: 'cinematic', durationSec: 30 });
+    expect(h1).not.toBe(h2);
+  });
+
+  it('produces different hashes for different aspect ratios', () => {
+    const h1 = hashMotionTemplate({ aspectRatio: '9:16' });
+    const h2 = hashMotionTemplate({ aspectRatio: '16:9' });
+    expect(h1).not.toBe(h2);
+  });
+
+  it('ignores undefined and false boolean params', () => {
+    const h1 = hashMotionTemplate({ stylePreset: 'cinematic', enableOrbit360: false, orbitSpeed: undefined });
+    const h2 = hashMotionTemplate({ stylePreset: 'cinematic' });
+    expect(h1).toBe(h2);
+  });
+
+  it('includes true boolean params', () => {
+    const h1 = hashMotionTemplate({ stylePreset: 'cinematic', enableOrbit360: true });
+    const h2 = hashMotionTemplate({ stylePreset: 'cinematic', enableOrbit360: false });
+    expect(h1).not.toBe(h2);
+  });
+
+  it('produces consistent hash for empty params', () => {
+    const h1 = hashMotionTemplate({});
+    const h2 = hashMotionTemplate({});
+    expect(h1).toBe(h2);
+    expect(h1).toHaveLength(16);
   });
 });
