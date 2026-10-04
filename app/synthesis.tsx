@@ -14,6 +14,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { compressDataUrlToMaxBytes } from '@/lib/imageEdit';
+import { analyzeAndDownscaleImage, cleanupSmartResizeTemp } from '@/lib/smartResize';
 import { cleanBase64 } from '@/lib/base64';
 import { registerTempFile, unpinTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
@@ -134,7 +135,16 @@ async function uploadImageToStorage(uri: string): Promise<string> {
   }
 
   let compressedUri = uri;
+  let preScaled: ReturnType<typeof analyzeAndDownscaleImage> extends Promise<infer R> ? R | null : null = null;
   try {
+    if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
+      preScaled = await analyzeAndDownscaleImage(uri);
+      if (preScaled.downscaled && preScaled.uri !== uri) {
+        compressedUri = preScaled.uri;
+        registerTempFile(compressedUri, 'synthesis-presize', { pin: true });
+      }
+    }
+
     // 720px normalization + 2MB hard cap via iterative compression.
     // On web, compression runs in a Web Worker so the UI thread stays free.
     const dimSteps = [UPLOAD_INITIAL_DIM, 600, 480, 360];
@@ -189,6 +199,7 @@ async function uploadImageToStorage(uri: string): Promise<string> {
       unpinTempFile(compressedUri);
       await safeDeleteTempFile(compressedUri).catch(() => {});
     }
+    if (preScaled) await cleanupSmartResizeTemp(preScaled).catch(() => {});
   }
 }
 
