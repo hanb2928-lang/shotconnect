@@ -192,6 +192,11 @@ export function MultiAngleCaptureGuide({
         if (mountedRef.current) setCaptureError('카메라 캡처 중 오류가 발생했습니다. 다시 촬영해 주세요.');
         console.error('[MultiAngleGuide] camera capture failed:', err);
       } finally {
+        // Inter-capture throttle: enforce a minimum 400ms gap between the
+        // end of one capture and the start of the next. This gives the
+        // native camera buffer time to fully drain before the hardware is
+        // asked to capture again.
+        await new Promise((resolve) => setTimeout(resolve, 400)).catch(() => {});
         isCapturingRef.current = false;
         pickLockRef.current = false;
         if (mountedRef.current) setProcessing(false);

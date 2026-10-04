@@ -45,6 +45,7 @@ export const InlineCameraViewfinder = forwardRef<
   const streamGenRef = useRef(0);
   const captureLockRef = useRef(false);
   const captureInProgressRef = useRef(false);
+  const captureQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const [cameraReady, setCameraReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -218,33 +219,57 @@ export const InlineCameraViewfinder = forwardRef<
 
   const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
     if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady) return null;
-    if (captureInProgressRef.current) return null;
-    captureInProgressRef.current = true;
-    let capturedUri: string | null = null;
-    try {
-      const result = await nativeCameraRef.current.takePictureAsync({
-        quality: 0.6,
-      });
-      if (!result?.uri) {
+
+    // Serial FIFO queue: chain every capture onto the previous one so that
+    // takePictureAsync, compressImageToBase64, and FileSystem.deleteAsync
+    // never overlap on the native bridge. Overlapping these operations is
+    // what causes the camera hardware to report "busy" and silently drop
+    // the capture — especially in multi-angle and stereo-cut-auto modes
+    // where shots come in rapid succession.
+    const runCapture = async (): Promise<{ base64: string; mimeType: string } | null> => {
+      if (captureInProgressRef.current) return null;
+      captureInProgressRef.current = true;
+      let capturedUri: string | null = null;
+      try {
+        // Pre-capture stabilization: give the native camera buffer time to
+        // settle before issuing the next takePictureAsync.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        if (!mountedRef.current || !nativeCameraRef.current || !cameraReady) return null;
+        const result = await nativeCameraRef.current.takePictureAsync({
+          quality: 0.6,
+        });
+        if (!result?.uri) {
+          return null;
+        }
+        capturedUri = result.uri;
+        const compressed = await compressImageToBase64(capturedUri, 1080, 0.6);
+        // Wait for temp file cleanup to finish before releasing the lock.
+        await FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+        capturedUri = null;
+        return compressed;
+      } catch (err) {
+        console.error('[InlineCameraViewfinder] native capture failed:', err);
+        if (capturedUri) {
+          await FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+        }
+        // Remount the camera session only on actual failure.
+        setCameraKey((k) => k + 1);
         return null;
+      } finally {
+        // Post-capture hardware cooldown: hold the lock for an extra 150ms
+        // after all I/O completes so the camera sensor buffer fully drains
+        // before the next capture is allowed to start.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        captureInProgressRef.current = false;
+        captureLockRef.current = false;
       }
-      capturedUri = result.uri;
-      const compressed = await compressImageToBase64(capturedUri, 1080, 0.6);
-      FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
-      capturedUri = null;
-      return compressed;
-    } catch (err) {
-      console.error('[InlineCameraViewfinder] native capture failed:', err);
-      if (capturedUri) {
-        FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
-      }
-      // Only remount on actual failure — the camera session may be in a bad state
-      setCameraKey((k) => k + 1);
-      return null;
-    } finally {
-      captureInProgressRef.current = false;
-      captureLockRef.current = false;
-    }
+    };
+
+    // Enqueue: each capture waits for the previous one to fully complete
+    // (including its post-capture cooldown) before starting.
+    const next = captureQueueRef.current.then(() => runCapture());
+    captureQueueRef.current = next.catch(() => {});
+    return next;
   }, [cameraReady]);
 
   useImperativeHandle(
