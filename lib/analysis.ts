@@ -205,10 +205,11 @@ export async function uploadVideoBlob(
     }
   } else {
     const FileSystem = await import('expo-file-system/legacy');
-    const base64 = await FileSystem.readAsStringAsync(uri, {
+    let base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: FileSystem.EncodingType.Base64,
     });
     body = base64ToUint8Array(base64);
+    base64 = '';
   }
 
   const uploadPromise = supabase.storage

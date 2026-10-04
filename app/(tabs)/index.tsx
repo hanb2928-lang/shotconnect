@@ -706,6 +706,8 @@ function CameraScreenInner() {
       if (result.canceled || !result.assets?.[0]?.uri) return;
       const asset = result.assets[0];
       if (!asset.uri) return;
+      const flushed = await waitForUriFlush(asset.uri);
+      if (!flushed || !isMountedRef.current) return;
       const { base64, mimeType } = await withTimeout(
         new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
           InteractionManager.runAfterInteractions(async () => {
@@ -968,6 +970,8 @@ function CameraScreenInner() {
       if (!isMountedRef.current) return null;
       if (result.canceled || !result.assets?.[0]?.uri) return null;
       const assetUri = result.assets[0].uri;
+      const flushed = await waitForUriFlush(assetUri);
+      if (!flushed || !isMountedRef.current) return null;
       const { base64, mimeType, compressedUri } = await withTimeout(
         new Promise<{ base64: string; mimeType: string; compressedUri: string | null }>((resolve, reject) => {
           InteractionManager.runAfterInteractions(async () => {

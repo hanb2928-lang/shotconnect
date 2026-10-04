@@ -65,7 +65,8 @@ import { mixBgmIntoVideo, fetchBgmRecommendation, type BgmRecommendation } from 
 import { runSynthesis, getSynthesisSummary, type AngleInput } from '@/lib/aiSynthesisEngine';
 import { buildDirectingPlan, getDirectingSummary } from '@/lib/directingEngine';
 import { buildMultiPlatformPublishPlans, type PublishTarget } from '@/lib/publishManager';
-import { compressImage, base64ToBlob } from '@/lib/imageEdit';
+import { compressImage } from '@/lib/imageEdit';
+import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 
 type PlatformOption = {
@@ -387,7 +388,12 @@ export function PostCaptureWorkflow({
     saveGalleryLockRef.current = false;
   }, [videoUri, imageUri, editPlan.bgmTemplate.id, editPlan.pacingBpm, bgmRecommendation]);
 
-  const uriToBlob = useCallback(async (uri: string): Promise<Blob | Uint8Array> => {
+  const uriToBlob = useCallback(async (uri: string): Promise<{ data: Uint8Array | Blob; mimeType: string }> => {
+    if (Platform.OS !== 'web' && uri.startsWith('data:')) {
+      const mimeType = uri.match(/^data:([^;]+);/)?.[1] || 'image/jpeg';
+      const b64 = cleanBase64(uri);
+      return { data: base64ToUint8Array(b64), mimeType };
+    }
     if (Platform.OS !== 'web' && (uri.startsWith('file://') || uri.startsWith('content://'))) {
       const FileSystem = await import('expo-file-system/legacy');
       let readableUri = uri;
@@ -405,30 +411,43 @@ export function PostCaptureWorkflow({
       }
       const ext = readableUri.split('.').pop()?.toLowerCase() ?? 'jpg';
       const isVideo = ext === 'mp4' || ext === 'mov';
-      const MAX_NATIVE_READ_BYTES = isVideo ? 80_000_000 : 15_000_000;
+      const isHeic = ext === 'heic' || ext === 'heif';
+      const MAX_NATIVE_READ_BYTES = isVideo ? 30_000_000 : 12_000_000;
       if (info.size > MAX_NATIVE_READ_BYTES) {
         if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
         throw new Error(isVideo
-          ? '영상 파일이 너무 큽니다. 더 짧은 영상으로 다시 촬영해주세요.'
+          ? '영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.'
           : '이미지가 너무 큽니다. 더 낮은 해상도로 다시 촬영해주세요.');
       }
-      const mimeType = isVideo ? (ext === 'mov' ? 'video/quicktime' : 'video/mp4') : ext === 'png' ? 'image/png' : 'image/jpeg';
+      const mimeType = isVideo
+        ? (ext === 'mov' ? 'video/quicktime' : 'video/mp4')
+        : isHeic
+          ? 'image/heic'
+          : ext === 'png'
+            ? 'image/png'
+            : ext === 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
       try {
-        const base64 = await FileSystem.readAsStringAsync(readableUri, {
+        let base64 = await FileSystem.readAsStringAsync(readableUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        const result = base64ToBlob(base64, mimeType);
-        return result;
+        await new Promise<void>((r) => setTimeout(r, 0));
+        const bytes = base64ToUint8Array(cleanBase64(base64));
+        base64 = '';
+        return { data: bytes, mimeType };
       } finally {
         if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
       }
     }
     if (uri.startsWith('data:') || uri.startsWith('blob:') || uri.startsWith('http') || uri.startsWith('file:')) {
       const resp = await fetch(uri);
-      return resp.blob();
+      const blob = await resp.blob();
+      return { data: blob, mimeType: blob.type || 'image/jpeg' };
     }
     const resp = await fetch(uri);
-    return resp.blob();
+    const blob = await resp.blob();
+    return { data: blob, mimeType: blob.type || 'image/jpeg' };
   }, []);
 
   const uploadWithRetry = useCallback(async (
@@ -491,7 +510,7 @@ export function PostCaptureWorkflow({
       if (uploadUri) {
         try {
           let finalUri = uploadUri;
-          if (imageUri && !videoUri) {
+          if (imageUri && !videoUri && !uploadUri.startsWith('data:')) {
             try {
               finalUri = await new Promise<string>((resolve, reject) => {
                 InteractionManager.runAfterInteractions(async () => {
@@ -505,9 +524,14 @@ export function PostCaptureWorkflow({
               finalUri = uploadUri;
             }
           }
-          const uploadBody = await uriToBlob(finalUri);
-          const ext = imageUri ? 'jpg' : 'mp4';
-          const contentType = imageUri ? 'image/jpeg' : 'video/mp4';
+          const { data: uploadBody, mimeType: detectedMimeType } = await uriToBlob(finalUri);
+          const isImage = !!imageUri && !videoUri;
+          const contentType = detectedMimeType || (isImage ? 'image/jpeg' : 'video/mp4');
+          const ext = contentType === 'image/png' ? 'png'
+            : contentType === 'image/webp' ? 'webp'
+            : contentType === 'image/heic' ? 'heic'
+            : contentType === 'video/quicktime' ? 'mov'
+            : isImage ? 'jpg' : 'mp4';
           const fileName = `shortform-${Date.now()}.${ext}`;
           cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, contentType);
         } catch {
