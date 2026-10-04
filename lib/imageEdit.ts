@@ -393,7 +393,7 @@ export async function compressImageToBase64(
         NATIVE_READ_TIMEOUT_MS,
         '이미지 변환',
       );
-      registerTempFile(manipulated.uri, 'compressImageToBase64');
+      registerTempFile(manipulated.uri, 'compressImageToBase64', { pin: true });
       return await withFileLock(manipulated.uri, async () => {
         const fileInfo = await withTimeout(
           withFileSettle('compressGetInfo', () => FileSystem.getInfoAsync(manipulated.uri)),
@@ -640,7 +640,7 @@ export async function prepareImageForApi(
       ),
     );
 
-    registerTempFile(manipulated.uri, 'prepareImageForApi-native');
+    registerTempFile(manipulated.uri, 'prepareImageForApi-native', { pin: true });
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await withFileSettle('prepareApi-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
@@ -702,7 +702,7 @@ export async function prepareImageForEdit(
       ),
     );
 
-    registerTempFile(manipulated.uri, 'prepareImageForEdit-native');
+    registerTempFile(manipulated.uri, 'prepareImageForEdit-native', { pin: true });
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await withFileSettle('prepareEdit-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
@@ -870,7 +870,7 @@ export async function compressImageToBase64WithUri(
         { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
       ),
     );
-    registerTempFile(manipulated.uri, 'prepareImageForUpload-native');
+    registerTempFile(manipulated.uri, 'prepareImageForUpload-native', { pin: true });
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await withFileSettle('compressWithUri-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');

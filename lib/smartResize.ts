@@ -123,7 +123,7 @@ export async function analyzeAndDownscaleImage(uri: string): Promise<ImageAnalys
         format: ImageManipulator.SaveFormat.JPEG,
       }),
     );
-    registerTempFile(manipulated.uri, 'smartResize-image');
+    registerTempFile(manipulated.uri, 'smartResize-image', { pin: true });
 
     const { width: newW, height: newH } = await getImageDimensions(manipulated.uri);
     addBreadcrumb('smart-resize', `Downscaled to ${newW}x${newH}`, 'warning');

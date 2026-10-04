@@ -150,6 +150,7 @@ async function uploadImageToStorage(uri: string): Promise<string> {
     const dimSteps = [UPLOAD_INITIAL_DIM, 600, 480, 360];
     const qualitySteps = [UPLOAD_INITIAL_QUALITY, 0.55, 0.42, 0.3];
 
+    let prevCompressedUri: string | null = null;
     for (let pass = 0; pass < dimSteps.length; pass++) {
       if (Platform.OS === 'web' && uri.startsWith('data:')) {
         // Web data URL: compress via worker (or main-thread fallback)
@@ -166,8 +167,13 @@ async function uploadImageToStorage(uri: string): Promise<string> {
         [{ resize: { width: dimSteps[pass] } }],
         { compress: qualitySteps[pass], format: ImageManipulator.SaveFormat.JPEG },
       );
+      if (prevCompressedUri && prevCompressedUri !== uri && Platform.OS !== 'web' && !prevCompressedUri.startsWith('data:')) {
+        unpinTempFile(prevCompressedUri);
+        await safeDeleteTempFile(prevCompressedUri).catch(() => {});
+      }
       compressedUri = manipulated.uri;
       registerTempFile(compressedUri, 'synthesis-compress', { pin: true });
+      prevCompressedUri = compressedUri;
       const fileInfo = await FileSystem.getInfoAsync(compressedUri);
       if (fileInfo.exists && fileInfo.size <= MAX_NATIVE_IMAGE_BYTES) break;
     }
@@ -245,7 +251,8 @@ async function performUpload(finalBase64: string): Promise<string> {
       } catch {
         // If recompression fails, retry with the same payload
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const backoffDelay = 1000 * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+      await new Promise((resolve) => setTimeout(resolve, backoffDelay));
       continue;
     }
 
@@ -616,7 +623,8 @@ export default function SynthesisScreen() {
       : `Cinematic ${modeLabel} product showcase. ${captionText || '시선 집중! 지금 바로 확인하세요'}`;
 
     try {
-      setVideoProgress({ phase: 'submitting', progress: 0.06, message: '이미지 업로드 중...', elapsedSec: 0 });
+      const totalImages = productImages.length + (modelImage ? 1 : 0);
+      setVideoProgress({ phase: 'submitting', progress: 0.06, message: `이미지 업로드 중... (1/${totalImages})`, elapsedSec: 0 });
 
       const uploadSingle = async (img: SourceImage): Promise<string> => {
         if (img.uri.startsWith('http://') || img.uri.startsWith('https://')) return img.uri;
@@ -627,12 +635,18 @@ export default function SynthesisScreen() {
       // payload limits — each image is compressed, read, and uploaded one at
       // a time so peak memory stays bounded to a single image's data.
       const uploadedUrls: string[] = [];
-      for (const img of productImages) {
-        const url = await uploadSingle(img);
+      for (let i = 0; i < productImages.length; i++) {
+        if (!mountedRef.current) return;
+        setVideoProgress((prev) => prev ? { ...prev, message: `이미지 업로드 중... (${i + 1}/${totalImages})` } : prev);
+        const url = await uploadSingle(productImages[i]);
         uploadedUrls.push(url);
       }
       const mainUrl = uploadedUrls[0];
       const restUrls = uploadedUrls.slice(1);
+      if (modelImage) {
+        if (!mountedRef.current) return;
+        setVideoProgress((prev) => prev ? { ...prev, message: `이미지 업로드 중... (${productImages.length + 1}/${totalImages})` } : prev);
+      }
       const modelUrl = modelImage ? await uploadSingle(modelImage) : null;
 
       if (!mountedRef.current) return;
@@ -688,11 +702,24 @@ export default function SynthesisScreen() {
         scanIdRef.current = null;
         try { await supabase.from('scans').delete().eq('id', orphanedScanId); } catch {}
       }
+      const phase = jobIdRef.current ? 'ai-generation' : 'image-upload';
       jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress(null);
-      const userMsg = friendlyError(err, 'AI 영상 생성 요청에 실패했습니다. 잠시 후 다시 시도해주세요.');
-      logError(err, { component: 'synthesis', action: 'handleGenerate' });
+      const userMsg = friendlyError(err, phase === 'image-upload'
+        ? '이미지 업로드에 실패했습니다. 네트워크 연결을 확인하고 잠시 후 다시 시도해주세요.'
+        : 'AI 영상 생성 요청에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      logError(err, {
+        component: 'synthesis',
+        action: 'handleGenerate',
+        extra: {
+          phase,
+          productImageCount: productImages.length,
+          hasModelImage: !!modelImage,
+          genMode,
+          platform,
+        },
+      });
       setError(userMsg);
     } finally {
       generateLockRef.current = false;
