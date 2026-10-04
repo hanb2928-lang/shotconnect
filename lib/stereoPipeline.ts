@@ -88,26 +88,28 @@ async function uploadAngleShotsConcurrently(
   let failures = 0;
   const uploadedPaths: string[] = [];
   let cursor = 0;
+  let fatalThreshold = false;
 
   async function processNext(): Promise<void> {
     while (cursor < shots.length) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || fatalThreshold) return;
       const idx = cursor++;
       const shot = shots[idx];
       try {
         const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg', signal);
+        if (fatalThreshold) {
+          const p = extractStoragePath(url);
+          if (p) await supabase.storage.from('scans').remove([p]).catch(() => {});
+          return;
+        }
         results.push({ url, shot });
         const p = extractStoragePath(url);
         if (p) uploadedPaths.push(p);
-        // Release the base64 reference from the shot after a successful upload
-        // so the multi-MB string can be GC'd before the next shot's base64
-        // is loaded into the worker's closure.
         (shot as { base64?: string }).base64 = undefined;
-        // Yield between uploads on native to let the JS engine reclaim memory
-        // from the Blob allocation before the next iteration.
         await nativeHeapCooldownGuard();
       } catch {
         failures++;
+        if (failures >= 2) fatalThreshold = true;
       }
     }
   }

@@ -232,7 +232,10 @@ export const InlineCameraViewfinder = forwardRef<
     // the capture — especially in multi-angle and stereo-cut-auto modes
     // where shots come in rapid succession.
     const runCapture = async (): Promise<{ base64: string; mimeType: string } | null> => {
-      if (captureInProgressRef.current) return null;
+      if (captureInProgressRef.current) {
+        captureLockRef.current = false;
+        return null;
+      }
       captureInProgressRef.current = true;
       let capturedUri: string | null = null;
       try {

@@ -61,6 +61,7 @@ const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
 const UPLOAD_MAX_RETRIES = 3;
 const UPLOAD_INITIAL_DIM = 720;
 const UPLOAD_INITIAL_QUALITY = 0.7;
+const UPLOAD_TIMEOUT_MS = 30_000;
 
 function isUploadNetworkError(err: unknown): boolean {
   if (err instanceof Error) {
@@ -84,6 +85,19 @@ function isTlsOrProxyError(err: unknown): boolean {
     return msg.includes('tls') || msg.includes('ssl') || msg.includes('certificate') || msg.includes('handshake') || msg.includes('secure connection');
   }
   return false;
+}
+
+function withUploadTimeout<T>(uploadPromise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인해주세요.')),
+      timeoutMs,
+    );
+  });
+  return Promise.race([uploadPromise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 async function compressForUpload(dataUrl: string, maxDim: number, quality: number): Promise<string> {
@@ -186,9 +200,12 @@ async function performUpload(finalBase64: string): Promise<string> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     const bytes = makeBytes(currentBase64);
-    const { error: uploadError } = await supabase.storage
-      .from('scans')
-      .upload(fileName, bytes, { contentType: 'image/jpeg', cacheControl: '360000' });
+    const { error: uploadError } = await withUploadTimeout(
+      supabase.storage
+        .from('scans')
+        .upload(fileName, bytes, { contentType: 'image/jpeg', cacheControl: '360000' }),
+      UPLOAD_TIMEOUT_MS,
+    );
 
     if (!uploadError) {
       const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
@@ -646,6 +663,15 @@ export default function SynthesisScreen() {
       setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (!mountedRef.current) return;
+      // B-002: If a scan record was created but the video job was never
+      // submitted, delete the orphaned scan so retry doesn't conflict
+      // with stale DB state. If the job WAS submitted, keep the scan —
+      // the server is still processing it.
+      if (scanIdRef.current && !jobIdRef.current) {
+        const orphanedScanId = scanIdRef.current;
+        scanIdRef.current = null;
+        try { await supabase.from('scans').delete().eq('id', orphanedScanId); } catch {}
+      }
       jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress(null);
@@ -876,7 +902,7 @@ export default function SynthesisScreen() {
         )}
       </ScrollView>
 
-      {isGenerating && productImages.length >= 2 ? (
+      {isGenerating && videoProgress?.phase === 'generating' && productImages.length >= 2 ? (
         <MotionPreviewOverlay
           visible={isGenerating}
           images={productImages.map((img) => img.uri)}
@@ -887,7 +913,7 @@ export default function SynthesisScreen() {
       ) : (
         <ProcessingBarrier
           visible={isGenerating || isExporting}
-          label={isExporting ? '내보내는 중...' : 'AI 생성 중...'}
+          label={isExporting ? '내보내는 중...' : videoProgress?.phase === 'submitting' ? '이미지 업로드 중...' : 'AI 생성 중...'}
           sublabel={videoProgress?.message ?? '완료될 때까지 화면이 잠겨 있어요'}
         />
       )}
