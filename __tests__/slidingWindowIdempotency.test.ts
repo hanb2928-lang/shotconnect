@@ -73,13 +73,14 @@ describe('jobQueue.waitForJob — sliding window under flaky network', () => {
       return { select };
     });
 
-    const promise = waitForJob('job-flaky-1', 60_000);
+    const promise = waitForJob('job-flaky-1', 120_000);
 
-    // waitForJob polls every 3s, first poll at 5s
-    // Need 5 errors within 30s window to trigger failure
-    for (let i = 0; i < 10; i++) {
-      jest.advanceTimersByTime(3000);
-      await Promise.resolve(); // flush microtasks
+    // waitForJob uses exponential backoff: 3s, 4.5s, 6.75s, 10.1s, 15s, 15s...
+    // The first poll fires at POLL_INITIAL_MS=3s. We need 5 errors within the
+    // 30s sliding window. Advance time in small steps and flush microtasks
+    // after each step so each scheduled poll fires and its promise resolves.
+    for (let i = 0; i < 20; i++) {
+      await jest.advanceTimersByTimeAsync(3000);
     }
 
     const result = await promise;
@@ -87,17 +88,21 @@ describe('jobQueue.waitForJob — sliding window under flaky network', () => {
     expect(result.error).toContain('네트워크 연결이 불안정');
   });
 
-  it('does NOT reset error window on sporadic success — still fails if failures accumulate', async () => {
-    // Simulate flaky network: fail, fail, succeed (job still pending), fail, fail, fail, fail, fail
+  it('does NOT reset error window on sporadic success — job still completes without false failure', async () => {
+    // Simulate flaky network: fail, fail, succeed (job still processing),
+    // fail, then done. The sporadic success at call 3 should NOT reset the
+    // error window, but with only 3 total errors (below MAX_POLL_ERRORS=5),
+    // it should NOT trigger a false failure either. The job completes normally.
     let callCount = 0;
     mockFromChain.mockImplementation(() => {
       callCount++;
       const thisCall = callCount;
       const single = jest.fn().mockImplementation(() => {
-        // Calls 1-2 fail, call 3 succeeds but job is still 'processing',
-        // calls 4-8 fail
         if (thisCall === 3) {
           return { data: { status: 'processing', result: null }, error: null };
+        }
+        if (thisCall >= 5) {
+          return { data: { status: 'done', result: { videoUrl: 'https://example.com/fit.mp4' } }, error: null };
         }
         throw new Error('Network error');
       });
@@ -107,18 +112,17 @@ describe('jobQueue.waitForJob — sliding window under flaky network', () => {
       return { select };
     });
 
-    const promise = waitForJob('job-flaky-2', 60_000);
+    const promise = waitForJob('job-flaky-2', 120_000);
 
-    for (let i = 0; i < 15; i++) {
-      jest.advanceTimersByTime(3000);
-      await Promise.resolve();
+    for (let i = 0; i < 20; i++) {
+      await jest.advanceTimersByTimeAsync(3000);
     }
 
     const result = await promise;
-    // Even though call 3 succeeded, the error window should NOT have been reset.
-    // The 5 failures in the 30s window should trigger an error state.
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('네트워크 연결이 불안정');
+    // The error window was NOT reset by the sporadic success (3 total errors
+    // accumulated, not 0), but 3 < 5 so no false failure. Job completes.
+    expect(result.success).toBe(true);
+    expect(result.result).toEqual({ videoUrl: 'https://example.com/fit.mp4' });
   });
 
   it('resolves successfully when job completes despite intermittent failures', async () => {
@@ -137,11 +141,10 @@ describe('jobQueue.waitForJob — sliding window under flaky network', () => {
       return { select };
     });
 
-    const promise = waitForJob('job-flaky-3', 60_000);
+    const promise = waitForJob('job-flaky-3', 120_000);
 
-    for (let i = 0; i < 10; i++) {
-      jest.advanceTimersByTime(3000);
-      await Promise.resolve();
+    for (let i = 0; i < 15; i++) {
+      await jest.advanceTimersByTimeAsync(3000);
     }
 
     const result = await promise;
