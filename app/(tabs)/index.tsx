@@ -1559,7 +1559,7 @@ function CameraScreenInner() {
             </TouchableOpacity>
           </View>
           <Text style={styles.shutterHintText}>
-            {autoSaving ? 'AI 자동 분석 중...' : '정면·좌측·우측·후면·상부 순차 촬영'}
+            {autoSaving ? 'AI 자동 분석 중...' : '3~5각도 순차 촬영 (정면·좌측·우측 기본)'}
           </Text>
         </View>
 
@@ -1569,6 +1569,13 @@ function CameraScreenInner() {
           onComplete={handleMultiAngleComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
+          minShots={3}
+          maxShots={5}
+          headerTitle="입체컷 오토 · 3~5각도 가이드"
+          introTitle="3~5각도 순차 촬영으로 입체적 AI 영상 완성"
+          introDesc="정면, 좌측, 우측을 기본 3컷으로 촬영하면 AI가 제품의 입체적 특성을 복원합니다. 후면과 상부를 추가해 최대 5장까지 촬영하면 더 정밀한 결과를 얻을 수 있습니다."
+          completeLabelAll="5장으로 입체컷 만들기"
+          completeLabelEarly="3장으로 입체컷 만들기"
         />
 
         <PostCaptureWorkflow
@@ -1702,6 +1709,13 @@ function CameraScreenInner() {
         onComplete={handleMultiAngleComplete}
         onPickImage={handleMultiAnglePick}
         onCaptureImage={handleMultiAngleCapture}
+        minShots={3}
+        maxShots={5}
+        headerTitle="입체컷 오토 · 3~5각도 가이드"
+        introTitle="3~5각도 순차 촬영으로 입체적 AI 영상 완성"
+        introDesc="정면, 좌측, 우측을 기본 3컷으로 촬영하면 AI가 제품의 입체적 특성을 복원합니다. 후면과 상부를 추가해 최대 5장까지 촬영하면 더 정밀한 결과를 얻을 수 있습니다."
+        completeLabelAll="5장으로 입체컷 만들기"
+        completeLabelEarly="3장으로 입체컷 만들기"
       />
 
       {/* Auto-save toast */}

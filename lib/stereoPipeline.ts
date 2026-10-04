@@ -222,6 +222,9 @@ async function invokeStereoCutAuto(
   }
 }
 
+export const STEREO_MIN_SHOTS = 3;
+export const STEREO_MAX_SHOTS = 5;
+
 export async function createScanFromAngleShots(
   shots: AngleShot[],
   signal?: AbortSignal,
@@ -288,6 +291,12 @@ export async function runStereoPipeline(
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
+  if (allShots.length < STEREO_MIN_SHOTS) {
+    throw new Error(`입체컷 오토는 최소 ${STEREO_MIN_SHOTS}컷이 필요합니다. 정면, 좌측, 우측을 촬영해주세요.`);
+  }
+  if (allShots.length > STEREO_MAX_SHOTS) {
+    allShots.length = STEREO_MAX_SHOTS;
+  }
 
   let imageUrl: string;
   let additionalUrls: string[];

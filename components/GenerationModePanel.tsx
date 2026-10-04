@@ -81,7 +81,7 @@ function GenerationModePanelInner({
                 입체컷 오토
               </Text>
               <Text style={styles.modeCardDesc}>
-                정면·좌측·우측·상부를 순차 촬영해 AI 입체적 숏폼 완성
+                정면·좌측·우측 3컷 기본, 최대 5각도까지 순차 촬영해 AI 입체적 숏폼 완성
               </Text>
             </View>
           </View>

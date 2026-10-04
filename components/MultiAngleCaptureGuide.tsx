@@ -51,6 +51,7 @@ interface MultiAngleCaptureGuideProps {
   onCaptureImage?: (angleId: string) => Promise<{ base64: string; mimeType: string } | null>;
   guides?: AngleGuide[];
   minShots?: number;
+  maxShots?: number;
   headerTitle?: string;
   introTitle?: string;
   introDesc?: string;
@@ -67,8 +68,9 @@ export function MultiAngleCaptureGuide({
   onCaptureImage,
   guides = ANGLE_GUIDES,
   minShots,
-  headerTitle = '입체컷 오토 · 5각도 가이드',
-  introTitle = '5각도 순차 촬영으로 입체적 AI 영상 완성',
+  maxShots,
+  headerTitle = '입체컷 오토 · 3~5각도 가이드',
+  introTitle = '3~5각도 순차 촬영으로 입체적 AI 영상 완성',
   introDesc,
   accentColor,
   completeLabelAll = '5장으로 콘텐츠 만들기',
@@ -94,24 +96,27 @@ export function MultiAngleCaptureGuide({
   }, []);
 
   const effectiveMinShots = minShots ?? guides.length;
+  const effectiveMaxShots = maxShots ?? guides.length;
   const effectiveAccent = accentColor ?? theme.colors.primary[400];
   const effectiveAccentBg = accentColor ?? theme.colors.primary[600];
   const effectiveIntroDesc = introDesc ??
-    '정면, 좌측, 우측, 후면, 상부를 순서대로 촬영하면 AI가 제품의 입체적 특성을 정밀하게 복원합니다. 5장의 사진으로 왜곡 없는 역동적인 숏폼을 생성합니다.';
+    '정면, 좌측, 우측을 기본 3컷으로 촬영하면 AI가 제품의 입체적 특성을 복원합니다. 후면과 상부를 추가해 최대 5장까지 촬영하면 더 정밀한 결과를 얻을 수 있습니다.';
 
   useEffect(() => {
     shotsRef.current = shots;
   }, [shots]);
 
   const completedCount = Object.keys(shots).length;
-  const allDone = completedCount >= guides.length;
+  const allDone = completedCount >= effectiveMaxShots;
   const minMet = completedCount >= effectiveMinShots;
+  const maxReached = completedCount >= effectiveMaxShots;
 
   const currentGuide = guides[currentAngle];
   const currentShot = currentGuide ? shots[currentGuide.id] : undefined;
 
   const handleAddShot = useCallback(
     async (angleId: string, base64: string, mimeType: string) => {
+      if (maxReached) return;
       const guideIndex = guides.findIndex((g) => g.id === angleId);
       const guide = guides[guideIndex];
       if (!guide || !base64) return;
@@ -137,7 +142,7 @@ export function MultiAngleCaptureGuide({
         setCurrentAngle(guideIndex + 1);
       }
     },
-    [guides],
+    [guides, maxReached],
   );
 
   const handlePickFromGallery = useCallback(
@@ -245,7 +250,7 @@ export function MultiAngleCaptureGuide({
     onClose();
   }, [onClose]);
 
-  const canCapture = cameraReady && !processing && !isCapturingRef.current && !pickLockRef.current;
+  const canCapture = cameraReady && !processing && !isCapturingRef.current && !pickLockRef.current && !maxReached;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -265,7 +270,7 @@ export function MultiAngleCaptureGuide({
             {guides.map((g, i) => (
               <View key={g.id} style={[styles.progressDot, shots[g.id] && styles.progressDotDone, i === currentAngle && { ...styles.progressDotActive, backgroundColor: effectiveAccent }]} />
             ))}
-            <Text style={styles.progressText}>{completedCount}/{guides.length} 완료</Text>
+            <Text style={styles.progressText}>{completedCount}/{effectiveMaxShots} 완료</Text>
           </View>
 
           <ScrollView
@@ -412,7 +417,7 @@ export function MultiAngleCaptureGuide({
             >
               <Check size={18} color={allDone ? '#fff' : theme.colors.dark.textFaint} strokeWidth={2} />
               <Text style={[styles.completeBtnText, !allDone && styles.completeBtnTextDisabled]}>
-                {allDone ? completeLabelAll : `${guides.length - completedCount}장 더 촬영하세요`}
+                {allDone ? completeLabelAll : `${effectiveMaxShots - completedCount}장 더 촬영하세요`}
               </Text>
               {allDone && <ChevronRight size={18} color="#fff" strokeWidth={2} />}
             </TouchableOpacity>

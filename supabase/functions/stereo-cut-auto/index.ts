@@ -336,9 +336,15 @@ Deno.serve(async (req: Request) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    if (angles.length < 3) {
+      return new Response(JSON.stringify({ error: "입체컷 오토는 최소 3컷이 필요합니다. 정면, 좌측, 우측을 촬영해주세요." }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const validAngles = angles.length > 5 ? angles.slice(0, 5) : angles;
 
     // Phase 2: AI 입체 분석 및 3D 신세시스
-    const synthesis = runSynthesis(angles, customPrompt);
+    const synthesis = runSynthesis(validAngles, customPrompt);
 
     // Phase 3: 유튜브 상위 1% 심리 리듬 연출
     const bpm = targetPlatforms.includes("tiktok") ? 140 : 100;
@@ -356,11 +362,11 @@ Deno.serve(async (req: Request) => {
     ];
 
     const jobId = `stereo-cut-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const estimatedProcessingSec = angles.length >= 5 ? 8 : 5;
+    const estimatedProcessingSec = validAngles.length >= 5 ? 8 : 5;
 
     const frameBuffers = inputFrameBuffers.length > 0
       ? inputFrameBuffers
-      : angles.map((a, i) => ({
+      : validAngles.map((a, i) => ({
           angleKey: a.key,
           width: 1080,
           height: 1920,
