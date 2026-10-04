@@ -24,6 +24,25 @@ interface FrameBufferInput {
   orderIndex: number;
 }
 
+interface AngleDelta {
+  angleKey: string;
+  orderIndex: number;
+  displacementX: number;
+  displacementY: number;
+  scaleRatio: number;
+  rotationDeg: number;
+  edgeDensity: number;
+  label: string;
+}
+
+interface KeyframeProxyPayload {
+  keyframeUrl: string;
+  keyframeAngleKey: string;
+  deltas: AngleDelta[];
+  angleCount: number;
+  proxyMode: true;
+}
+
 interface StereoCutRequest {
   angles: AngleImageInput[];
   productName?: string;
@@ -32,6 +51,7 @@ interface StereoCutRequest {
   scanId?: string;
   frameBuffers?: FrameBufferInput[];
   aspectRatio?: string;
+  keyframeProxy?: KeyframeProxyPayload;
 }
 
 type UsageContext =
@@ -193,6 +213,75 @@ function runSynthesis(angles: AngleImageInput[], customPrompt: string): Synthesi
   };
 }
 
+/**
+ * Reconstructs a SynthesisResult from keyframe proxy deltas without needing
+ * full-resolution angle images. Uses displacement, scale, rotation, and edge
+ * density to estimate volume and interpolation gaps — the same structural
+ * information that runSynthesis extracts from angle metadata, but derived
+ * from lightweight on-device delta vectors instead of full image tensors.
+ */
+function runSynthesisFromProxy(proxy: KeyframeProxyPayload, customPrompt: string): SynthesisResult {
+  const totalAngles = proxy.angleCount;
+  const strategy = totalAngles >= 5 ? "five_angle_stereo" : totalAngles >= 3 ? "three_angle_partial" : "single_fallback";
+  const contextMatch = detectContext(customPrompt);
+
+  const deltaKeys = new Set(proxy.deltas.map((d) => d.angleKey));
+  const hasFront = proxy.keyframeAngleKey === "front" || deltaKeys.has("front");
+  const hasSide = deltaKeys.has("left") || deltaKeys.has("right");
+  const hasTop = deltaKeys.has("top");
+  const hasBack = deltaKeys.has("back");
+
+  // Confidence from delta coverage + displacement magnitude
+  const coverage = totalAngles / 5;
+  const avgDisplacement = proxy.deltas.length > 0
+    ? proxy.deltas.reduce((s, d) => s + Math.abs(d.displacementX) + Math.abs(d.displacementY), 0) / proxy.deltas.length
+    : 0;
+  const motionConfidence = Math.min(0.3, avgDisplacement * 0.5);
+  const confidence = Math.min(1, coverage * 0.7 + (hasFront ? 0.1 : 0) + (hasSide ? 0.1 : 0) + motionConfidence);
+
+  // Estimate depth ratio from scale variance across deltas
+  const scaleVariance = proxy.deltas.length > 1
+    ? proxy.deltas.reduce((s, d) => s + Math.pow(d.scaleRatio - 1, 2), 0) / proxy.deltas.length
+    : 0.3;
+  const depthRatio = hasSide && hasBack ? Math.min(1, 0.6 + scaleVariance) : hasSide ? 0.7 : 0.4;
+
+  const order = ["front", "left", "right", "back", "top"];
+  const present = new Set([proxy.keyframeAngleKey, ...deltaKeys]);
+  const interpolationGaps = [];
+  for (let i = 0; i < order.length - 1; i++) {
+    if (present.has(order[i]) && present.has(order[i + 1])) {
+      interpolationGaps.push({ fromAngle: order[i], toAngle: order[i + 1], steps: 2 });
+    }
+  }
+
+  const processingSteps = strategy === "five_angle_stereo"
+    ? ["키프레임 + 델타 벡터 기반 5각도 입체 복원", "델타 변위 → 3D 볼륨 역산", "각도 간 보간 (프록시 모드)", "입체 에셋 생성 및 텍스처 매핑"]
+    : strategy === "three_angle_partial"
+    ? [`${totalAngles}각도 프록시 입체 복원`, "델타 기반 부분 볼륨 추정", "입체 에셋 생성 (프록시 모드)"]
+    : ["키프레임에서 깊이 추정", "단면 대칭 가정으로 입체 추정"];
+
+  const strategyLabels: Record<string, string> = {
+    five_angle_stereo: "프록시 5각도 입체 융합 (키프레임 + 델타)",
+    three_angle_partial: `프록시 ${totalAngles}각도 부분 입체 융합`,
+    single_fallback: "단일 키프레임 기반 추정 합성",
+  };
+
+  return {
+    strategy,
+    volumeEstimate: {
+      widthRatio: hasFront ? 1.0 : 0.7,
+      heightRatio: hasTop ? 1.0 : 0.75,
+      depthRatio,
+      confidence,
+    },
+    contextMatch,
+    interpolationGaps,
+    spatialDepthHint: strategyLabels[strategy],
+    primaryAngle: proxy.keyframeAngleKey,
+    processingSteps,
+  };
+}
+
 const HOOK_TRANSITIONS: Record<UsageContext, string> = {
   unboxing: "paradox_reveal",
   desk_setup: "rotation_zoom",
@@ -344,7 +433,12 @@ Deno.serve(async (req: Request) => {
     const validAngles = angles.length > 5 ? angles.slice(0, 5) : angles;
 
     // Phase 2: AI 입체 분석 및 3D 신세시스
-    const synthesis = runSynthesis(validAngles, customPrompt);
+    // If a keyframe proxy payload is provided, use the lightweight path that
+    // reconstructs the synthesis from delta vectors instead of decoding all
+    // angle images at full resolution.
+    const synthesis = payload.keyframeProxy
+      ? runSynthesisFromProxy(payload.keyframeProxy, customPrompt)
+      : runSynthesis(validAngles, customPrompt);
 
     // Phase 3: 유튜브 상위 1% 심리 리듬 연출
     const bpm = targetPlatforms.includes("tiktok") ? 140 : 100;
