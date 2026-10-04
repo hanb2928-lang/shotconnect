@@ -9,7 +9,7 @@ import {
   Alert,
   ViewStyle,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -47,6 +47,9 @@ import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 import { MotionPreviewOverlay } from '@/components/MotionPreviewOverlay';
+import { DraftHistory } from '@/components/DraftHistory';
+import { useDraftAutoSave } from '@/hooks/useDraftAutoSave';
+import type { DraftEntry } from '@/lib/draftStorage';
 import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/lib/videoJobPersistence';
 import { AppState, type AppStateStatus } from 'react-native';
 
@@ -128,6 +131,24 @@ export default function SynthesisScreen() {
   const genStartRef = useRef<number>(0);
   const progressMsgRef = useRef<string>('');
   const mountedRef = useRef(true);
+  const { saveDraftState, loadDraft, clearDraftId } = useDraftAutoSave('synthesis');
+  const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
+  const params = useLocalSearchParams<{ draftId?: string }>();
+  const [jobId, setJobId] = useState<string | null>(null);
+  const handleResumeDraftRef = useRef<((draft: DraftEntry) => Promise<void>) | null>(null);
+
+  // Auto-load draft from query param (navigated from home screen DraftHistory)
+  useEffect(() => {
+    if (!params.draftId || resumeDraftId) return;
+    (async () => {
+      const draftId = params.draftId;
+      if (!draftId) return;
+      const draft = await loadDraft(draftId);
+      if (draft && handleResumeDraftRef.current) {
+        await handleResumeDraftRef.current(draft);
+      }
+    })();
+  }, [params.draftId, resumeDraftId, loadDraft]);
 
   useBeforeUnloadGuard(isGenerating || isExporting);
 
@@ -267,7 +288,57 @@ export default function SynthesisScreen() {
     };
   }, []);
 
-  const [jobId, setJobId] = useState<string | null>(null);
+  // Auto-save draft when images or options change
+  useEffect(() => {
+    if (productImages.length > 0) {
+      saveDraftState({
+        imageUris: productImages.map((img) => img.uri),
+        angleLabels: productImages.map((img) => img.angle || ''),
+        modelImageUri: modelImage?.uri,
+        status: isGenerating ? 'generating' : 'editing',
+        scanId: scanIdRef.current ?? undefined,
+        jobId: jobId ?? undefined,
+        resultVideoUrl: resultVideoUrl ?? undefined,
+        genMode,
+        mood,
+        platform,
+        uploaded: productImages.some((img) => img.uri.startsWith('http')),
+      });
+    }
+  }, [productImages, modelImage, isGenerating, jobId, resultVideoUrl, genMode, mood, platform, saveDraftState]);
+
+  // Resume a draft — restores images and options
+  const handleResumeDraft = useCallback(async (draft: DraftEntry) => {
+    // On web, blob: URIs are gone after reload — only https:// URIs survive.
+    // On native, file:// URIs may still exist in the app's cache directory.
+    const validUris = draft.imageUris.filter((uri) =>
+      uri.startsWith('http') ||
+      (Platform.OS !== 'web' && uri.startsWith('file://'))
+    );
+    if (validUris.length === 0) {
+      setError('이 작업의 이미지가 만료되었습니다. 다시 촬영해주세요.');
+      return;
+    }
+    const restoredImages: SourceImage[] = validUris.map((uri, i) => ({
+      id: `restored-${Date.now()}-${i}`,
+      uri,
+      angle: draft.angleLabels[i] || `사진 ${i + 1}`,
+    }));
+    setProductImages(restoredImages);
+    if (draft.modelImageUri && (draft.modelImageUri.startsWith('http') || (Platform.OS !== 'web' && draft.modelImageUri.startsWith('file://')))) {
+      setModelImage({ id: `restored-model-${Date.now()}`, uri: draft.modelImageUri });
+    }
+    if (draft.genMode) setGenMode(draft.genMode as GenMode);
+    if (draft.mood) setMood(draft.mood as ProductMood);
+    if (draft.platform) setPlatform(draft.platform as PlatformMode);
+    if (draft.scanId) scanIdRef.current = draft.scanId;
+    if (draft.resultVideoUrl) setResultVideoUrl(draft.resultVideoUrl);
+    setResumeDraftId(draft.id);
+    await loadDraft(draft.id);
+  }, [loadDraft]);
+
+  // Keep ref in sync so the boot effect can call handleResumeDraft
+  handleResumeDraftRef.current = handleResumeDraft;
 
   // Restore jobId from persistent storage after OS cold-start kill
   useEffect(() => {
@@ -603,6 +674,8 @@ export default function SynthesisScreen() {
           onPlatformChange={handlePlatformChange}
           onOutputModeChange={setOutputMode}
         />
+
+        <DraftHistory onResume={handleResumeDraft} />
 
         <ProductMoodPresetCard
           autoDetectedMood={autoDetectedMood}
