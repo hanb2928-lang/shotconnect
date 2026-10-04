@@ -1,7 +1,7 @@
 import type { AnalysisResult } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { enqueueJob } from '@/lib/jobQueue';
-import { uploadImage } from '@/lib/analysis';
+import { uploadWithRetry } from '@/lib/analysis';
 import { generateAffiliateLinks } from '@/lib/affiliate';
 import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array } from '@/lib/base64';
@@ -83,7 +83,7 @@ export async function startAsyncAnalysis(
   if (cached?.analysis_result) {
     // Cache hit — upload image for the scan record, then create scan with full data
     if (aborted()) throw new Error('분석이 취소되었습니다.');
-    const imageUrl = await uploadImage(base64, mimeType, signal);
+    const imageUrl = await uploadWithRetry(base64, mimeType, signal);
     const cacheUploadedPath = extractStoragePath(imageUrl);
     const analysis = cached.analysis_result as unknown as AnalysisResult;
     let scanId: string;
@@ -105,7 +105,7 @@ export async function startAsyncAnalysis(
   let imageUrl: string;
   try {
     if (aborted()) throw new Error('분석이 취소되었습니다.');
-    imageUrl = await uploadImage(base64, mimeType, signal);
+    imageUrl = await uploadWithRetry(base64, mimeType, signal);
     const p = extractStoragePath(imageUrl);
     if (p) uploadedPaths.push(p);
   } catch (err) {
@@ -120,7 +120,7 @@ export async function startAsyncAnalysis(
       throw new Error('분석이 취소되었습니다.');
     }
     try {
-      const url = await uploadImage(additionalBase64Images[i], 'image/jpeg', signal);
+      const url = await uploadWithRetry(additionalBase64Images[i], 'image/jpeg', signal);
       additionalUrls.push(url);
       const ap = extractStoragePath(url);
       if (ap) uploadedPaths.push(ap);

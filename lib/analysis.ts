@@ -32,7 +32,7 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
   });
 }
 
-const UPLOAD_TIMEOUT_MS = 15_000;
+const UPLOAD_TIMEOUT_MS = 30_000;
 const COMPRESS_TIMEOUT_MS = 20_000;
 const UPLOAD_RETRY_MAX = 3;
 const UPLOAD_RETRY_BASE_MS = 1000;
@@ -62,7 +62,7 @@ function withUploadTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promis
  * chain uploads independently — a single timeout on a flaky network should
  * not collapse the entire analysis pipeline.
  */
-async function uploadWithRetry(
+export async function uploadWithRetry(
   b64: string,
   mimeType: string,
   signal?: AbortSignal,
@@ -76,7 +76,7 @@ async function uploadWithRetry(
       lastError = error;
       if (signal?.aborted) throw error;
       if (attempt < UPLOAD_RETRY_MAX - 1) {
-        const delayMs = UPLOAD_RETRY_BASE_MS * Math.pow(2, attempt);
+        const delayMs = UPLOAD_RETRY_BASE_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
         await new Promise<void>((r) => setTimeout(r, delayMs));
       }
     }
@@ -267,7 +267,7 @@ export async function analyzeImage(
     async () => {
       await deductCredits('photo_analysis');
       try {
-      const imageUrl = await uploadImage(b64, compressed.mimeType);
+      const imageUrl = await uploadWithRetry(b64, compressed.mimeType);
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
     method: 'POST',
     headers: {
@@ -651,7 +651,7 @@ export async function analyzeImageWithProductContext(
     async () => {
       await deductCredits('photo_analysis');
       try {
-      const imageUrl = await uploadImage(b64, compressed.mimeType, signal);
+      const imageUrl = await uploadWithRetry(b64, compressed.mimeType, signal);
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
         method: 'POST',
         headers: {
@@ -745,7 +745,7 @@ export async function analyzeImageQueued(
     async () => {
       await deductCredits('photo_analysis');
       try {
-      const imageUrl = await uploadImage(b64, compressed.mimeType, signal);
+      const imageUrl = await uploadWithRetry(b64, compressed.mimeType, signal);
       const result = await enqueueAndWait<Record<string, unknown>>(
         'analyze-photo',
         { imageUrl, fileName, mimeType: compressed.mimeType, mode, ...(preferredStyle ? { preferredStyle } : {}) },

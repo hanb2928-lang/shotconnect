@@ -14,7 +14,7 @@ import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
 import { logError, addBreadcrumb } from './errorLogger';
 import { safeInvoke } from './apiClient';
 
-const UPLOAD_MAX_RETRIES = 2;
+const UPLOAD_MAX_RETRIES = 3;
 const UPLOAD_RETRY_DELAY_MS = 1500;
 const UPLOAD_CONCURRENCY = Platform.OS === 'web' ? 2 : 1;
 
@@ -64,7 +64,7 @@ async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortS
           const recovered = await waitForOnline();
           if (!recovered) break;
         }
-        await new Promise((r) => setTimeout(r, UPLOAD_RETRY_DELAY_MS * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, UPLOAD_RETRY_DELAY_MS * (attempt + 1) + Math.floor(Math.random() * 500)));
       }
     }
   }
