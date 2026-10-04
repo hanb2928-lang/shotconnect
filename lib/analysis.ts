@@ -16,6 +16,7 @@ import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
 import { sanitizeEncodedText } from '@/lib/textSanitizer';
 import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
 import { waitForFileChannelFlush } from '@/lib/smartResize';
+import { isUploadCircuitOpen, recordUploadSuccess, recordUploadFailure } from '@/lib/uploadCircuitBreaker';
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   const abortError = () => {
@@ -72,10 +73,16 @@ export async function uploadWithRetry(
   let lastError: unknown;
   for (let attempt = 0; attempt < UPLOAD_RETRY_MAX; attempt++) {
     if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+    if (isUploadCircuitOpen()) {
+      throw new Error('네트워크 연결이 불안정하여 업로드가 일시 중단되었습니다. 잠시 후 다시 시도해주세요.');
+    }
     try {
-      return await uploadImage(b64, mimeType, signal);
+      const result = await uploadImage(b64, mimeType, signal);
+      recordUploadSuccess();
+      return result;
     } catch (error) {
       lastError = error;
+      recordUploadFailure();
       if (signal?.aborted) throw error;
       if (attempt < UPLOAD_RETRY_MAX - 1) {
         const delayMs = UPLOAD_RETRY_BASE_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 500);

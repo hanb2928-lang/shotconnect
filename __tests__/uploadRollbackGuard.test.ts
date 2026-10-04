@@ -66,6 +66,7 @@ jest.mock('@/lib/analysis', () => {
 
 import { supabase } from '@/lib/supabase';
 import { isOnline } from '@/hooks/useNetworkStatus';
+import { resetUploadCircuit } from '@/lib/uploadCircuitBreaker';
 import { createScanFromAngleShots } from '@/lib/stereoPipeline';
 
 function getStorageRemoveMock(): jest.Mock {
@@ -85,6 +86,7 @@ describe('Upload Rollback Guard', () => {
     jest.clearAllMocks();
     (isOnline as jest.Mock).mockReturnValue(true);
     mockUploadBlobImpl.mockReset();
+    resetUploadCircuit();
   });
 
   it('rolls back when every upload fails (network down)', async () => {

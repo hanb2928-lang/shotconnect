@@ -10,6 +10,7 @@ import { getDeepLink } from './platformUpload';
 import * as Linking from 'expo-linking';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { nativeHeapCooldownGuard } from './imageEdit';
+import { isUploadCircuitOpen, recordUploadSuccess, recordUploadFailure, waitForUploadCircuit } from './uploadCircuitBreaker';
 import type { AngleShot } from '@/components/MultiAngleCaptureGuide';
 import { logError, addBreadcrumb } from './errorLogger';
 import { safeInvoke } from './apiClient';
@@ -58,10 +59,16 @@ async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortS
   const blob = base64ToBlob(base64, mimeType);
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+    if (isUploadCircuitOpen()) {
+      throw new Error('네트워크 연결이 불안정하여 업로드가 일시 중단되었습니다. 잠시 후 다시 시도해주세요.');
+    }
     try {
-      return await uploadImageBlob(blob, mimeType, true, signal);
+      const result = await uploadImageBlob(blob, mimeType, true, signal);
+      recordUploadSuccess();
+      return result;
     } catch (err) {
       lastErr = err;
+      recordUploadFailure();
       if (attempt < UPLOAD_MAX_RETRIES) {
         if (!isOnline()) {
           const recovered = await waitForOnline();
@@ -93,6 +100,10 @@ async function uploadAngleShotsConcurrently(
   async function processNext(): Promise<void> {
     while (cursor < shots.length) {
       if (signal?.aborted || fatalThreshold) return;
+      if (isUploadCircuitOpen()) {
+        const ready = await waitForUploadCircuit(signal);
+        if (!ready || signal?.aborted || fatalThreshold) return;
+      }
       const idx = cursor++;
       const shot = shots[idx];
       try {
