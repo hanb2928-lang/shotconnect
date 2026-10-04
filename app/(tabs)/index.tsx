@@ -1482,7 +1482,7 @@ function CameraScreenInner() {
                 setCameraReady(false);
                 setError(event.message || '카메라를 시작할 수 없습니다. 권한과 다른 앱의 카메라 사용 여부를 확인해주세요.');
               }}
-              mode="video"
+              mode="picture"
             />
           ) : (
             <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>
@@ -1698,7 +1698,7 @@ function CameraScreenInner() {
                 setCameraReady(false);
                 setError(event.message || '카메라를 시작할 수 없습니다. 권한과 다른 앱의 카메라 사용 여부를 확인해주세요.');
               }}
-            mode="video"
+            mode="picture"
           />
         ) : (
           <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>
