@@ -12,6 +12,7 @@ import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { compressCaptureFrameToBlob, compressImageToBase64 } from '@/lib/imageEdit';
+import { withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
 import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -242,15 +243,25 @@ export const InlineCameraViewfinder = forwardRef<
           return null;
         }
         capturedUri = result.uri;
-        const compressed = await compressImageToBase64(capturedUri, 1080, 0.6);
+        const uriToDelete = capturedUri;
+        const compressed = await compressImageToBase64(uriToDelete, 1080, 0.6);
         // Wait for temp file cleanup to finish before releasing the lock.
-        await FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+        // Use withFileSettle to retry on transient EBUSY from the camera
+        // session still holding the file handle.
+        await withFileSettle('deleteCapturedUri', () =>
+          FileSystem.deleteAsync(uriToDelete, { idempotent: true }),
+        ).catch(() => {});
+        await waitForFileChannelFlush();
         capturedUri = null;
         return compressed;
       } catch (err) {
         console.error('[InlineCameraViewfinder] native capture failed:', err);
         if (capturedUri) {
-          await FileSystem.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+          const errUri = capturedUri;
+          await withFileSettle('deleteCapturedUriErr', () =>
+            FileSystem.deleteAsync(errUri, { idempotent: true }),
+          ).catch(() => {});
+          await waitForFileChannelFlush();
         }
         // Remount the camera session only on actual failure.
         setCameraKey((k) => k + 1);

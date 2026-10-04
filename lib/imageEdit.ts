@@ -388,20 +388,21 @@ export async function compressImageToBase64(
       registerTempFile(manipulated.uri, 'compressImageToBase64');
       return await withFileLock(manipulated.uri, async () => {
         const fileInfo = await withTimeout(
-          FileSystem.getInfoAsync(manipulated.uri),
+          withFileSettle('compressGetInfo', () => FileSystem.getInfoAsync(manipulated.uri)),
           NATIVE_READ_TIMEOUT_MS,
           '변환 파일 정보 조회',
         );
         if (!fileInfo.exists) throw new Error('이미지 변환 실패');
         assertNativeImageSize(fileInfo.size);
         const base64 = await withTimeout(
-          FileSystem.readAsStringAsync(manipulated.uri, {
+          withFileSettle('compressRead', () => FileSystem.readAsStringAsync(manipulated.uri, {
             encoding: FileSystem.EncodingType.Base64,
-          }),
+          })),
           NATIVE_READ_TIMEOUT_MS,
           '이미지 파일 읽기',
         );
-        safeDeleteTempFile(manipulated.uri).catch(() => {});
+        await safeDeleteTempFile(manipulated.uri).catch(() => {});
+        await waitForFileChannelFlush();
         return { base64, mimeType: 'image/jpeg' };
       });
     } catch {
@@ -422,7 +423,10 @@ export async function compressImageToBase64(
       return { base64, mimeType: 'image/jpeg' };
     }
   } finally {
-    if (source.temporary) await FileSystem.deleteAsync(source.uri, { idempotent: true }).catch(() => {});
+    if (source.temporary) {
+      await withFileSettle('deleteSource', () => FileSystem.deleteAsync(source.uri, { idempotent: true })).catch(() => {});
+      await waitForFileChannelFlush();
+    }
   }
 }
 
@@ -620,21 +624,24 @@ export async function prepareImageForApi(
           ? [{ resize: { width: maxDimension } }]
           : [{ resize: { height: maxDimension } }]
         : [];
-    const manipulated = await ImageManipulator.manipulateAsync(
-      normalizedDataUrl,
-      actions,
-      { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+    const manipulated = await withFileSettle('prepareApi-manipulate', () =>
+      ImageManipulator.manipulateAsync(
+        normalizedDataUrl,
+        actions,
+        { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+      ),
     );
 
     registerTempFile(manipulated.uri, 'prepareImageForApi-native');
     return await withFileLock(manipulated.uri, async () => {
-      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+      const fileInfo = await withFileSettle('prepareApi-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
       assertNativeImageSize(fileInfo.size);
-      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      const base64 = await withFileSettle('prepareApi-read', () => FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
-      });
-      safeDeleteTempFile(manipulated.uri).catch(() => {});
+      }));
+      await safeDeleteTempFile(manipulated.uri).catch(() => {});
+      await waitForFileChannelFlush();
       return `data:image/jpeg;base64,${base64}`;
     });
   } catch {
@@ -679,20 +686,23 @@ export async function prepareImageForEdit(
           ? [{ resize: { width: maxDimension } }]
           : [{ resize: { height: maxDimension } }]
         : [];
-    const manipulated = await ImageManipulator.manipulateAsync(
-      normalizedDataUrl,
-      actions,
-      { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+    const manipulated = await withFileSettle('prepareEdit-manipulate', () =>
+      ImageManipulator.manipulateAsync(
+        normalizedDataUrl,
+        actions,
+        { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+      ),
     );
 
     registerTempFile(manipulated.uri, 'prepareImageForEdit-native');
     return await withFileLock(manipulated.uri, async () => {
-      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+      const fileInfo = await withFileSettle('prepareEdit-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
-      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      const base64 = await withFileSettle('prepareEdit-read', () => FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
-      });
-      safeDeleteTempFile(manipulated.uri).catch(() => {});
+      }));
+      await safeDeleteTempFile(manipulated.uri).catch(() => {});
+      await waitForFileChannelFlush();
       return `data:image/png;base64,${base64}`;
     });
   } catch {
@@ -786,7 +796,8 @@ export async function extractVideoFrameBase64(
           });
           return { base64, mimeType: 'image/jpeg' };
         } finally {
-          safeDeleteTempFile(localPath).catch(() => {});
+          await safeDeleteTempFile(localPath).catch(() => {});
+          await waitForFileChannelFlush();
         }
       }
       return { base64: result.base64, mimeType: result.mimeType };
@@ -844,20 +855,23 @@ export async function compressImageToBase64WithUri(
           ? [{ resize: { width: maxDimension } }]
           : [{ resize: { height: maxDimension } }]
         : [];
-    const manipulated = await ImageManipulator.manipulateAsync(
-      uri,
-      actions,
-      { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+    const manipulated = await withFileSettle('compressWithUri-manipulate', () =>
+      ImageManipulator.manipulateAsync(
+        uri,
+        actions,
+        { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+      ),
     );
     registerTempFile(manipulated.uri, 'prepareImageForUpload-native');
     return await withFileLock(manipulated.uri, async () => {
-      const fileInfo = await FileSystem.getInfoAsync(manipulated.uri);
+      const fileInfo = await withFileSettle('compressWithUri-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
       assertNativeImageSize(fileInfo.size);
-      const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      const base64 = await withFileSettle('compressWithUri-read', () => FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
-      });
-      safeDeleteTempFile(manipulated.uri).catch(() => {});
+      }));
+      await safeDeleteTempFile(manipulated.uri).catch(() => {});
+      await waitForFileChannelFlush();
       return { base64, mimeType: 'image/jpeg', compressedUri: null };
     });
   } catch {
