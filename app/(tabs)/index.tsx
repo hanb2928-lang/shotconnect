@@ -922,6 +922,21 @@ function CameraScreenInner() {
         multiAngleCaptureInProgressRef.current = false;
         return null;
       }
+      // Copy the captured photo from the camera's cache URI to the app's
+      // persistent document directory. The OS can evict cache files at any
+      // time; copying to documentDirectory ensures the file survives until
+      // we're done reading and uploading it.
+      let safeUri = capturedUri;
+      try {
+        const fs = await import('expo-file-system/legacy');
+        const docDir = fs.documentDirectory;
+        if (docDir && capturedUri.startsWith('file://') && !capturedUri.startsWith(docDir)) {
+          const dest = `${docDir}cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          await fs.copyAsync({ from: capturedUri, to: dest });
+          await fs.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+          safeUri = dest;
+        }
+      } catch { /* if copy fails, proceed with original URI */ }
       // Defer heavy FileSystem I/O + base64 decode until after the camera
       // surface flushes its next frame, preventing black-frame captures on
       // high-refresh-rate displays where the surface texture drops while
@@ -933,7 +948,7 @@ function CameraScreenInner() {
             for (let attempt = 0; attempt < 2; attempt++) {
               if (!isMountedRef.current) { reject(new Error('unmounted')); return; }
               try {
-                const r = await compressImageToBase64WithUri(capturedUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
+                const r = await compressImageToBase64WithUri(safeUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
                 resolve(r);
                 return;
               } catch (err) {
@@ -989,11 +1004,23 @@ function CameraScreenInner() {
       const assetUri = result.assets[0].uri;
       const flushed = await waitForUriFlush(assetUri);
       if (!flushed || !isMountedRef.current) return null;
+      // Copy picked image to document directory to prevent cache eviction
+      // before processing completes.
+      let safeUri = assetUri;
+      try {
+        const fs = await import('expo-file-system/legacy');
+        const docDir = fs.documentDirectory;
+        if (docDir && assetUri.startsWith('file://') && !assetUri.startsWith(docDir)) {
+          const dest = `${docDir}pick-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          await fs.copyAsync({ from: assetUri, to: dest });
+          safeUri = dest;
+        }
+      } catch { /* if copy fails, proceed with original URI */ }
       const { base64, mimeType, compressedUri } = await withTimeout(
         new Promise<{ base64: string; mimeType: string; compressedUri: string | null }>((resolve, reject) => {
           InteractionManager.runAfterInteractions(async () => {
             try {
-              const r = await compressImageToBase64WithUri(assetUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
+              const r = await compressImageToBase64WithUri(safeUri, getDeviceCaptureMaxDim(), isLowEndDevice() ? 0.6 : 0.7);
               resolve(r);
             } catch (err) { reject(err); }
           });

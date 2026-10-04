@@ -375,12 +375,13 @@ async function validateCopiedFile(path: string): Promise<void> {
 async function makeReadableNativeUri(uri: string): Promise<{ uri: string; temporary: boolean }> {
   if (Platform.OS === 'web') return { uri, temporary: false };
   const appCacheDir = FileSystem.cacheDirectory;
+  const docDir = FileSystem.documentDirectory;
   const needsCopy =
     uri.startsWith('content://') ||
-    (uri.startsWith('file://') && appCacheDir && !uri.startsWith(appCacheDir) && !uri.startsWith(FileSystem.documentDirectory ?? ''));
+    (uri.startsWith('file://') && appCacheDir && !uri.startsWith(appCacheDir) && !(docDir && uri.startsWith(docDir)));
   if (!needsCopy) return { uri, temporary: false };
-  if (!appCacheDir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
-  const target = `${FileSystem.cacheDirectory}shot-connect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  if (!docDir) throw new Error('저장 공간을 사용할 수 없습니다.');
+  const target = `${docDir}shot-connect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let bgAbortController: AbortController | null = null;
   const releaseSlot = await acquireNativeCopySlot();

@@ -250,6 +250,23 @@ export const InlineCameraViewfinder = forwardRef<
           return null;
         }
         capturedUri = result.uri;
+        // Immediately copy the captured photo from the camera's cache URI to
+        // the app's persistent document directory. The OS can evict cache
+        // files at any time, and content:// URIs from the camera may become
+        // inaccessible after the camera session closes.
+        const docDir = FileSystem.documentDirectory;
+        if (docDir && capturedUri.startsWith('file://') && !capturedUri.startsWith(docDir)) {
+          const safePath = `${docDir}cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          await withFileSettle('copyToDocDir', () =>
+            FileSystem.copyAsync({ from: capturedUri!, to: safePath }),
+          );
+          await waitForFileChannelFlush();
+          // Delete the original cache URI to avoid leaving stale temp files
+          await withFileSettle('deleteOrigCapture', () =>
+            FileSystem.deleteAsync(capturedUri!, { idempotent: true }),
+          ).catch(() => {});
+          capturedUri = safePath;
+        }
         const uriToDelete = capturedUri;
         const compressed = await compressImageToBase64(uriToDelete, 720, 0.8);
         await debugSaveNormalizedCapture(compressed.base64, compressed.mimeType, 720, 720, 'inline-native-normalized');
