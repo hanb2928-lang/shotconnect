@@ -43,8 +43,8 @@ async function getImageDimensions(uri: string): Promise<{ width: number; height:
 }
 
 const BUSY_ERROR_PATTERNS = ['EBUSY', 'Resource busy', 'file is in use', 'already in use', 'EPERM', 'EACCES'];
-const SETTLE_MAX_ATTEMPTS = 4;
-const SETTLE_BASE_DELAY_MS = 80;
+const SETTLE_MAX_ATTEMPTS = 6;
+const SETTLE_BASE_DELAY_MS = 120;
 
 function isBusyError(error: unknown): boolean {
   const msg = String(error?.toString?.() ?? error ?? '');
@@ -84,8 +84,15 @@ export async function withFileSettle<T>(
  */
 export async function waitForFileChannelFlush(): Promise<void> {
   if (Platform.OS === 'web') return;
+  // Two microtask yields let the JS engine clear pending native callbacks,
+  // then a short timed delay gives the OS file channel handle enough
+  // breathing room to fully flush its write buffer before the next
+  // read/upload/delete hits the same inode. On slow Android flash storage
+  // the gap between copyAsync completing and the handle being released
+  // can be 50–150ms — two setTimeout(0) calls alone are insufficient.
   await new Promise<void>((r) => setTimeout(r, 0));
   await new Promise<void>((r) => setTimeout(r, 0));
+  await new Promise<void>((r) => setTimeout(r, 50));
 }
 
 export async function analyzeAndDownscaleImage(uri: string): Promise<ImageAnalysisResult> {

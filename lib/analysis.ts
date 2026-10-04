@@ -15,6 +15,7 @@ import { cleanBase64 } from '@/lib/base64';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
 import { sanitizeEncodedText } from '@/lib/textSanitizer';
 import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
+import { waitForFileChannelFlush } from '@/lib/smartResize';
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   const abortError = () => {
@@ -93,6 +94,8 @@ export async function uploadImage(
   const { base64: _compressedBase64, mimeType: compressedMime } = await compressBase64ForUpload(base64, mimeType);
   let compressedBase64 = _compressedBase64;
   if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+
+  await waitForFileChannelFlush();
 
   const uploadMime = compressedMime || 'image/jpeg';
   const ext = uploadMime === 'image/png' ? 'png' : uploadMime === 'image/webp' ? 'webp' : 'jpg';
