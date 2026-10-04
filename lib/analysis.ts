@@ -8,6 +8,7 @@ import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
 import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes } from '@/lib/imageEdit';
+import { compressUriToUri, uploadUriToSupabase } from '@/lib/imageEdit';
 import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
 import { hashObject } from '@/lib/contentHash';
@@ -17,6 +18,7 @@ import { sanitizeEncodedText } from '@/lib/textSanitizer';
 import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
 import { waitForFileChannelFlush } from '@/lib/smartResize';
 import { isUploadCircuitOpen, recordUploadSuccess, recordUploadFailure } from '@/lib/uploadCircuitBreaker';
+import { logUploadStart, logUploadEvent } from '@/lib/uploadDebugLogger';
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   const abortError = () => {
@@ -119,7 +121,16 @@ export async function uploadImage(
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
   const uploadBlob = base64ToBlob(compressedBase64, uploadMime);
+  const uploadSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   compressedBase64 = '';
+
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+  const finishLog = logUploadStart({
+    path: 'supabase_js',
+    url: uploadUrl,
+    mimeType: uploadMime,
+    fileSize: uploadSize,
+  });
 
   const uploadPromise = supabase.storage
     .from('scans')
@@ -127,8 +138,12 @@ export async function uploadImage(
 
   const { error } = await withUploadTimeout(uploadPromise, signal);
 
-  if (error) throw new Error(`Upload failed: ${error.message}`);
+  if (error) {
+    finishLog({ error: error.message });
+    throw new Error(`Upload failed: ${error.message}`);
+  }
 
+  finishLog({ status: 200 });
   const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
   return urlData.publicUrl;
 }
@@ -168,16 +183,106 @@ export async function uploadImageBlob(
     : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+  const blobSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
+  const finishLog = logUploadStart({
+    path: 'supabase_js',
+    url: uploadUrl,
+    mimeType: uploadMime,
+    fileSize: blobSize,
+  });
+
   const uploadPromise = supabase.storage
     .from('scans')
     .upload(fileName, uploadBlob, { contentType: uploadMime, cacheControl: '360000' });
 
   const { error } = await withUploadTimeout(uploadPromise, signal);
 
-  if (error) throw new Error(`Upload failed: ${error.message}`);
+  if (error) {
+    finishLog({ error: error.message });
+    throw new Error(`Upload failed: ${error.message}`);
+  }
 
+  finishLog({ status: 200 });
   const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
   return urlData.publicUrl;
+}
+
+/**
+ * Upload a file URI directly to Supabase Storage without ever converting
+ * to base64. On native, compresses the file to a smaller JPEG file via
+ * ImageManipulator, then uploads via FileSystem.uploadAsync — the native
+ * networking module streams the file directly, never touching JS memory.
+ */
+export async function uploadCompressedUri(
+  fileUri: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (Platform.OS === 'web') {
+    throw new Error('uploadCompressedUri is not supported on web');
+  }
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < UPLOAD_RETRY_MAX; attempt++) {
+    if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+    if (isUploadCircuitOpen()) {
+      throw new Error('네트워크 연결이 불안정하여 업로드가 일시 중단되었습니다. 잠시 후 다시 시도해주세요.');
+    }
+    let compressedUri: string | null = null;
+    try {
+      compressedUri = await compressUriToUri(fileUri, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+      const FileSystem = await import('expo-file-system/legacy');
+      const info = await FileSystem.getInfoAsync(compressedUri);
+      if (!info.exists || (info.size !== undefined && info.size > UPLOAD_MAX_PAYLOAD_BYTES)) {
+        // Re-compress at lower quality if file is too large
+        const reCompressed = await compressUriToUri(fileUri, 480, 0.5);
+        await FileSystem.deleteAsync(compressedUri, { idempotent: true }).catch(() => {});
+        compressedUri = reCompressed;
+      }
+      if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+      let fileSize: number | undefined;
+      try {
+        const FileSystem = await import('expo-file-system/legacy');
+        const info = await FileSystem.getInfoAsync(compressedUri);
+        if (info.exists) fileSize = info.size;
+      } catch { /* best-effort */ }
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/public/scans/scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const finishLog = logUploadStart({
+        path: 'native_uploadAsync',
+        url: uploadUrl,
+        fileUri: compressedUri,
+        fileSize,
+        mimeType: 'image/jpeg',
+        attempt,
+      });
+      try {
+        const publicUrl = await withUploadTimeout(
+          uploadUriToSupabase(compressedUri, 'image/jpeg'),
+          signal,
+        );
+        finishLog({ status: 200 });
+        recordUploadSuccess();
+        return publicUrl;
+      } catch (err) {
+        finishLog({ error: err instanceof Error ? err.message : String(err) });
+        throw err;
+      }
+    } catch (error) {
+      lastError = error;
+      recordUploadFailure();
+      if (signal?.aborted) throw error;
+      if (attempt < UPLOAD_RETRY_MAX - 1) {
+        const delayMs = UPLOAD_RETRY_BASE_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
+        await new Promise<void>((r) => setTimeout(r, delayMs));
+      }
+    } finally {
+      if (compressedUri) {
+        const FileSystem = await import('expo-file-system/legacy');
+        await FileSystem.deleteAsync(compressedUri, { idempotent: true }).catch(() => {});
+      }
+    }
+  }
+  throw lastError;
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -252,6 +357,14 @@ export async function uploadVideoBlob(
     }
   }
 
+  const videoUploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+  const finishLog = logUploadStart({
+    path: 'supabase_js',
+    url: videoUploadUrl,
+    mimeType,
+    fileSize: body.byteLength,
+  });
+
   const uploadPromise = supabase.storage
     .from('scans')
     .upload(fileName, body, { contentType: mimeType, cacheControl: '360000' });
@@ -263,8 +376,12 @@ export async function uploadVideoBlob(
   const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
   const { error } = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
 
-  if (error) throw new Error(`동영상 업로드 실패: ${error.message}`);
+  if (error) {
+    finishLog({ error: error.message });
+    throw new Error(`동영상 업로드 실패: ${error.message}`);
+  }
 
+  finishLog({ status: 200 });
   const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
   return urlData.publicUrl;
 }

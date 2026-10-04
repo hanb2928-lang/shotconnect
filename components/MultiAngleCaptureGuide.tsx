@@ -26,6 +26,7 @@ export type AngleShot = {
   base64?: string;
   dataUrl?: string;
   mimeType: string;
+  uri?: string;
 };
 
 export type AngleGuide = {
@@ -47,8 +48,8 @@ interface MultiAngleCaptureGuideProps {
   visible: boolean;
   onClose: () => void;
   onComplete: (shots: AngleShot[]) => void;
-  onPickImage?: (angleId: string) => Promise<{ base64: string; mimeType: string } | null>;
-  onCaptureImage?: (angleId: string) => Promise<{ base64: string; mimeType: string } | null>;
+  onPickImage?: (angleId: string) => Promise<{ base64: string; mimeType: string; uri?: string } | null>;
+  onCaptureImage?: (angleId: string) => Promise<{ base64: string; mimeType: string; uri?: string } | null>;
   guides?: AngleGuide[];
   minShots?: number;
   maxShots?: number;
@@ -115,7 +116,7 @@ export function MultiAngleCaptureGuide({
   const currentShot = currentGuide ? shots[currentGuide.id] : undefined;
 
   const handleAddShot = useCallback(
-    async (angleId: string, base64: string, mimeType: string) => {
+    async (angleId: string, base64: string, mimeType: string, uri?: string) => {
       if (maxReached) return;
       const guideIndex = guides.findIndex((g) => g.id === angleId);
       const guide = guides[guideIndex];
@@ -131,6 +132,7 @@ export function MultiAngleCaptureGuide({
           hint: guide.hint,
           base64,
           mimeType,
+          uri,
         };
         return next;
       });
@@ -156,7 +158,7 @@ export function MultiAngleCaptureGuide({
         const result = await onPickImage(angleId);
         if (!mountedRef.current) return;
         if (result?.base64) {
-          await handleAddShot(angleId, result.base64, result.mimeType);
+          await handleAddShot(angleId, result.base64, result.mimeType, result.uri);
         } else {
           setCaptureError('이미지를 불러오지 못했습니다. 다시 시도해 주세요.');
         }
@@ -181,7 +183,7 @@ export function MultiAngleCaptureGuide({
       setCaptureError(null);
       try {
         const viewfinder = viewfinderRef.current;
-        let result: { base64: string; mimeType: string } | null = null;
+        let result: { base64: string; mimeType: string; uri?: string } | null = null;
         if (viewfinder?.isReady()) {
           result = await viewfinder.capture();
         }
@@ -189,7 +191,7 @@ export function MultiAngleCaptureGuide({
           result = await onCaptureImage(angleId);
         }
         if (result?.base64) {
-          await handleAddShot(angleId, result.base64, result.mimeType);
+          await handleAddShot(angleId, result.base64, result.mimeType, result.uri);
         } else {
           if (mountedRef.current) setCaptureError('카메라 캡처에 실패했습니다. 다시 촬영해 주세요.');
         }

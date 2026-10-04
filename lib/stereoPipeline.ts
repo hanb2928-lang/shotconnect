@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { uploadImage, uploadImageBlob, saveManualScan } from './analysis';
+import { uploadImage, uploadImageBlob, uploadCompressedUri, saveManualScan } from './analysis';
 import { base64ToBlob } from './imageEdit';
 import { supabase } from './supabase';
 import { runSynthesis, getSynthesisSummary, type AngleInput } from './aiSynthesisEngine';
@@ -51,7 +51,13 @@ function waitForOnline(): Promise<boolean> {
 
 const UPLOAD_MAX_BASE64_BYTES = 4_500_000;
 
-async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortSignal): Promise<string> {
+async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortSignal, uri?: string): Promise<string> {
+  // Native URI fast path: upload directly via FileSystem.uploadAsync,
+  // skipping base64 entirely. The native networking module streams
+  // the file without loading it into JS memory.
+  if (uri && Platform.OS !== 'web') {
+    return uploadCompressedUri(uri, signal);
+  }
   if (base64.length > UPLOAD_MAX_BASE64_BYTES) {
     throw new Error('이미지가 너무 커서 업로드할 수 없습니다. 더 낮은 해상도로 다시 촬영해주세요.');
   }
@@ -107,7 +113,7 @@ async function uploadAngleShotsConcurrently(
       const idx = cursor++;
       const shot = shots[idx];
       try {
-        const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg', signal);
+        const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg', signal, shot.uri);
         if (fatalThreshold) {
           const p = extractStoragePath(url);
           if (p) await supabase.storage.from('scans').remove([p]).catch(() => {});

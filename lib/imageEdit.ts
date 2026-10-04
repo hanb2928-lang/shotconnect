@@ -954,9 +954,7 @@ export async function compressImageToBase64WithUri(
       const base64 = await withFileSettle('compressWithUri-read', () => FileSystem.readAsStringAsync(manipulated.uri, {
         encoding: FileSystem.EncodingType.Base64,
       }));
-      await safeDeleteTempFile(manipulated.uri).catch(() => {});
-      await waitForFileChannelFlush();
-      return { base64, mimeType: 'image/jpeg', compressedUri: null };
+      return { base64, mimeType: 'image/jpeg', compressedUri: manipulated.uri };
     });
   } catch {
     const result = await compressImageToBase64(source.uri, maxDimension, quality);
@@ -1012,4 +1010,117 @@ export async function nativeHeapCooldownGuard(): Promise<void> {
   }
   const ms = isLowEndDevice() ? 400 : 200;
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Compress/resize a file URI to another file URI — no base64 in JS memory.
+ * Returns the URI of the compressed JPEG file in documentDirectory.
+ */
+export async function compressUriToUri(
+  uri: string,
+  maxDimension = UPLOAD_MAX_DIMENSION,
+  quality = UPLOAD_QUALITY,
+): Promise<string> {
+  if (Platform.OS === 'web') {
+    throw new Error('compressUriToUri is not supported on web');
+  }
+  const source = await makeReadableNativeUri(uri);
+  try {
+    const { width: origW, height: origH } = await getImageSize(source.uri);
+    const longer = Math.max(origW, origH);
+    const actions =
+      longer > maxDimension
+        ? origW >= origH
+          ? [{ resize: { width: maxDimension } }]
+          : [{ resize: { height: maxDimension } }]
+        : [];
+    const manipulated = await withFileSettle('compressUriToUri', () =>
+      ImageManipulator.manipulateAsync(
+        source.uri,
+        actions,
+        { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+      ),
+    );
+    registerTempFile(manipulated.uri, 'compressUriToUri', { pin: true });
+    const docDir = FileSystem.documentDirectory;
+    if (docDir && !manipulated.uri.startsWith(docDir)) {
+      const dest = `${docDir}compressed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      await withFileSettle('compressUriToUri-copy', () =>
+        FileSystem.copyAsync({ from: manipulated.uri, to: dest }),
+      );
+      await waitForFileChannelFlush();
+      await withFileSettle('compressUriToUri-deleteManip', () =>
+        FileSystem.deleteAsync(manipulated.uri, { idempotent: true }),
+      ).catch(() => {});
+      return dest;
+    }
+    return manipulated.uri;
+  } finally {
+    if (!source.uri.startsWith('data:')) {
+      unpinTempFile(source.uri);
+      if (source.temporary) {
+        await withFileSettle('compressUriToUri-deleteSource', () =>
+          FileSystem.deleteAsync(source.uri, { idempotent: true }),
+        ).catch(() => {});
+      }
+    }
+  }
+}
+
+/**
+ * Upload a file URI directly to Supabase Storage using the native
+ * FileSystem.uploadAsync — bypasses JS bridge entirely, no base64.
+ */
+export async function uploadUriToSupabase(
+  fileUri: string,
+  mimeType: string,
+): Promise<string> {
+  if (Platform.OS === 'web') {
+    throw new Error('uploadUriToSupabase is not supported on web');
+  }
+  const ext = mimeType === 'image/png' ? 'png'
+    : mimeType === 'image/webp' ? 'webp'
+    : mimeType === 'image/heic' ? 'heic'
+    : 'jpg';
+  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
+
+  let fileSize: number | undefined;
+  try {
+    const info = await FileSystem.getInfoAsync(fileUri);
+    if (info.exists) fileSize = info.size;
+  } catch { /* best-effort */ }
+
+  const result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
+    httpMethod: 'POST',
+    headers: {
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'Content-Type': mimeType,
+      'x-upsert': 'false',
+    },
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName: 'file',
+    mimeType,
+  });
+
+  if (__DEV__) {
+    const { logUploadEvent } = await import('@/lib/uploadDebugLogger');
+    logUploadEvent({
+      path: 'native_uploadAsync',
+      url: uploadUrl,
+      fileUri,
+      fileSize,
+      mimeType,
+      status: result.status,
+      responseBody: typeof result.body === 'string' ? result.body : undefined,
+      error: result.status >= 400 ? `HTTP ${result.status}` : undefined,
+    });
+  }
+
+  if (result.status >= 400) {
+    throw new Error(`업로드 실패 (${result.status})`);
+  }
+
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
+  return publicUrl;
 }

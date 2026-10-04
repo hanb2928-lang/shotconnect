@@ -34,7 +34,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { theme } from '@/lib/theme';
 import { startAsyncAnalysis } from '@/lib/asyncAnalysis';
-import { saveManualScan, uploadImage } from '@/lib/analysis';
+import { saveManualScan, uploadImage, uploadCompressedUri } from '@/lib/analysis';
 import { supabase } from '@/lib/supabase';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { buildDataUrl, cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
@@ -282,6 +282,7 @@ function CameraScreenInner() {
   const postCaptureBase64Ref = useRef<string | null>(null);
   const postCaptureMimeRef = useRef<string>('video/webm');
   const postCaptureVideoUriRef = useRef<string | null>(null);
+  const postCaptureUriRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -535,6 +536,7 @@ function CameraScreenInner() {
     const base64 = postCaptureBase64Ref.current;
     const mimeType = postCaptureMimeRef.current;
     const videoUri = postCaptureVideoUriRef.current;
+    const captureUri = postCaptureUriRef.current;
 
     autoSavingRef.current = true;
     if (!acquirePipelineLock('postCapture')) { autoSavingRef.current = false; return; }
@@ -554,6 +556,13 @@ function CameraScreenInner() {
           );
           if (!isMountedRef.current || controller.signal.aborted) throw new Error('aborted');
           const imageUrl = await uploadImage(frame.base64, frame.mimeType, controller.signal, true);
+          if (!isMountedRef.current || controller.signal.aborted) throw new Error('aborted');
+          return await saveManualScan(imageUrl);
+        }
+        // Native URI fast path: upload directly via FileSystem.uploadAsync,
+        // skipping base64 conversion entirely to avoid memory spikes.
+        if (captureUri && Platform.OS !== 'web') {
+          const imageUrl = await uploadCompressedUri(captureUri, controller.signal);
           if (!isMountedRef.current || controller.signal.aborted) throw new Error('aborted');
           return await saveManualScan(imageUrl);
         }
@@ -599,6 +608,7 @@ function CameraScreenInner() {
     postCaptureVideoUriRef.current = null;
     setPostCaptureBase64(null);
     postCaptureBase64Ref.current = null;
+    postCaptureUriRef.current = null;
   }, []);
 
   const prepareCameraForProcessing = useCallback(async () => {
@@ -744,6 +754,7 @@ function CameraScreenInner() {
       postCaptureMimeRef.current = mimeType;
       setPostCaptureVideoUri(null);
       postCaptureVideoUriRef.current = null;
+      postCaptureUriRef.current = asset.uri;
       setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
     } catch (err) {
       if (!isMountedRef.current) return;

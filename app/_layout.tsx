@@ -26,6 +26,9 @@ const NetworkBanner = lazy(() =>
 const VideoJobRecoveryToast = lazy(() =>
   import('@/components/VideoJobRecoveryToast').then((m) => ({ default: m.VideoJobRecoveryToast })),
 );
+const UploadDebugOverlay = lazy(() =>
+  import('@/components/UploadDebugOverlay').then((m) => ({ default: m.UploadDebugOverlay })),
+);
 import { I18nProvider, useI18n } from '@/hooks/useI18n';
 import { AppThemeProvider } from '@/hooks/useAppTheme';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -298,6 +301,7 @@ export default function RootLayout() {
   //   Frame 2: browser has composited the frame without the splash overlay
   //   Frame 3: mount AppShell — reflow happens on a settled compositor
   const [shellReady, setShellReady] = useState(false);
+  const [uploadDebugVisible, setUploadDebugVisible] = useState(false);
   useEffect(() => {
     if (!isReady || shellReady) return;
     if (bootReadyMarkedRef.current) return;
@@ -316,6 +320,14 @@ export default function RootLayout() {
     setShellReady(true);
   }, [isReady, shellReady, hideSplash]);
 
+  // Expose a global toggle for the upload debug overlay so it can be
+  // opened from Flipper/RN Debugger console or from code.
+  useEffect(() => {
+    if (!__DEV__) return;
+    (global as unknown as Record<string, unknown>).__toggleUploadDebug = () =>
+      setUploadDebugVisible((v) => !v);
+  }, []);
+
   return (
     <ErrorBoundary>
       <I18nProvider>
@@ -330,6 +342,11 @@ export default function RootLayout() {
                       <AppShell />
                       <Suspense fallback={<BootFallback />}><NetworkBanner /></Suspense>
                       <Suspense fallback={<BootFallback />}><VideoJobRecoveryToast /></Suspense>
+                      {__DEV__ && (
+                        <Suspense fallback={null}>
+                          <UploadDebugOverlay visible={uploadDebugVisible} onClose={() => setUploadDebugVisible(false)} />
+                        </Suspense>
+                      )}
                     </>
                   )}
                   <StatusBar style="light" />
