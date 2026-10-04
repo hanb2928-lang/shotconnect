@@ -21,6 +21,15 @@ export function friendlyError(err: unknown, fallback: string): string {
   if (lower.includes('500') || lower.includes('502') || lower.includes('503') || lower.includes('server')) {
     return '서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
   }
+  if (lower.includes('413') || lower.includes('payload too large') || lower.includes('entity too large')) {
+    return '이미지 크기가 서버 허용 한도를 초과했습니다. 더 작은 이미지로 다시 시도해주세요.';
+  }
+  if (lower.includes('tls') || lower.includes('ssl') || lower.includes('certificate') || lower.includes('handshake') || lower.includes('secure connection')) {
+    return '보안 연결에 실패했습니다. Wi-Fi 환경을 변경하거나 VPN/프록시 설정을 확인해 주세요.';
+  }
+  if (lower.includes('만료') || lower.includes('expired') || lower.includes('삭제되') || lower.includes('not found') || lower.includes('찾을 수 없')) {
+    return '촬영된 이미지가 만료되었거나 삭제되었습니다. 다시 촬영해주세요.';
+  }
   if (lower.includes('upload') || lower.includes('storage')) {
     return '이미지 업로드에 실패했습니다. 네트워크 연결을 확인해주세요.';
   }

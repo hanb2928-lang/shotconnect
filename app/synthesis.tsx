@@ -54,6 +54,8 @@ import { useDraftAutoSave } from '@/hooks/useDraftAutoSave';
 import type { DraftEntry } from '@/lib/draftStorage';
 import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/lib/videoJobPersistence';
 import { AppState, type AppStateStatus } from 'react-native';
+import { friendlyError } from '@/lib/errors';
+import { logError } from '@/lib/errorLogger';
 
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
 const UPLOAD_MAX_RETRIES = 3;
@@ -647,7 +649,9 @@ export default function SynthesisScreen() {
       jobIdRef.current = null;
       setIsGenerating(false);
       setVideoProgress(null);
-      setError(err instanceof Error ? err.message : 'AI 영상 생성 요청에 실패했습니다.');
+      const userMsg = friendlyError(err, 'AI 영상 생성 요청에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      logError(err, { component: 'synthesis', action: 'handleGenerate' });
+      setError(userMsg);
     } finally {
       generateLockRef.current = false;
     }
@@ -674,7 +678,8 @@ export default function SynthesisScreen() {
       setIsGenerating(false);
       clearActiveVideoJob();
       setVideoProgress((prev) => prev ? { ...prev, phase: 'error', progress: 0, message: errMsg } : null);
-      setError(errMsg);
+      logError(new Error(errMsg), { component: 'synthesis', action: 'polling.onError' });
+      setError(friendlyError(new Error(errMsg), errMsg));
     },
   });
 
