@@ -784,13 +784,30 @@ export async function fetchBgmRecommendation(imageDataUrl: string, mimeType: str
         // function instead of sending a multi-MB base64 string through the
         // JS bridge — reduces native heap pressure and network payload.
         const fileName = `bgm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-        const { error: uploadError } = await supabase.storage
-          .from('scans')
-          .upload(fileName, base64ToUint8Array(b64), { contentType: mimeType, cacheControl: '360000' });
         let imageUrl = '';
-        if (!uploadError) {
-          const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-          imageUrl = urlData.publicUrl;
+        if (Platform.OS !== 'web') {
+          try {
+            const { writeBase64ToTempFile, uploadUriToBucket } =
+              await import('@/lib/imageEdit');
+            const { unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
+            const tmpPath = await writeBase64ToTempFile(b64, 'jpg');
+            if (tmpPath) {
+              try {
+                imageUrl = await uploadUriToBucket(tmpPath, mimeType, 'scans', fileName);
+              } finally {
+                unpinTempFile(tmpPath);
+                await safeDeleteTempFile(tmpPath).catch(() => {});
+              }
+            }
+          } catch { /* fall back to base64 payload below */ }
+        } else {
+          const { error: uploadError } = await supabase.storage
+            .from('scans')
+            .upload(fileName, base64ToUint8Array(b64), { contentType: mimeType, cacheControl: '360000' });
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
+            imageUrl = urlData.publicUrl;
+          }
         }
         const payload = imageUrl
           ? { imageUrl }

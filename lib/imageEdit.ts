@@ -180,7 +180,7 @@ function assertNativeBase64Size(base64: string): void {
   }
 }
 
-async function writeBase64ToTempFile(base64: string, ext: string): Promise<string | null> {
+export async function writeBase64ToTempFile(base64: string, ext: string): Promise<string | null> {
   if (Platform.OS === 'web' || !FileSystem.cacheDirectory) return null;
   const path = `${FileSystem.cacheDirectory}b64tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   try {
@@ -515,12 +515,23 @@ export async function uploadEditedImage(base64: string, mimeType: string): Promi
   const uploadMime = isPng ? 'image/png' : 'image/jpeg';
   const ext = isPng ? 'png' : 'jpg';
 
+  // Native: write to temp file and upload via FileSystem.uploadAsync
+  if (Platform.OS !== 'web') {
+    const tmpPath = await writeBase64ToTempFile(compressedBase64, ext);
+    if (tmpPath) {
+      const { unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
+      try {
+        return await uploadUriToSupabase(tmpPath, uploadMime);
+      } finally {
+        unpinTempFile(tmpPath);
+        await safeDeleteTempFile(tmpPath).catch(() => {});
+      }
+    }
+  }
+
+  // Web fallback
   const fileName = `edited-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-
-  const body = Platform.OS === 'web'
-    ? base64ToBlob(compressedBase64, uploadMime)
-    : base64ToUint8Array(compressedBase64);
-
+  const body = base64ToBlob(compressedBase64, uploadMime);
   const { error } = await supabase.storage
     .from('scans')
     .upload(fileName, body, { contentType: uploadMime, cacheControl: '360000' });
@@ -1068,22 +1079,42 @@ export async function compressUriToUri(
 }
 
 /**
+ * Compress a file URI and upload it to Supabase Storage in one shot.
+ * On native, the file never enters JS memory as base64 — it goes
+ * disk → ImageManipulator → disk → FileSystem.uploadAsync → server.
+ */
+export async function compressAndUploadUri(
+  uri: string,
+  maxDimension = UPLOAD_MAX_DIMENSION,
+  quality = UPLOAD_QUALITY,
+): Promise<string> {
+  if (Platform.OS === 'web') {
+    throw new Error('compressAndUploadUri is not supported on web');
+  }
+  const compressedUri = await compressUriToUri(uri, maxDimension, quality);
+  try {
+    return await uploadUriToSupabase(compressedUri, 'image/jpeg');
+  } finally {
+    await safeDeleteTempFile(compressedUri).catch(() => {});
+    await waitForFileChannelFlush();
+  }
+}
+
+/**
  * Upload a file URI directly to Supabase Storage using the native
  * FileSystem.uploadAsync — bypasses JS bridge entirely, no base64.
  */
-export async function uploadUriToSupabase(
+export async function uploadUriToBucket(
   fileUri: string,
   mimeType: string,
+  bucket: string,
+  fileName: string,
+  upsert = false,
 ): Promise<string> {
   if (Platform.OS === 'web') {
-    throw new Error('uploadUriToSupabase is not supported on web');
+    throw new Error('uploadUriToBucket is not supported on web');
   }
-  const ext = mimeType === 'image/png' ? 'png'
-    : mimeType === 'image/webp' ? 'webp'
-    : mimeType === 'image/heic' ? 'heic'
-    : 'jpg';
-  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${fileName}`;
 
   let fileSize: number | undefined;
   try {
@@ -1091,16 +1122,39 @@ export async function uploadUriToSupabase(
     if (info.exists) fileSize = info.size;
   } catch { /* best-effort */ }
 
-  const result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
-    httpMethod: 'POST',
-    headers: {
-      Authorization: `Bearer ${supabaseAnonKey}`,
-      'Content-Type': mimeType,
-      'x-upsert': 'false',
-    },
-    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-    mimeType,
-  });
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${supabaseAnonKey}`,
+    'x-upsert': upsert ? 'true' : 'false',
+  };
+
+  // Primary: BINARY_CONTENT streams the raw file as the request body — fastest
+  // and lowest overhead. Some Android devices/OEM network stacks mishandle
+  // raw binary POST bodies (silently truncating or sending empty bodies),
+  // so we fall back to MULTIPART which wraps the file in a standard
+  // multipart/form-data envelope that all HTTP stacks handle correctly.
+  let result: { status: number; body?: string } | null = null;
+  try {
+    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
+      httpMethod: 'POST',
+      headers: { ...headers, 'Content-Type': mimeType },
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      mimeType,
+    });
+    if (result.status >= 400 && result.status !== 409) result = null;
+  } catch {
+    result = null;
+  }
+
+  if (!result) {
+    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
+      httpMethod: 'POST',
+      headers,
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType,
+      parameters: { upsert: upsert ? 'true' : 'false' },
+    });
+  }
 
   if (__DEV__) {
     const { logUploadEvent } = await import('@/lib/uploadDebugLogger');
@@ -1120,6 +1174,18 @@ export async function uploadUriToSupabase(
     throw new Error(`업로드 실패 (${result.status})`);
   }
 
-  const publicUrl = `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${fileName}`;
   return publicUrl;
+}
+
+export async function uploadUriToSupabase(
+  fileUri: string,
+  mimeType: string,
+): Promise<string> {
+  const ext = mimeType === 'image/png' ? 'png'
+    : mimeType === 'image/webp' ? 'webp'
+    : mimeType === 'image/heic' ? 'heic'
+    : 'jpg';
+  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  return uploadUriToBucket(fileUri, mimeType, 'scans', fileName);
 }

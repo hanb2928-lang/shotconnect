@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import { aiCachedCall } from './aiCache';
 import { hashObject } from './contentHash';
@@ -61,12 +62,33 @@ export async function analyzeProductVision(
         try {
           const b64 = cleanBase64(images[i]);
           const fileName = `vision-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-          const { error: uploadError } = await supabase.storage
-            .from('scans')
-            .upload(fileName, base64ToUint8Array(b64), { contentType: 'image/jpeg', cacheControl: '360000' });
-          if (!uploadError) {
-            const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-            if (urlData.publicUrl) uploadedUrls.push(urlData.publicUrl);
+          let uploaded = false;
+          if (Platform.OS !== 'web') {
+            try {
+              const { writeBase64ToTempFile, uploadUriToBucket } =
+                await import('@/lib/imageEdit');
+              const { unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
+              const tmpPath = await writeBase64ToTempFile(b64, 'jpg');
+              if (tmpPath) {
+                try {
+                  const url = await uploadUriToBucket(tmpPath, 'image/jpeg', 'scans', fileName);
+                  uploadedUrls.push(url);
+                  uploaded = true;
+                } finally {
+                  unpinTempFile(tmpPath);
+                  await safeDeleteTempFile(tmpPath).catch(() => {});
+                }
+              }
+            } catch { /* fall through to JS SDK */ }
+          }
+          if (!uploaded) {
+            const { error: uploadError } = await supabase.storage
+              .from('scans')
+              .upload(fileName, base64ToUint8Array(b64), { contentType: 'image/jpeg', cacheControl: '360000' });
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
+              if (urlData.publicUrl) uploadedUrls.push(urlData.publicUrl);
+            }
           }
         } catch {
           // fall through to base64 fallback

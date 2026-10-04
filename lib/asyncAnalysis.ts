@@ -1,7 +1,8 @@
+import { Platform } from 'react-native';
 import type { AnalysisResult } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { enqueueJob } from '@/lib/jobQueue';
-import { uploadWithRetry } from '@/lib/analysis';
+import { uploadWithRetry, uploadCompressedUri } from '@/lib/analysis';
 import { generateAffiliateLinks } from '@/lib/affiliate';
 import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array } from '@/lib/base64';
@@ -61,6 +62,7 @@ export async function startAsyncAnalysis(
   additionalBase64Images: string[] = [],
   preferredStyle?: string,
   signal?: AbortSignal,
+  captureUri?: string,
 ): Promise<AsyncAnalysisResult> {
   const aborted = (): boolean => signal?.aborted === true;
   const fileName = `scan-${Date.now()}`;
@@ -83,7 +85,9 @@ export async function startAsyncAnalysis(
   if (cached?.analysis_result) {
     // Cache hit — upload image for the scan record, then create scan with full data
     if (aborted()) throw new Error('분석이 취소되었습니다.');
-    const imageUrl = await uploadWithRetry(base64, mimeType, signal);
+    const imageUrl = captureUri && Platform.OS !== 'web'
+      ? await uploadCompressedUri(captureUri, signal)
+      : await uploadWithRetry(base64, mimeType, signal);
     const cacheUploadedPath = extractStoragePath(imageUrl);
     const analysis = cached.analysis_result as unknown as AnalysisResult;
     let scanId: string;
@@ -108,7 +112,9 @@ export async function startAsyncAnalysis(
   let primaryBase64 = base64;
   try {
     if (aborted()) throw new Error('분석이 취소되었습니다.');
-    imageUrl = await uploadWithRetry(primaryBase64, mimeType, signal);
+    imageUrl = captureUri && Platform.OS !== 'web'
+      ? await uploadCompressedUri(captureUri, signal)
+      : await uploadWithRetry(primaryBase64, mimeType, signal);
     primaryBase64 = '';
     const p = extractStoragePath(imageUrl);
     if (p) uploadedPaths.push(p);
@@ -357,17 +363,46 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
     throw new Error('TTS 오디오 데이터가 비어 있습니다');
   }
   const audioFileName = `tts-${scanId}-${Date.now()}.mp3`;
-  const { error: uploadError } = await supabase.storage
-    .from('scans')
-    .upload(audioFileName, audioBytes, { contentType: 'audio/mpeg', cacheControl: '360000' });
-  if (uploadError) throw new Error(`TTS 오디오 업로드 실패: ${uploadError.message}`);
+  let audioPublicUrl = '';
 
-  const { data: urlData } = supabase.storage.from('scans').getPublicUrl(audioFileName);
-  if (!urlData.publicUrl || !urlData.publicUrl.startsWith('https://')) {
+  // Native: write audio to temp file and upload via FileSystem.uploadAsync
+  if (Platform.OS !== 'web') {
+    try {
+      const FileSystem = await import('expo-file-system/legacy');
+      const { uploadUriToBucket } = await import('@/lib/imageEdit');
+      const { registerTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
+      if (FileSystem.cacheDirectory) {
+        const tmpPath = `${FileSystem.cacheDirectory}tts-${scanId}-${Date.now()}.mp3`;
+        const b64 = data.audioBase64!;
+        await FileSystem.writeAsStringAsync(tmpPath, b64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        registerTempFile(tmpPath, 'triggerTTS', { pin: true });
+        try {
+          audioPublicUrl = await uploadUriToBucket(tmpPath, 'audio/mpeg', 'scans', audioFileName);
+        } finally {
+          await safeDeleteTempFile(tmpPath).catch(() => {});
+        }
+      }
+    } catch {
+      // fall back to JS SDK below
+    }
+  }
+
+  if (!audioPublicUrl) {
+    const { error: uploadError } = await supabase.storage
+      .from('scans')
+      .upload(audioFileName, audioBytes, { contentType: 'audio/mpeg', cacheControl: '360000' });
+    if (uploadError) throw new Error(`TTS 오디오 업로드 실패: ${uploadError.message}`);
+    const { data: urlData } = supabase.storage.from('scans').getPublicUrl(audioFileName);
+    audioPublicUrl = urlData.publicUrl;
+  }
+
+  if (!audioPublicUrl || !audioPublicUrl.startsWith('https://')) {
     throw new Error('TTS 공개 URL 생성 실패: 올바른 형식이 아닙니다');
   }
 
-  await supabase.from('scans').update({ tts_url: urlData.publicUrl }).eq('id', scanId);
+  await supabase.from('scans').update({ tts_url: audioPublicUrl }).eq('id', scanId);
 }
 
 /**

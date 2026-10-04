@@ -118,12 +118,37 @@ export async function uploadImage(
     : uploadMime === 'image/webp' ? 'webp'
     : uploadMime === 'image/heic' ? 'heic'
     : 'jpg';
-  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
+  // Native: write base64 to a temp file and upload via FileSystem.uploadAsync,
+  // bypassing the JS bridge entirely. The JS bridge serializes binary data
+  // through Hermes, which causes memory spikes and bridge timeouts on large
+  // images. FileSystem.uploadAsync streams the file natively.
+  if (Platform.OS !== 'web') {
+    const { writeBase64ToTempFile } = await import('@/lib/imageEdit');
+    const { unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
+    const tmpPath = await writeBase64ToTempFile(compressedBase64, ext);
+    compressedBase64 = '';
+    if (tmpPath) {
+      try {
+        const publicUrl = await withUploadTimeout(
+          uploadUriToSupabase(tmpPath, uploadMime),
+          signal,
+        );
+        return publicUrl;
+      } finally {
+        unpinTempFile(tmpPath);
+        await safeDeleteTempFile(tmpPath).catch(() => {});
+        await waitForFileChannelFlush();
+      }
+    }
+  }
+
+  // Web fallback: use supabase.storage.upload with Blob
   const uploadBlob = base64ToBlob(compressedBase64, uploadMime);
   const uploadSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   compressedBase64 = '';
 
+  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
   const finishLog = logUploadStart({
     path: 'supabase_js',
@@ -181,8 +206,45 @@ export async function uploadImageBlob(
     : uploadMime === 'image/webp' ? 'webp'
     : uploadMime === 'image/heic' ? 'heic'
     : 'jpg';
-  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
+  // Native: write bytes to a temp file and upload via FileSystem.uploadAsync,
+  // bypassing the JS bridge. This avoids the Hermes bridge bottleneck that
+  // causes memory spikes and session timeouts on binary uploads.
+  if (Platform.OS !== 'web') {
+    const FileSystem = await import('expo-file-system/legacy');
+    const { registerTempFile, unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
+    if (FileSystem.cacheDirectory) {
+      const tmpPath = `${FileSystem.cacheDirectory}blob-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      try {
+        // Convert blob/Uint8Array to base64 for writeAsStringAsync
+        let bytes: Uint8Array;
+        if (uploadBlob instanceof Uint8Array) {
+          bytes = uploadBlob;
+        } else {
+          const ab = await (uploadBlob as Blob).arrayBuffer();
+          bytes = new Uint8Array(ab);
+        }
+        const b64 = uint8ArrayToBase64(bytes);
+        await FileSystem.writeAsStringAsync(tmpPath, b64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        registerTempFile(tmpPath, 'uploadImageBlob', { pin: true });
+
+        const publicUrl = await withUploadTimeout(
+          uploadUriToSupabase(tmpPath, uploadMime),
+          signal,
+        );
+        return publicUrl;
+      } finally {
+        unpinTempFile(tmpPath);
+        await safeDeleteTempFile(tmpPath).catch(() => {});
+        await waitForFileChannelFlush();
+      }
+    }
+  }
+
+  // Web fallback: use supabase.storage.upload with Blob
+  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
   const blobSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   const finishLog = logUploadStart({
@@ -312,16 +374,11 @@ export async function uploadVideoBlob(
   const ext = mimeType === 'video/quicktime' ? 'mov' : 'mp4';
   const fileName = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-  let body: Uint8Array;
-  if (Platform.OS === 'web') {
-    const resp = await fetch(uri);
-    try {
-      const buf = await resp.arrayBuffer();
-      body = new Uint8Array(buf);
-    } finally {
-      if (resp.body) resp.body.cancel().catch(() => {});
-    }
-  } else {
+  // Native: use FileSystem.uploadAsync to stream the file directly from disk
+  // to Supabase Storage, completely bypassing the JS bridge. Reading the
+  // entire video into JS memory as base64/Uint8Array causes OOM and bridge
+  // timeouts on large videos.
+  if (Platform.OS !== 'web') {
     const FileSystem = await import('expo-file-system/legacy');
     let readableUri = uri;
     let tempCopy: string | null = null;
@@ -347,14 +404,53 @@ export async function uploadVideoBlob(
       if (info.size > 30_000_000) {
         throw new Error('영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.');
       }
-      let base64 = await FileSystem.readAsStringAsync(readableUri, {
-        encoding: FileSystem.EncodingType.Base64,
+
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+      const finishLog = logUploadStart({
+        path: 'native_uploadAsync',
+        url: uploadUrl,
+        mimeType,
+        fileSize: info.size,
       });
-      body = base64ToUint8Array(base64);
-      base64 = '';
+
+      const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
+        httpMethod: 'POST',
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          'Content-Type': mimeType,
+          'x-upsert': 'false',
+        },
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      });
+
+      let timer: ReturnType<typeof setTimeout>;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
+      });
+      const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
+      const result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
+
+      if (result.status >= 400) {
+        finishLog({ error: `HTTP ${result.status}` });
+        throw new Error(`동영상 업로드 실패 (${result.status})`);
+      }
+
+      finishLog({ status: 200 });
+      const publicUrl = `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
+      return publicUrl;
     } finally {
       if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
     }
+  }
+
+  // Web fallback: read via fetch and upload through supabase JS SDK
+  const resp = await fetch(uri);
+  let body: Uint8Array;
+  try {
+    const buf = await resp.arrayBuffer();
+    body = new Uint8Array(buf);
+  } finally {
+    if (resp.body) resp.body.cancel().catch(() => {});
   }
 
   const videoUploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
@@ -691,15 +787,37 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
 
   const audioBytes = base64ToUint8Array(data.audioBase64);
   const fileName = `tts-${scanId}-${Date.now()}.mp3`;
-  const { error: uploadError } = await supabase.storage
-    .from('scans')
-    .upload(fileName, audioBytes, { contentType: 'audio/mpeg', cacheControl: '360000' });
-  if (uploadError) return;
+  let ttsPublicUrl = '';
 
-  const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-  if (!urlData.publicUrl) return;
+  // Native: write audio to temp file and upload via FileSystem.uploadAsync
+  if (Platform.OS !== 'web') {
+    try {
+      const { writeBase64ToTempFile, uploadUriToBucket } = await import('@/lib/imageEdit');
+      const { unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
+      const tmpPath = await writeBase64ToTempFile(data.audioBase64, 'mp3');
+      if (tmpPath) {
+        try {
+          ttsPublicUrl = await uploadUriToBucket(tmpPath, 'audio/mpeg', 'scans', fileName);
+        } finally {
+          unpinTempFile(tmpPath);
+          await safeDeleteTempFile(tmpPath).catch(() => {});
+        }
+      }
+    } catch { /* fall back to JS SDK */ }
+  }
 
-  const { error: ttsUpdateError } = await supabase.from('scans').update({ tts_url: urlData.publicUrl }).eq('id', scanId);
+  if (!ttsPublicUrl) {
+    const { error: uploadError } = await supabase.storage
+      .from('scans')
+      .upload(fileName, audioBytes, { contentType: 'audio/mpeg', cacheControl: '360000' });
+    if (uploadError) return;
+    const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
+    ttsPublicUrl = urlData.publicUrl;
+  }
+
+  if (!ttsPublicUrl) return;
+
+  const { error: ttsUpdateError } = await supabase.from('scans').update({ tts_url: ttsPublicUrl }).eq('id', scanId);
   if (ttsUpdateError) return;
 }
 

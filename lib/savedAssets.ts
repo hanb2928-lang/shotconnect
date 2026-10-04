@@ -3,6 +3,8 @@ import { supabase, supabaseUrl } from '@/lib/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { SavedAsset } from '@/types/database';
 import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
+import { uploadUriToBucket } from '@/lib/imageEdit';
+import { uint8ArrayToBase64 } from '@/lib/base64';
 
 const BUCKET = 'assets';
 const MAX_RETRIES = 3;
@@ -36,6 +38,35 @@ export async function uploadAssetBlob(
 ): Promise<string | null> {
   const path = `${fileName}`;
 
+  // Native: write blob to temp file and upload via FileSystem.uploadAsync
+  if (Platform.OS !== 'web' && FileSystem.cacheDirectory) {
+    const ext = mimeType.startsWith('video/') ? 'mp4' : mimeType === 'image/png' ? 'png' : 'jpg';
+    const tmpPath = `${FileSystem.cacheDirectory}asset-blob-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    try {
+      let bytes: Uint8Array;
+      if (blob instanceof Uint8Array) {
+        bytes = blob;
+      } else if (blob instanceof Blob) {
+        const ab = await blob.arrayBuffer();
+        bytes = new Uint8Array(ab);
+      } else {
+        return null;
+      }
+      const b64 = uint8ArrayToBase64(bytes);
+      await FileSystem.writeAsStringAsync(tmpPath, b64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      registerTempFile(tmpPath, 'uploadAssetBlob', { pin: true });
+      const publicUrl = await withRetry(() => uploadUriToBucket(tmpPath, mimeType, BUCKET, path, true));
+      return publicUrl;
+    } catch {
+      return null;
+    } finally {
+      await safeDeleteTempFile(tmpPath).catch(() => {});
+    }
+  }
+
+  // Web fallback
   try {
     const result = await withRetry(async () => {
       const { error } = await supabase.storage
@@ -133,24 +164,8 @@ export async function uploadAssetDataUrl(
     registerTempFile(fileUri, 'uploadAssetDataUrl', { pin: true });
 
     try {
-      const formData = new FormData();
-      formData.append('file', {
-        uri: fileUri,
-        name: fileName,
-        type: mimeType,
-      } as unknown as Blob);
-
-      const result = await withRetry(async () => {
-        const { error } = await supabase.storage
-          .from(BUCKET)
-          .upload(fileName, formData, { contentType: mimeType, upsert: true, cacheControl: '360000' });
-        if (error) throw error;
-        return true;
-      });
-      if (!result) return null;
-
-      const { data } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
-      return data.publicUrl;
+      const publicUrl = await withRetry(() => uploadUriToBucket(fileUri, mimeType, BUCKET, fileName, true));
+      return publicUrl;
     } catch {
       return null;
     } finally {
@@ -166,28 +181,12 @@ export async function uploadAssetFromFileUri(
 ): Promise<string | null> {
   if (Platform.OS === 'web') return null;
 
-  const formData = new FormData();
-  formData.append('file', {
-    uri: fileUri,
-    name: fileName,
-    type: mimeType,
-  } as unknown as Blob);
-
   try {
-    const result = await withRetry(async () => {
-      const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(fileName, formData, { contentType: mimeType, upsert: true, cacheControl: '360000' });
-      if (error) throw error;
-      return true;
-    });
-    if (!result) return null;
+    const publicUrl = await withRetry(() => uploadUriToBucket(fileUri, mimeType, BUCKET, fileName, true));
+    return publicUrl;
   } catch {
     return null;
   }
-
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
-  return data.publicUrl;
 }
 
 export async function uploadAssetFromFileUriWithProgress(
@@ -199,48 +198,11 @@ export async function uploadAssetFromFileUriWithProgress(
   if (Platform.OS === 'web') return null;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const formData = new FormData();
-    formData.append('file', {
-      uri: fileUri,
-      name: fileName,
-      type: mimeType,
-    } as unknown as Blob);
-
     try {
-      const result = await new Promise<string | null>((resolve) => {
-        let settled = false;
-        const timeoutId = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          resolve(null);
-        }, FILE_UPLOAD_TIMEOUT_MS);
-
-        supabase.storage
-          .from(BUCKET)
-          .upload(fileName, formData, { contentType: mimeType, upsert: true, cacheControl: '360000' })
-          .then(({ error }) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeoutId);
-            if (error) {
-              resolve(null);
-            } else {
-              const { data } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
-              resolve(data.publicUrl);
-            }
-          })
-          .catch(() => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeoutId);
-            resolve(null);
-          });
-      });
-
-      if (result) {
-        onProgress(100);
-        return result;
-      }
+      onProgress(0);
+      const result = await withRetry(() => uploadUriToBucket(fileUri, mimeType, BUCKET, fileName, true));
+      onProgress(100);
+      return result;
     } catch {
       // fall through to retry
     }
