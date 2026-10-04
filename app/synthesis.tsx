@@ -63,7 +63,23 @@ const UPLOAD_INITIAL_QUALITY = 0.7;
 function isUploadNetworkError(err: unknown): boolean {
   if (err instanceof Error) {
     const msg = err.message.toLowerCase();
-    return msg.includes('network') || msg.includes('failed to fetch') || msg.includes('timeout') || msg.includes('abort');
+    return msg.includes('network') || msg.includes('failed to fetch') || msg.includes('timeout') || msg.includes('abort') || msg.includes('tls') || msg.includes('ssl') || msg.includes('certificate');
+  }
+  return false;
+}
+
+function isPayloadTooLargeError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return msg.includes('413') || msg.includes('payload too large') || msg.includes('entity too large') || msg.includes('request entity too large');
+  }
+  return false;
+}
+
+function isTlsOrProxyError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return msg.includes('tls') || msg.includes('ssl') || msg.includes('certificate') || msg.includes('handshake') || msg.includes('secure connection');
   }
   return false;
 }
@@ -156,14 +172,18 @@ async function uploadImageToStorage(uri: string): Promise<string> {
 }
 
 async function performUpload(finalBase64: string): Promise<string> {
-  const bytes = Platform.OS === 'web'
-    ? new Blob([Uint8Array.from(atob(finalBase64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' })
-    : Uint8Array.from(atob(finalBase64), (c) => c.charCodeAt(0));
+  const makeBytes = (b64: string) => Platform.OS === 'web'
+    ? new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' })
+    : Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+  let currentBase64 = finalBase64;
+  let currentDim = 540;
+  let currentQuality = 0.3;
   const fileName = `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 
-  // Exponential backoff retry with jitter for transient network failures
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    const bytes = makeBytes(currentBase64);
     const { error: uploadError } = await supabase.storage
       .from('scans')
       .upload(fileName, bytes, { contentType: 'image/jpeg', cacheControl: '360000' });
@@ -175,6 +195,26 @@ async function performUpload(finalBase64: string): Promise<string> {
 
     lastError = uploadError instanceof Error ? uploadError : new Error(String(uploadError));
 
+    // N-002: On 413 Payload Too Large, attempt emergency recompression
+    // before retrying — shrink dimensions and quality further.
+    if (attempt < UPLOAD_MAX_RETRIES && isPayloadTooLargeError(uploadError)) {
+      const emergencyDims = [480, 360, 240];
+      const emergencyQualities = [0.25, 0.18, 0.12];
+      const stepIdx = Math.min(attempt, emergencyDims.length - 1);
+      currentDim = emergencyDims[stepIdx];
+      currentQuality = emergencyQualities[stepIdx];
+      const dataUrl = `data:image/jpeg;base64,${currentBase64}`;
+      try {
+        const recompressed = await compressForUpload(dataUrl, currentDim, currentQuality);
+        currentBase64 = cleanBase64(recompressed);
+      } catch {
+        // If recompression fails, retry with the same payload
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      continue;
+    }
+
+    // N-001 / N-003: On network/TLS/SSL errors, exponential backoff with jitter
     if (attempt < UPLOAD_MAX_RETRIES && isUploadNetworkError(uploadError)) {
       const baseDelay = 1000 * Math.pow(2, attempt);
       const jitter = 0.5 + Math.random() * 0.5;
@@ -184,7 +224,12 @@ async function performUpload(finalBase64: string): Promise<string> {
     break;
   }
 
-  throw new Error(`이미지 업로드 실패: ${lastError?.message ?? '알 수 없는 오제'}`);
+  // N-003: Provide a user-friendly hint for TLS/proxy/firewall failures
+  if (lastError && isTlsOrProxyError(lastError)) {
+    throw new Error('보안 연결에 실패했습니다. Wi-Fi 환경을 변경하거나 VPN/프록시 설정을 확인해 주세요.');
+  }
+
+  throw new Error(`이미지 업로드 실패: ${lastError?.message ?? '알 수 없는 오류'}`);
 }
 
 export default function SynthesisScreen() {
