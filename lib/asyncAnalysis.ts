@@ -101,31 +101,40 @@ export async function startAsyncAnalysis(
   }
 
   // Cache miss — upload image and additional angles
+  // Work on mutable copies so we can null out multi-MB base64 strings
+  // after each upload, letting GC reclaim them before the next one.
   const uploadedPaths: string[] = [];
   let imageUrl: string;
+  let primaryBase64 = base64;
   try {
     if (aborted()) throw new Error('분석이 취소되었습니다.');
-    imageUrl = await uploadWithRetry(base64, mimeType, signal);
+    imageUrl = await uploadWithRetry(primaryBase64, mimeType, signal);
+    primaryBase64 = '';
     const p = extractStoragePath(imageUrl);
     if (p) uploadedPaths.push(p);
+    if (additionalBase64Images.length > 0) {
+      await nativeHeapCooldownGuard();
+    }
   } catch (err) {
     throw err;
   }
 
   const additionalUrls: string[] = [];
   let uploadFailures = 0;
-  for (let i = 0; i < additionalBase64Images.length; i++) {
+  const additionalCopy = [...additionalBase64Images];
+  for (let i = 0; i < additionalCopy.length; i++) {
     if (aborted()) {
       await rollbackUploads(uploadedPaths);
       throw new Error('분석이 취소되었습니다.');
     }
     try {
-      const url = await uploadWithRetry(additionalBase64Images[i], 'image/jpeg', signal);
+      const url = await uploadWithRetry(additionalCopy[i], 'image/jpeg', signal);
+      additionalCopy[i] = '';
       additionalUrls.push(url);
       const ap = extractStoragePath(url);
       if (ap) uploadedPaths.push(ap);
       uploadFailures = 0;
-      if (i < additionalBase64Images.length - 1) {
+      if (i < additionalCopy.length - 1) {
         await nativeHeapCooldownGuard();
       }
     } catch {

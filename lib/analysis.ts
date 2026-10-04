@@ -14,6 +14,7 @@ import { hashObject } from '@/lib/contentHash';
 import { cleanBase64 } from '@/lib/base64';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
 import { sanitizeEncodedText } from '@/lib/textSanitizer';
+import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   const abortError = () => {
@@ -89,17 +90,20 @@ export async function uploadImage(
   mimeType: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  // Compress before upload: resize to max 1080px, quality 0.68
-  const { base64: compressedBase64, mimeType: compressedMime } = await compressBase64ForUpload(base64, mimeType);
+  const { base64: _compressedBase64, mimeType: compressedMime } = await compressBase64ForUpload(base64, mimeType);
+  let compressedBase64 = _compressedBase64;
   if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
 
   const uploadMime = compressedMime || 'image/jpeg';
   const ext = uploadMime === 'image/png' ? 'png' : uploadMime === 'image/webp' ? 'webp' : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
+  const uploadBlob = base64ToBlob(compressedBase64, uploadMime);
+  compressedBase64 = '';
+
   const uploadPromise = supabase.storage
     .from('scans')
-    .upload(fileName, base64ToBlob(compressedBase64, uploadMime), { contentType: uploadMime, cacheControl: '360000' });
+    .upload(fileName, uploadBlob, { contentType: uploadMime, cacheControl: '360000' });
 
   const { error } = await withUploadTimeout(uploadPromise, signal);
 
@@ -315,6 +319,7 @@ export async function analyzeMultiShot(
     imageHashes.push(hashObject({ b64 }).slice(0, 16));
     const url = await uploadWithRetry(b64, compressed.mimeType);
     imageUrls.push(url);
+    if (i < srcCopy.length - 1) await nativeHeapCooldownGuard();
   }
 
   const cacheInput = {
@@ -786,6 +791,7 @@ export async function analyzeMultiShotQueued(
     imageHashes.push(hashObject({ b64 }).slice(0, 16));
     const url = await uploadWithRetry(b64, compressed.mimeType, signal);
     imageUrls.push(url);
+    if (i < srcCopy.length - 1) await nativeHeapCooldownGuard();
   }
 
   const cacheInput = {

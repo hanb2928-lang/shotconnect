@@ -10,6 +10,7 @@ import { mediaCacheKey, mediaCacheGet, mediaCacheSet } from '@/lib/mediaCache';
 import { registerTempFile, safeDeleteTempFile, unpinTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
 import { analyzeAndDownscaleImage, withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
+import { runProactiveFlush, getHeapUsageRatio } from '@/lib/proactiveMemoryFlush';
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
@@ -906,7 +907,18 @@ export async function waitForUriFlush(uri: string): Promise<boolean> {
 }
 
 export async function nativeHeapCooldownGuard(): Promise<void> {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web') {
+    const ratio = getHeapUsageRatio();
+    if (ratio !== null && ratio > 0.75) {
+      await runProactiveFlush(true).catch(() => {});
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return;
+  }
+  const ratio = getHeapUsageRatio();
+  if (ratio !== null && ratio > 0.7) {
+    await runProactiveFlush(true).catch(() => {});
+  }
   const ms = isLowEndDevice() ? 400 : 200;
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
