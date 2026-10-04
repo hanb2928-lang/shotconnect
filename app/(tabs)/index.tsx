@@ -1470,7 +1470,7 @@ function CameraScreenInner() {
         </View>
 
         <View style={styles.cameraPreviewWrap}>
-          {isActive && bridgeReady ? (
+          {isActive && bridgeReady && !fittingGuideVisible ? (
             <CameraView
               key={`fitting-cam-${cameraSessionKey}`}
               ref={cameraRef}
@@ -1684,9 +1684,9 @@ function CameraScreenInner() {
         </TouchableOpacity>
       </View>
 
-      {/* Camera Preview */}
+      {/* Camera Preview — unmount when guide modal is open to avoid dual CameraView conflict on native */}
       <View style={styles.cameraPreviewWrap}>
-        {isActive && bridgeReady ? (
+        {isActive && bridgeReady && !multiAngleVisible ? (
           <CameraView
             key={`native-cam-${cameraSessionKey}`}
             ref={cameraRef}
