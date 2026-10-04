@@ -398,22 +398,50 @@ export function PostCaptureWorkflow({
       const FileSystem = await import('expo-file-system/legacy');
       let readableUri = uri;
       let tempCopy: string | null = null;
-      if (uri.startsWith('content://')) {
+
+      const copyFromContent = async (): Promise<string> => {
         if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
-        tempCopy = `${FileSystem.cacheDirectory}upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-        await FileSystem.copyAsync({ from: uri, to: tempCopy });
+        const dest = `${FileSystem.cacheDirectory}upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        await FileSystem.copyAsync({ from: uri, to: dest });
+        const info = await FileSystem.getInfoAsync(dest);
+        if (!info.exists || info.size <= 0) {
+          await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
+          throw new Error('파일 복사에 실패했습니다. 다시 시도해주세요.');
+        }
+        return dest;
+      };
+
+      if (uri.startsWith('content://')) {
+        tempCopy = await copyFromContent();
         readableUri = tempCopy;
       }
-      const info = await FileSystem.getInfoAsync(readableUri);
-      if (!info.exists || info.size <= 0) {
-        if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
-        throw new Error('파일을 찾을 수 없습니다.');
+
+      const verifyFile = async (): Promise<{ exists: boolean; size: number }> => {
+        const info = await FileSystem.getInfoAsync(readableUri);
+        if (info.exists && !info.isDirectory) {
+          return { exists: true, size: info.size };
+        }
+        return { exists: false, size: 0 };
+      };
+
+      let fileInfo = await verifyFile();
+      if (!fileInfo.exists || fileInfo.size <= 0) {
+        if (uri.startsWith('content://')) {
+          if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+          tempCopy = await copyFromContent();
+          readableUri = tempCopy;
+          fileInfo = await verifyFile();
+        }
+        if (!fileInfo.exists || fileInfo.size <= 0) {
+          if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+          throw new Error('파일을 찾을 수 없습니다.');
+        }
       }
       const ext = readableUri.split('.').pop()?.toLowerCase() ?? 'jpg';
       const isVideo = ext === 'mp4' || ext === 'mov';
       const isHeic = ext === 'heic' || ext === 'heif';
       const MAX_NATIVE_READ_BYTES = isVideo ? 30_000_000 : 12_000_000;
-      if (info.size > MAX_NATIVE_READ_BYTES) {
+      if (fileInfo.size > MAX_NATIVE_READ_BYTES) {
         if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
         throw new Error(isVideo
           ? '영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.'
@@ -429,9 +457,35 @@ export function PostCaptureWorkflow({
               ? 'image/webp'
               : 'image/jpeg';
       try {
-        let base64 = await FileSystem.readAsStringAsync(readableUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        let base64: string | null = null;
+        for (let readAttempt = 0; readAttempt < 2; readAttempt++) {
+          try {
+            const check = await verifyFile();
+            if (!check.exists || check.size <= 0) {
+              if (uri.startsWith('content://')) {
+                if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+                tempCopy = await copyFromContent();
+                readableUri = tempCopy;
+                continue;
+              }
+              throw new Error('파일을 찾을 수 없습니다.');
+            }
+            base64 = await FileSystem.readAsStringAsync(readableUri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            break;
+          } catch (readErr) {
+            if (readAttempt === 1) throw readErr;
+            if (uri.startsWith('content://')) {
+              if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+              tempCopy = await copyFromContent();
+              readableUri = tempCopy;
+            } else {
+              throw readErr;
+            }
+          }
+        }
+        if (!base64) throw new Error('파일을 읽을 수 없습니다.');
         await new Promise<void>((r) => setTimeout(r, 0));
         const bytes = base64ToUint8Array(cleanBase64(base64));
         base64 = '';
@@ -456,6 +510,8 @@ export function PostCaptureWorkflow({
     maxRetries: number,
     contentType: string = 'video/mp4',
   ): Promise<boolean> => {
+    const isVideo = contentType.startsWith('video/');
+    const UPLOAD_TIMEOUT_MS = isVideo ? 120_000 : 60_000;
     let lastError: string | null = null;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -465,9 +521,14 @@ export function PostCaptureWorkflow({
           const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
           await new Promise((r) => setTimeout(r, delayMs));
         }
-        const { error } = await supabase.storage
+        const uploadPromise = supabase.storage
           .from('videos')
           .upload(fileName, body, { contentType, upsert: false });
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('업로드 시간이 초과되었습니다.')), UPLOAD_TIMEOUT_MS);
+        });
+        const { error } = await Promise.race([uploadPromise, timeout]).finally(() => clearTimeout(timer!));
         if (error) throw error;
         if (mountedRef.current) setUploadRetrying(false);
         return true;

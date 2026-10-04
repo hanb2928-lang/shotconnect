@@ -35,7 +35,7 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
   });
 }
 
-const UPLOAD_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 60_000;
 const COMPRESS_TIMEOUT_MS = 20_000;
 const UPLOAD_RETRY_MAX = 3;
 const UPLOAD_RETRY_BASE_MS = 1000;
@@ -105,7 +105,10 @@ export async function uploadImage(
   await waitForFileChannelFlush();
 
   const uploadMime = compressedMime || 'image/jpeg';
-  const ext = uploadMime === 'image/png' ? 'png' : uploadMime === 'image/webp' ? 'webp' : 'jpg';
+  const ext = uploadMime === 'image/png' ? 'png'
+    : uploadMime === 'image/webp' ? 'webp'
+    : uploadMime === 'image/heic' ? 'heic'
+    : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
   const uploadBlob = base64ToBlob(compressedBase64, uploadMime);
@@ -152,7 +155,10 @@ export async function uploadImageBlob(
     }
   }
 
-  const ext = uploadMime === 'image/png' ? 'png' : uploadMime === 'image/webp' ? 'webp' : 'jpg';
+  const ext = uploadMime === 'image/png' ? 'png'
+    : uploadMime === 'image/webp' ? 'webp'
+    : uploadMime === 'image/heic' ? 'heic'
+    : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
   const uploadPromise = supabase.storage
@@ -184,7 +190,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   return `data:${mimeType};base64,${base64}`;
 }
 
-const VIDEO_UPLOAD_TIMEOUT_MS = 60_000;
+const VIDEO_UPLOAD_TIMEOUT_MS = 120_000;
 
 export async function uploadVideoBlob(
   uri: string,
@@ -205,11 +211,30 @@ export async function uploadVideoBlob(
     }
   } else {
     const FileSystem = await import('expo-file-system/legacy');
-    let base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    body = base64ToUint8Array(base64);
-    base64 = '';
+    let readableUri = uri;
+    let tempCopy: string | null = null;
+    if (uri.startsWith('content://')) {
+      if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
+      tempCopy = `${FileSystem.cacheDirectory}video-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
+      await FileSystem.copyAsync({ from: uri, to: tempCopy });
+      readableUri = tempCopy;
+    }
+    try {
+      const info = await FileSystem.getInfoAsync(readableUri);
+      if (!info.exists || info.size <= 0) {
+        throw new Error('동영상 파일을 찾을 수 없습니다.');
+      }
+      if (info.size > 30_000_000) {
+        throw new Error('영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.');
+      }
+      let base64 = await FileSystem.readAsStringAsync(readableUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      body = base64ToUint8Array(base64);
+      base64 = '';
+    } finally {
+      if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+    }
   }
 
   const uploadPromise = supabase.storage
