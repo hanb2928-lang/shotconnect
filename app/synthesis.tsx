@@ -133,10 +133,10 @@ async function uploadImageToStorage(uri: string): Promise<string> {
     registerTempFile(uri, 'synthesis-upload', { pin: true });
   }
 
+  let compressedUri = uri;
   try {
     // 720px normalization + 2MB hard cap via iterative compression.
     // On web, compression runs in a Web Worker so the UI thread stays free.
-    let compressedUri = uri;
     const dimSteps = [UPLOAD_INITIAL_DIM, 600, 480, 360];
     const qualitySteps = [UPLOAD_INITIAL_QUALITY, 0.55, 0.42, 0.3];
 
@@ -157,6 +157,7 @@ async function uploadImageToStorage(uri: string): Promise<string> {
         { compress: qualitySteps[pass], format: ImageManipulator.SaveFormat.JPEG },
       );
       compressedUri = manipulated.uri;
+      registerTempFile(compressedUri, 'synthesis-compress', { pin: true });
       const fileInfo = await FileSystem.getInfoAsync(compressedUri);
       if (fileInfo.exists && fileInfo.size <= MAX_NATIVE_IMAGE_BYTES) break;
     }
@@ -183,6 +184,10 @@ async function uploadImageToStorage(uri: string): Promise<string> {
     if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
       unpinTempFile(uri);
       await safeDeleteTempFile(uri).catch(() => {});
+    }
+    if (compressedUri !== uri && Platform.OS !== 'web' && !compressedUri.startsWith('data:')) {
+      unpinTempFile(compressedUri);
+      await safeDeleteTempFile(compressedUri).catch(() => {});
     }
   }
 }
