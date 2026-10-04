@@ -278,6 +278,7 @@ function CameraScreenInner() {
   // Virtual fitting state
   const [fittingGuideVisible, setFittingGuideVisible] = useState(false);
   const [cameraSessionKey, setCameraSessionKey] = useState(() => Date.now());
+  const [cameraMode, setCameraMode] = useState<'picture' | 'video'>('picture');
 
   const postCaptureBase64Ref = useRef<string | null>(null);
   const postCaptureMimeRef = useRef<string>('video/webm');
@@ -867,6 +868,7 @@ function CameraScreenInner() {
     }
     const cam = cameraRef.current;
     if (!cam || !cameraReadyRef.current || !permissionGrantedRef.current || !bridgeReady || !isMountedRef.current || isPipelineLocked()) { multiAngleCaptureInProgressRef.current = false; return null; }
+    setCameraMode('picture');
     if (bufferReleaseTimerRef.current) clearTimeout(bufferReleaseTimerRef.current);
     bufferReleasedRef.current = false;
     try {
@@ -1186,6 +1188,7 @@ function CameraScreenInner() {
 
   const handleShutterPress = useCallback((target: 'multiAngle' | 'fitting') => {
     if (captureBtnLockRef.current || processingRef.current || autoSavingRef.current || stereoOverlayRef.current) return;
+    setCameraMode('picture');
     captureBtnLockRef.current = true;
     if (target === 'multiAngle') {
       setMultiAngleVisible(true);
@@ -1196,6 +1199,7 @@ function CameraScreenInner() {
 
   const handleModeSelect = useCallback((mode: CaptureMode) => {
     setCaptureMode(mode);
+    setCameraMode('picture');
     setError(null);
     setStudioMode(null);
     if (mode === 'single') {
@@ -1520,7 +1524,7 @@ function CameraScreenInner() {
                 setCameraReady(false);
                 setError(event.message || '카메라를 시작할 수 없습니다. 권한과 다른 앱의 카메라 사용 여부를 확인해주세요.');
               }}
-              mode="picture"
+              mode={cameraMode}
             />
           ) : (
             <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>
@@ -1736,7 +1740,7 @@ function CameraScreenInner() {
                 setCameraReady(false);
                 setError(event.message || '카메라를 시작할 수 없습니다. 권한과 다른 앱의 카메라 사용 여부를 확인해주세요.');
               }}
-            mode="picture"
+            mode={cameraMode}
           />
         ) : (
           <View style={[styles.cameraPreview, styles.cameraPlaceholder]}>

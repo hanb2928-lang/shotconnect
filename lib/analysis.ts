@@ -8,7 +8,7 @@ import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
 import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage } from '@/lib/imageEdit';
-import { compressUriToUri, uploadUriToSupabase } from '@/lib/imageEdit';
+import { compressUriToUri, uploadFileDirectNative } from '@/lib/imageEdit';
 import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
 import { hashObject } from '@/lib/contentHash';
@@ -130,8 +130,13 @@ export async function uploadImage(
     compressedBase64 = '';
     if (tmpPath) {
       try {
+        const ext2 = uploadMime === 'image/png' ? 'png'
+          : uploadMime === 'image/webp' ? 'webp'
+          : uploadMime === 'image/heic' ? 'heic'
+          : 'jpg';
+        const fileName2 = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext2}`;
         const publicUrl = await withUploadTimeout(
-          uploadUriToSupabase(tmpPath, uploadMime),
+          uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime),
           signal,
         );
         return publicUrl;
@@ -227,8 +232,13 @@ export async function uploadImageBlob(
         });
         registerTempFile(tmpPath, 'uploadImageBlob', { pin: true });
 
+        const ext2 = uploadMime === 'image/png' ? 'png'
+          : uploadMime === 'image/webp' ? 'webp'
+          : uploadMime === 'image/heic' ? 'heic'
+          : 'jpg';
+        const fileName2 = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext2}`;
         const publicUrl = await withUploadTimeout(
-          uploadUriToSupabase(tmpPath, uploadMime),
+          uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime),
           signal,
         );
         return publicUrl;
@@ -311,9 +321,10 @@ export async function uploadCompressedUri(
         mimeType: 'image/jpeg',
         attempt,
       });
+      const uploadFileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
       try {
         const publicUrl = await withUploadTimeout(
-          uploadUriToSupabase(compressedUri, 'image/jpeg'),
+          uploadFileDirectNative(compressedUri, 'scans', uploadFileName, 'image/jpeg'),
           signal,
         );
         finishLog({ status: 200 });
@@ -408,7 +419,7 @@ export async function uploadVideoBlob(
       });
 
       // Primary: BINARY_CONTENT. Fallback: MULTIPART for OEM stacks that
-      // mishandle raw binary POST bodies (same rationale as uploadUriToBucket).
+      // mishandle raw binary POST bodies (same rationale as uploadFileDirectNative).
       let result: { status: number; body?: string } | null = null;
       try {
         const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
@@ -804,12 +815,12 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
   // Native: write audio to temp file and upload via FileSystem.uploadAsync
   if (Platform.OS !== 'web') {
     try {
-      const { writeBase64ToTempFile, uploadUriToBucket } = await import('@/lib/imageEdit');
+      const { writeBase64ToTempFile, uploadFileDirectNative: nativeUpload } = await import('@/lib/imageEdit');
       const { unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
       const tmpPath = await writeBase64ToTempFile(data.audioBase64, 'mp3');
       if (tmpPath) {
         try {
-          ttsPublicUrl = await uploadUriToBucket(tmpPath, 'audio/mpeg', 'scans', fileName);
+          ttsPublicUrl = await nativeUpload(tmpPath, 'scans', fileName, 'audio/mpeg');
         } finally {
           unpinTempFile(tmpPath);
           await safeDeleteTempFile(tmpPath).catch(() => {});

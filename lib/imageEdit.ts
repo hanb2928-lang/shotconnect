@@ -1185,19 +1185,74 @@ export async function uploadUriToSupabase(
 }
 
 /**
- * Native direct upload: streams a file URI straight to Supabase Storage
- * via FileSystem.uploadAsync with BINARY_CONTENT. The file bytes never
- * enter JS memory or cross the native bridge — the OS networking stack
- * handles the entire upload. Falls back to MULTIPART for OEM stacks that
- * mishandle raw binary POST bodies.
+ * [핵심] JS 메모리를 거치지 않고 네이티브 모듈이 직접 서버로 꽂아버리는 바이너리 다이렉트 업로드.
+ * expo-file-system의 FileSystem.uploadAsync가 OS 네이티브 네트워킹 스택으로 파일을 스트리밍하므로
+ * Hermes JS 엔진 메모리와 RN Bridge를 완전히 우회한다.
  */
-export async function forceNativeDirectUpload(
+export async function uploadFileDirectNative(
   fileUri: string,
   bucket: string,
   path: string,
   mimeType: string,
 ): Promise<string> {
-  return uploadUriToBucket(fileUri, mimeType, bucket, path, true);
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+
+  let result: { status: number; body?: string } | null = null;
+  try {
+    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      headers: {
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        'Content-Type': mimeType,
+        'x-upsert': 'true',
+      },
+    });
+    if (result.status >= 400 && result.status !== 409) result = null;
+  } catch {
+    result = null;
+  }
+
+  if (!result) {
+    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
+      httpMethod: 'POST',
+      headers: {
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType,
+      parameters: { upsert: 'true' },
+    });
+  }
+
+  if (result.status >= 400) {
+    throw new Error(`Native Direct Upload Failed [${result.status}]: ${result.body ?? ''}`);
+  }
+
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+}
+
+/**
+ * Supabase JS SDK를 우회하여 REST API로 스토리지 객체를 삭제한다.
+ * SDK의 .remove()는 내부적으로 추가 네트워크 왕복과 JS 객체 생성을 수반하므로,
+ * 직접 DELETE 요청으로 대체한다.
+ */
+export async function deleteStorageObjects(bucket: string, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  const deleteUrl = `${supabaseUrl}/storage/v1/object/${bucket}`;
+  const resp = await fetch(deleteUrl, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ prefixes: paths }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Storage delete failed (${resp.status}): ${text}`);
+  }
 }
 
 /**

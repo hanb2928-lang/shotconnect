@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { uploadImage, uploadImageBlob, uploadCompressedUri, saveManualScan } from './analysis';
-import { base64ToBlob } from './imageEdit';
+import { base64ToBlob, deleteStorageObjects } from './imageEdit';
 import { supabase } from './supabase';
 import { runSynthesis, getSynthesisSummary, type AngleInput } from './aiSynthesisEngine';
 import { buildShortFormEditPlan, type ShortFormPlatform } from './shortFormEditEngine';
@@ -31,7 +31,7 @@ function extractStoragePath(publicUrl: string): string | null {
 
 async function rollbackUploads(paths: string[]): Promise<void> {
   if (paths.length === 0) return;
-  await supabase.storage.from('scans').remove(paths).catch(() => {});
+  await deleteStorageObjects('scans', paths).catch(() => {});
 }
 
 function waitForOnline(): Promise<boolean> {
@@ -116,7 +116,7 @@ async function uploadAngleShotsConcurrently(
         const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg', signal, shot.uri);
         if (fatalThreshold) {
           const p = extractStoragePath(url);
-          if (p) await supabase.storage.from('scans').remove([p]).catch(() => {});
+          if (p) await deleteStorageObjects('scans', [p]).catch(() => {});
           return;
         }
         results.push({ url, shot });
