@@ -31,6 +31,7 @@ import { SUBSCRIPTION_PLANS, TOKEN_PACKS, formatKRW as formatPlanKRW } from '@/l
 import { CreditBalanceBadge } from '@/components/CreditBalanceBadge';
 import { CreditPurchaseModal } from '@/components/CreditPurchaseModal';
 import { GpuAutoscaleCard } from '@/components/GpuAutoscaleCard';
+import { StorageLifecycleCard } from '@/components/StorageLifecycleCard';
 import { getCreditBalance, getCreditHistory, type CreditBalance, type CreditTransaction } from '@/lib/credits';
 import { restorePurchases, isRevenueCatAvailable } from '@/lib/purchases';
 import type { UserSettings, RevenueRecord } from '@/types/database';
@@ -2251,6 +2252,7 @@ export default function SettingsScreen() {
         </View>
 
         <GpuAutoscaleCard />
+        <StorageLifecycleCard />
       </View>
 
       <View style={styles.section}>

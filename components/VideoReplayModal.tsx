@@ -15,6 +15,7 @@ import { theme } from '@/lib/theme';
 import { CachedImage } from '@/components/CachedImage';
 import { NativeVideoPlayer } from '@/components/NativeVideoPlayer';
 import { friendlyError } from '@/lib/errors';
+import { touchStorageObject } from '@/lib/storageLifecycle';
 import type { ArchiveItem } from '@/lib/archive';
 
 interface VideoReplayModalProps {
@@ -85,6 +86,7 @@ export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalPro
     const videoUrl = item.videoUrl;
     if (!videoUrl) return;
     setDownloading(true);
+    touchStorageObject(item.id, 'videos', videoUrl, 'video').catch(() => {});
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');
@@ -124,6 +126,7 @@ export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalPro
     if (!item) return;
     const videoUrl = item.videoUrl;
     if (!videoUrl) return;
+    touchStorageObject(item.id, 'videos', videoUrl, 'video').catch(() => {});
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');

@@ -25,8 +25,10 @@ import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { CachedImage } from '@/components/CachedImage';
 import { VideoReplayModal } from '@/components/VideoReplayModal';
 import { friendlyError } from '@/lib/errors';
+import { touchStorageObject } from '@/lib/storageLifecycle';
 
-let _mediaLibrary: typeof import('expo-media-library') | null = null;async function getMediaLibrary() {
+let _mediaLibrary: typeof import('expo-media-library') | null = null;
+async function getMediaLibrary() {
   if (!_mediaLibrary) _mediaLibrary = await import('expo-media-library');
   return _mediaLibrary;
 }
@@ -137,6 +139,7 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
   const handleReplay = (item: ArchiveItem) => {
     setReplayItem(item);
     setReplayVisible(true);
+    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {});
   };
 
   const handleCloseReplay = () => {
@@ -147,6 +150,7 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
   const handleDownload = useCallback(async (item: ArchiveItem) => {
     if (!item.videoUrl) return;
     setDownloadingId(item.id);
+    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {});
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');
@@ -184,6 +188,7 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
 
   const handleShare = useCallback(async (item: ArchiveItem) => {
     if (!item.videoUrl) return;
+    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {});
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');

@@ -51,6 +51,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
 import { uploadAssetBlobWithProgress, uploadAssetFromFileUriWithProgress, saveAssetRecord } from '@/lib/savedAssets';
+import { registerStorageObject } from '@/lib/storageLifecycle';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import { readUriAsBase64 } from '@/lib/imageEdit';
@@ -1720,6 +1721,7 @@ export default function ResultScreen() {
               .from('scans')
               .update({ muxed_video_url: finalUrl })
               .eq('id', scan?.id ?? '');
+            registerStorageObject(scan?.id ?? '', 'videos', fileName, 'video', result.blob.size).catch(() => {});
           }
         }
         if (!cancelled) {

@@ -11,6 +11,7 @@ import { mediaCacheClear, flushPendingToL2, sweepL2StaleEntries } from '@/lib/me
 import { releaseAllGLContexts } from '@/lib/glRenderer';
 import { sweepTempFiles } from '@/lib/tempFileManager';
 import { sweepStaleOfflineCache } from '@/lib/offlineCache';
+import { sweepIntermediateTempFiles } from '@/lib/storageLifecycle';
 
 let registered = false;
 
@@ -37,6 +38,10 @@ export function registerDefaultFlushHandlers(): void {
 
   registerFlushHandler('offline-cache', async () => {
     await sweepStaleOfflineCache();
+  });
+
+  registerFlushHandler('intermediate-temp-files', async () => {
+    await sweepIntermediateTempFiles();
   });
 
   registerFlushHandler('media-cache-l1', () => {
