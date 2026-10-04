@@ -5,7 +5,7 @@ import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 
 export function cleanBase64(base64: string): string {
   if (!base64) return '';
-  return base64.replace(/\s/g, '').replace(/^data:image\/\w+;base64,/, '');
+  return base64.replace(/\s/g, '').replace(/^data:[^;]+;base64,/, '');
 }
 
 export function getMimeTypeFromDataUrl(dataUrl: string): string {

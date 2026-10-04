@@ -1002,8 +1002,8 @@ function CameraScreenInner() {
       postCaptureBase64Ref.current = null;
       setPostCaptureMime(mimeType);
       postCaptureMimeRef.current = mimeType;
-      setPostCaptureVideoUri(payload);
-      postCaptureVideoUriRef.current = payload;
+      setPostCaptureVideoUri(`data:${mimeType};base64,${payload}`);
+      postCaptureVideoUriRef.current = `data:${mimeType};base64,${payload}`;
     } else {
       try {
         const compressed = await new Promise<string>((resolve, reject) => {

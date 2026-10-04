@@ -69,6 +69,7 @@ export async function uploadWithRetry(
   b64: string,
   mimeType: string,
   signal?: AbortSignal,
+  alreadyCompressed = false,
 ): Promise<string> {
   let lastError: unknown;
   for (let attempt = 0; attempt < UPLOAD_RETRY_MAX; attempt++) {
@@ -77,7 +78,7 @@ export async function uploadWithRetry(
       throw new Error('네트워크 연결이 불안정하여 업로드가 일시 중단되었습니다. 잠시 후 다시 시도해주세요.');
     }
     try {
-      const result = await uploadImage(b64, mimeType, signal);
+      const result = await uploadImage(b64, mimeType, signal, alreadyCompressed);
       recordUploadSuccess();
       return result;
     } catch (error) {
@@ -97,9 +98,15 @@ export async function uploadImage(
   base64: string,
   mimeType: string,
   signal?: AbortSignal,
+  alreadyCompressed = false,
 ): Promise<string> {
-  const { base64: _compressedBase64, mimeType: compressedMime } = await compressBase64ForUpload(base64, mimeType);
-  let compressedBase64 = _compressedBase64;
+  let compressedBase64 = base64;
+  let compressedMime = mimeType;
+  if (!alreadyCompressed) {
+    const result = await compressBase64ForUpload(base64, mimeType);
+    compressedBase64 = result.base64;
+    compressedMime = result.mimeType;
+  }
   if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
 
   await waitForFileChannelFlush();
@@ -216,7 +223,15 @@ export async function uploadVideoBlob(
     if (uri.startsWith('content://')) {
       if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
       tempCopy = `${FileSystem.cacheDirectory}video-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
-      await FileSystem.copyAsync({ from: uri, to: tempCopy });
+      const COPY_TIMEOUT_MS = 60_000;
+      let copyTimer: ReturnType<typeof setTimeout>;
+      const copyTimeout = new Promise<never>((_, reject) => {
+        copyTimer = setTimeout(() => reject(new Error('동영상 파일 복사 시간이 초과되었습니다.')), COPY_TIMEOUT_MS);
+      });
+      await Promise.race([
+        FileSystem.copyAsync({ from: uri, to: tempCopy }),
+        copyTimeout,
+      ]).finally(() => clearTimeout(copyTimer!));
       readableUri = tempCopy;
     }
     try {
@@ -307,7 +322,7 @@ export async function analyzeImage(
     async () => {
       await deductCredits('photo_analysis');
       try {
-      const imageUrl = await uploadWithRetry(b64, compressed.mimeType);
+      const imageUrl = await uploadWithRetry(b64, compressed.mimeType, undefined, true);
       const response = await safeFetch(ANALYSIS_FUNCTION_URL, {
     method: 'POST',
     headers: {
@@ -353,7 +368,7 @@ export async function analyzeMultiShot(
     const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
     const b64 = cleanBase64(compressed.dataUrl);
     imageHashes.push(hashObject({ b64 }).slice(0, 16));
-    const url = await uploadWithRetry(b64, compressed.mimeType);
+    const url = await uploadWithRetry(b64, compressed.mimeType, undefined, true);
     imageUrls.push(url);
     if (i < srcCopy.length - 1) await nativeHeapCooldownGuard();
   }

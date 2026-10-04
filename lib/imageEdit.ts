@@ -253,6 +253,10 @@ export async function compressBase64ForUpload(
       }
       return applyCap(compressed);
     } catch {
+      const fallbackBytes = Math.floor((base64.length * 3) / 4);
+      if (fallbackBytes > UPLOAD_MAX_PAYLOAD_BYTES) {
+        throw new Error('이미지 압축에 실패하여 업로드할 수 없습니다. 다시 시도해주세요.');
+      }
       return { base64, mimeType };
     }
   }
@@ -289,6 +293,10 @@ export async function compressBase64ForUpload(
     }
     return applyCap(compressed);
   } catch {
+    const fallbackBytes = Math.floor((base64.length * 3) / 4);
+    if (fallbackBytes > UPLOAD_MAX_PAYLOAD_BYTES) {
+      throw new Error('이미지 압축에 실패하여 업로드할 수 없습니다. 다시 시도해주세요.');
+    }
     return { base64, mimeType };
   }
 }
@@ -976,7 +984,7 @@ export async function compressCaptureUriToBlob(
 }
 
 export async function waitForUriFlush(uri: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const info = await FileSystem.getInfoAsync(uri);
       if (info.exists && (info.size === undefined || info.size > 0)) return true;
