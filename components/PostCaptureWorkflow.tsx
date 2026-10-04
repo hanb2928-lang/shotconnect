@@ -387,18 +387,41 @@ export function PostCaptureWorkflow({
     saveGalleryLockRef.current = false;
   }, [videoUri, imageUri, editPlan.bgmTemplate.id, editPlan.pacingBpm, bgmRecommendation]);
 
-  const uriToBlob = useCallback(async (uri: string): Promise<Blob> => {
-    if (Platform.OS !== 'web' && uri.startsWith('file://')) {
+  const uriToBlob = useCallback(async (uri: string): Promise<Blob | Uint8Array> => {
+    if (Platform.OS !== 'web' && (uri.startsWith('file://') || uri.startsWith('content://'))) {
       const FileSystem = await import('expo-file-system/legacy');
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-      const mimeType = ext === 'mp4' ? 'video/mp4' : ext === 'mov' ? 'video/quicktime' : ext === 'png' ? 'image/png' : 'image/jpeg';
-      const blob = base64ToBlob(base64, mimeType);
-      if (blob instanceof Blob) return blob;
-      const bytes = blob as Uint8Array;
-      return new Blob([bytes.buffer as ArrayBuffer], { type: mimeType });
+      let readableUri = uri;
+      let tempCopy: string | null = null;
+      if (uri.startsWith('content://')) {
+        if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
+        tempCopy = `${FileSystem.cacheDirectory}upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        await FileSystem.copyAsync({ from: uri, to: tempCopy });
+        readableUri = tempCopy;
+      }
+      const info = await FileSystem.getInfoAsync(readableUri);
+      if (!info.exists || info.size <= 0) {
+        if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+        throw new Error('파일을 찾을 수 없습니다.');
+      }
+      const ext = readableUri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const isVideo = ext === 'mp4' || ext === 'mov';
+      const MAX_NATIVE_READ_BYTES = isVideo ? 80_000_000 : 15_000_000;
+      if (info.size > MAX_NATIVE_READ_BYTES) {
+        if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+        throw new Error(isVideo
+          ? '영상 파일이 너무 큽니다. 더 짧은 영상으로 다시 촬영해주세요.'
+          : '이미지가 너무 큽니다. 더 낮은 해상도로 다시 촬영해주세요.');
+      }
+      const mimeType = isVideo ? (ext === 'mov' ? 'video/quicktime' : 'video/mp4') : ext === 'png' ? 'image/png' : 'image/jpeg';
+      try {
+        const base64 = await FileSystem.readAsStringAsync(readableUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const result = base64ToBlob(base64, mimeType);
+        return result;
+      } finally {
+        if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
+      }
     }
     if (uri.startsWith('data:') || uri.startsWith('blob:') || uri.startsWith('http') || uri.startsWith('file:')) {
       const resp = await fetch(uri);
@@ -409,7 +432,7 @@ export function PostCaptureWorkflow({
   }, []);
 
   const uploadWithRetry = useCallback(async (
-    blob: Blob,
+    body: Blob | Uint8Array,
     fileName: string,
     maxRetries: number,
     contentType: string = 'video/mp4',
@@ -425,7 +448,7 @@ export function PostCaptureWorkflow({
         }
         const { error } = await supabase.storage
           .from('videos')
-          .upload(fileName, blob, { contentType, upsert: false });
+          .upload(fileName, body, { contentType, upsert: false });
         if (error) throw error;
         if (mountedRef.current) setUploadRetrying(false);
         return true;
@@ -482,11 +505,11 @@ export function PostCaptureWorkflow({
               finalUri = uploadUri;
             }
           }
-          const blob = await uriToBlob(finalUri);
+          const uploadBody = await uriToBlob(finalUri);
           const ext = imageUri ? 'jpg' : 'mp4';
           const contentType = imageUri ? 'image/jpeg' : 'video/mp4';
           const fileName = `shortform-${Date.now()}.${ext}`;
-          cloudSuccess = await uploadWithRetry(blob, fileName, 3, contentType);
+          cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, contentType);
         } catch {
           cloudSuccess = false;
         }
