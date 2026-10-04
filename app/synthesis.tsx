@@ -46,6 +46,7 @@ import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
+import { MotionPreviewOverlay } from '@/components/MotionPreviewOverlay';
 import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/lib/videoJobPersistence';
 import { AppState, type AppStateStatus } from 'react-native';
 
@@ -658,11 +659,21 @@ export default function SynthesisScreen() {
         )}
       </ScrollView>
 
-      <ProcessingBarrier
-        visible={isGenerating || isExporting}
-        label={isExporting ? '내보내는 중...' : 'AI 생성 중...'}
-        sublabel={videoProgress?.message ?? '완료될 때까지 화면이 잠겨 있어요'}
-      />
+      {isGenerating && productImages.length >= 2 ? (
+        <MotionPreviewOverlay
+          visible={isGenerating}
+          images={productImages.map((img) => img.uri)}
+          label="AI 영상 생성 중"
+          progressMessage={videoProgress?.message ?? '촬영하신 이미지로 모션을 만들고 있어요'}
+          progress={videoProgress?.progress ?? 0}
+        />
+      ) : (
+        <ProcessingBarrier
+          visible={isGenerating || isExporting}
+          label={isExporting ? '내보내는 중...' : 'AI 생성 중...'}
+          sublabel={videoProgress?.message ?? '완료될 때까지 화면이 잠겨 있어요'}
+        />
+      )}
     </View>
   );
 }
