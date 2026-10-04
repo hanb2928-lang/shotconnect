@@ -246,7 +246,7 @@ export async function uploadCompressedUri(
         const info = await FileSystem.getInfoAsync(compressedUri);
         if (info.exists) fileSize = info.size;
       } catch { /* best-effort */ }
-      const uploadUrl = `${supabaseUrl}/storage/v1/object/public/scans/scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
       const finishLog = logUploadStart({
         path: 'native_uploadAsync',
         url: uploadUrl,

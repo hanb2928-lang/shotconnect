@@ -1083,7 +1083,7 @@ export async function uploadUriToSupabase(
     : mimeType === 'image/heic' ? 'heic'
     : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
 
   let fileSize: number | undefined;
   try {
@@ -1098,8 +1098,7 @@ export async function uploadUriToSupabase(
       'Content-Type': mimeType,
       'x-upsert': 'false',
     },
-    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-    fieldName: 'file',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     mimeType,
   });
 
