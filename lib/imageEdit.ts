@@ -798,7 +798,7 @@ export async function extractVideoFrameBase64(
         const localPath = `${FileSystem2.cacheDirectory}server-frame-${Date.now()}.jpg`;
         try {
           await FileSystem2.downloadAsync(result.frameUrl, localPath);
-          registerTempFile(localPath, 'extractVideoFrameBase64');
+          registerTempFile(localPath, 'extractVideoFrameBase64', { pin: true });
           const base64 = await FileSystem2.readAsStringAsync(localPath, {
             encoding: FileSystem2.EncodingType.Base64,
           });

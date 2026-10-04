@@ -130,7 +130,7 @@ export async function uploadAssetDataUrl(
     });
     const fileInfo = await FileSystem.getInfoAsync(fileUri);
     if (!fileInfo.exists) return null;
-    registerTempFile(fileUri, 'uploadAssetDataUrl');
+    registerTempFile(fileUri, 'uploadAssetDataUrl', { pin: true });
 
     try {
       const formData = new FormData();

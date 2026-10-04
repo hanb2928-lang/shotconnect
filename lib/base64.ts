@@ -143,7 +143,7 @@ export async function urlToDataUrl(url: string, timeoutMs = 15000): Promise<stri
     const localPath = `${FileSystem.cacheDirectory}url-to-data-${Date.now()}.tmp`;
     const downloadRes = await FileSystem.downloadAsync(url, localPath);
     if (downloadRes.status !== 200) throw new Error(`fetch ${downloadRes.status}`);
-    registerTempFile(downloadRes.uri, 'urlToDataUrl');
+    registerTempFile(downloadRes.uri, 'urlToDataUrl', { pin: true });
     return await withFileLock(downloadRes.uri, async () => {
       const base64 = await FileSystem.readAsStringAsync(downloadRes.uri, {
         encoding: FileSystem.EncodingType.Base64,
