@@ -180,11 +180,45 @@ function assertNativeBase64Size(base64: string): void {
   }
 }
 
+async function writeBase64ToTempFile(base64: string, ext: string): Promise<string | null> {
+  if (Platform.OS === 'web' || !FileSystem.cacheDirectory) return null;
+  const path = `${FileSystem.cacheDirectory}b64tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  try {
+    await withFileSettle('writeB64Temp', () =>
+      FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 }),
+    );
+    registerTempFile(path, 'writeBase64ToTempFile', { pin: true });
+    return path;
+  } catch {
+    return null;
+  }
+}
+
 export async function compressCaptureFrameToBlob(
   base64: string,
   mimeType: string,
 ): Promise<{ blob: Blob | Uint8Array; base64: string; mimeType: string }> {
   assertNativeBase64Size(base64);
+
+  if (Platform.OS !== 'web') {
+    const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+    const tmpPath = await writeBase64ToTempFile(base64, ext);
+    if (tmpPath) {
+      try {
+        const { base64: compressedBase64, mimeType: compressedMime } =
+          await compressImageToBase64(tmpPath, CAPTURE_MAX_DIMENSION, CAPTURE_QUALITY);
+        const blob = base64ToBlob(compressedBase64, compressedMime);
+        return { blob, base64: compressedBase64, mimeType: compressedMime };
+      } catch {
+        // fall through to data-URL path below
+      } finally {
+        unpinTempFile(tmpPath);
+        await safeDeleteTempFile(tmpPath).catch(() => {});
+        await waitForFileChannelFlush();
+      }
+    }
+  }
+
   const dataUrl = `data:${mimeType};base64,${base64}`;
   try {
     const compressed = await prepareImageForApi(dataUrl, CAPTURE_MAX_DIMENSION, CAPTURE_QUALITY);
@@ -220,6 +254,31 @@ export async function compressBase64ForUpload(
       return applyCap(compressed);
     } catch {
       return { base64, mimeType };
+    }
+  }
+
+  const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+  const tmpPath = await writeBase64ToTempFile(base64, ext);
+  if (tmpPath) {
+    try {
+      const { base64: compressedBase64, mimeType: compressedMime } =
+        await compressImageToBase64(tmpPath, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY);
+      if (dataUrlByteLength(`data:${compressedMime};base64,${compressedBase64}`) > UPLOAD_MAX_PAYLOAD_BYTES) {
+        const reCompressed = await compressDataUrlToMaxBytes(
+          `data:${compressedMime};base64,${compressedBase64}`,
+          UPLOAD_MAX_PAYLOAD_BYTES,
+          UPLOAD_MAX_DIMENSION,
+          UPLOAD_QUALITY,
+        );
+        return applyCap(reCompressed);
+      }
+      return { base64: compressedBase64, mimeType: compressedMime };
+    } catch {
+      // fall through to data-URL path below
+    } finally {
+      unpinTempFile(tmpPath);
+      await safeDeleteTempFile(tmpPath).catch(() => {});
+      await waitForFileChannelFlush();
     }
   }
 
@@ -347,15 +406,15 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
     // immediately to prevent OOM during later base64 encoding or canvas ops.
     const resized = await analyzeAndDownscaleImage(target);
     if (resized.downscaled && resized.uri !== target) {
-      // The original cached copy is no longer needed; the downscaled temp
-      // file becomes the active source.
       unpinTempFile(target);
       await withFileSettle('deleteOriginalCopy', () =>
         FileSystem.deleteAsync(target, { idempotent: true }),
       ).catch(() => {});
+      if (!resized.uri.startsWith('data:')) {
+        registerTempFile(resized.uri, 'makeReadableNativeUri-downscaled', { pin: true });
+      }
       return { uri: resized.uri, temporary: true };
     }
-    unpinTempFile(target);
     return { uri: target, temporary: true };
   } catch (error) {
     unregisterTempFile(target);
@@ -432,6 +491,7 @@ export async function compressImageToBase64(
     }
   } finally {
     if (source.temporary) {
+      unpinTempFile(source.uri);
       await withFileSettle('deleteSource', () => FileSystem.deleteAsync(source.uri, { idempotent: true })).catch(() => {});
       await waitForFileChannelFlush();
     }
@@ -810,7 +870,10 @@ export async function extractVideoFrameBase64(
       }
       return { base64: result.base64, mimeType: result.mimeType };
     } finally {
-      if (source.temporary) await FileSystem.deleteAsync(source.uri, { idempotent: true }).catch(() => {});
+      if (source.temporary) {
+        unpinTempFile(source.uri);
+        await FileSystem.deleteAsync(source.uri, { idempotent: true }).catch(() => {});
+      }
     }
   }
 
@@ -854,8 +917,12 @@ export async function compressImageToBase64WithUri(
   maxDimension = STANDARD_MAX_DIMENSION,
   quality = STANDARD_QUALITY,
 ): Promise<{ base64: string; mimeType: string; compressedUri: string | null }> {
+  const source = await makeReadableNativeUri(uri);
   try {
-    const { width: origW, height: origH } = await getImageSize(uri);
+    if (Platform.OS !== 'web' && !source.uri.startsWith('data:')) {
+      registerTempFile(source.uri, 'compressWithUri-source', { pin: true });
+    }
+    const { width: origW, height: origH } = await getImageSize(source.uri);
     const longer = Math.max(origW, origH);
     const actions =
       longer > maxDimension
@@ -865,12 +932,12 @@ export async function compressImageToBase64WithUri(
         : [];
     const manipulated = await withFileSettle('compressWithUri-manipulate', () =>
       ImageManipulator.manipulateAsync(
-        uri,
+        source.uri,
         actions,
         { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
       ),
     );
-    registerTempFile(manipulated.uri, 'prepareImageForUpload-native', { pin: true });
+    registerTempFile(manipulated.uri, 'compressWithUri-output', { pin: true });
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await withFileSettle('compressWithUri-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
       if (!fileInfo.exists) throw new Error('이미지 변환 실패');
@@ -883,8 +950,18 @@ export async function compressImageToBase64WithUri(
       return { base64, mimeType: 'image/jpeg', compressedUri: null };
     });
   } catch {
-    const result = await compressImageToBase64(uri, maxDimension, quality);
+    const result = await compressImageToBase64(source.uri, maxDimension, quality);
     return { ...result, compressedUri: null };
+  } finally {
+    if (Platform.OS !== 'web' && !source.uri.startsWith('data:')) {
+      unpinTempFile(source.uri);
+      if (source.temporary) {
+        await withFileSettle('compressWithUri-deleteSource', () =>
+          FileSystem.deleteAsync(source.uri, { idempotent: true }),
+        ).catch(() => {});
+        await waitForFileChannelFlush();
+      }
+    }
   }
 }
 
