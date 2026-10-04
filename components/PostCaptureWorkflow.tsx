@@ -65,7 +65,7 @@ import { mixBgmIntoVideo, fetchBgmRecommendation, type BgmRecommendation } from 
 import { runSynthesis, getSynthesisSummary, type AngleInput } from '@/lib/aiSynthesisEngine';
 import { buildDirectingPlan, getDirectingSummary } from '@/lib/directingEngine';
 import { buildMultiPlatformPublishPlans, type PublishTarget } from '@/lib/publishManager';
-import { compressImage } from '@/lib/imageEdit';
+import { compressImage, base64ToBlob } from '@/lib/imageEdit';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 
 type PlatformOption = {
@@ -388,11 +388,19 @@ export function PostCaptureWorkflow({
   }, [videoUri, imageUri, editPlan.bgmTemplate.id, editPlan.pacingBpm, bgmRecommendation]);
 
   const uriToBlob = useCallback(async (uri: string): Promise<Blob> => {
-    if (uri.startsWith('data:')) {
-      const resp = await fetch(uri);
-      return resp.blob();
+    if (Platform.OS !== 'web' && uri.startsWith('file://')) {
+      const FileSystem = await import('expo-file-system/legacy');
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const mimeType = ext === 'mp4' ? 'video/mp4' : ext === 'mov' ? 'video/quicktime' : ext === 'png' ? 'image/png' : 'image/jpeg';
+      const blob = base64ToBlob(base64, mimeType);
+      if (blob instanceof Blob) return blob;
+      const bytes = blob as Uint8Array;
+      return new Blob([bytes.buffer as ArrayBuffer], { type: mimeType });
     }
-    if (uri.startsWith('blob:') || uri.startsWith('http') || uri.startsWith('file:')) {
+    if (uri.startsWith('data:') || uri.startsWith('blob:') || uri.startsWith('http') || uri.startsWith('file:')) {
       const resp = await fetch(uri);
       return resp.blob();
     }
