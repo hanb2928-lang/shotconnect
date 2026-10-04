@@ -1,4 +1,4 @@
-const PIPELINE_LOCK_TIMEOUT_MS = 120_000;
+const PIPELINE_LOCK_TIMEOUT_MS = 30_000;
 
 let lockedBy: string | null = null;
 let lockedAt = 0;

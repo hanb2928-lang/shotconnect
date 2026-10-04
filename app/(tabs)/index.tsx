@@ -73,7 +73,7 @@ async function getStereoMod() {
   if (!_stereoMod) _stereoMod = await import('@/lib/stereoPipeline');
   return _stereoMod;
 }
-import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
+import { acquirePipelineLock, releasePipelineLock, isPipelineLocked, forceResetPipelineLock } from '@/lib/pipelineLock';
 import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 
@@ -436,7 +436,7 @@ function CameraScreenInner() {
         genIdRef.current += 1;
         if (stereoAbortRef.current) { stereoAbortRef.current.abort(); stereoAbortRef.current = null; }
         if (autoAnalysisAbortRef.current) { autoAnalysisAbortRef.current.abort(); autoAnalysisAbortRef.current = null; }
-        releasePipelineLock();
+        forceResetPipelineLock();
         if (typeof stopAutoSaveAnimation === 'function') {
           stopAutoSaveAnimation();
         }
@@ -746,62 +746,53 @@ function CameraScreenInner() {
       return;
     }
 
-    stereoOverlayRef.current = true;
     if (!acquirePipelineLock('stereo')) {
       stereoOverlayRef.current = false;
       return;
     }
-    await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
-    let stereoMod;
+    let stereoMod: typeof import('@/lib/stereoPipeline') | null = null;
+    let scanId: string | null = null;
+    let uploadedUrls: string[] = [];
+    let pipelineStarted = false;
     try {
+      await prepareCameraForProcessing();
       stereoMod = await getStereoMod();
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
-      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
-      releasePipelineLock();
-      setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
-      return;
-    }
-    setStereoProgress(stereoMod.makeInitialProgress());
-    setStereoOverlayVisible(true);
-
-    let scanId: string;
-    let uploadedUrls: string[];
-    try {
+      setStereoProgress(stereoMod.makeInitialProgress());
+      setStereoOverlayVisible(true);
       const result = await stereoMod.createScanFromAngleShots(sorted, controller.signal);
       scanId = result.scanId;
       uploadedUrls = result.uploadedUrls;
-    } catch (err) {
-      if (!isMountedRef.current) return;
+      if (isMountedRef.current) {
+        router.replace({ pathname: '/result/[id]', params: { id: scanId } });
+      }
+      const pipelineShots = [...sorted];
+      pipelineStarted = true;
       stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
-      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
-      releasePipelineLock();
-      setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
-      return;
-    }
-
-    if (isMountedRef.current) {
-      stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
-      router.replace({ pathname: '/result/[id]', params: { id: scanId } });
-    }
-
-    const pipelineShots = [...sorted];
-    nativeHeapCooldownGuard().finally(() => {
-      if (controller.signal.aborted) { releasePipelineLock(); return; }
-      stereoMod.runStereoPipeline(pipelineShots, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
-        if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
-        releasePipelineLock();
+      nativeHeapCooldownGuard().finally(() => {
+        if (controller.signal.aborted) { releasePipelineLock(); return; }
+        stereoMod!.runStereoPipeline(pipelineShots, () => {}, cleanMode, scanId!, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
+          if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+          releasePipelineLock();
+        });
       });
-    });
-    sorted.length = 0;
-    validShots.length = 0;
-    shots.length = 0;
+    } catch (err) {
+      if (isMountedRef.current) {
+        setStereoOverlayVisible(false);
+        setError(friendlyError(err, stereoMod ? '이미지 업로드에 실패했습니다. 다시 시도해주세요.' : '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+      }
+    } finally {
+      if (!pipelineStarted) {
+        stereoOverlayRef.current = false;
+        if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+        releasePipelineLock('stereo');
+      }
+      sorted.length = 0;
+      validShots.length = 0;
+      shots.length = 0;
+    }
   };
 
   const multiAngleCaptureInProgressRef = useRef(false);
@@ -1066,61 +1057,52 @@ function CameraScreenInner() {
       return;
     }
 
-    stereoOverlayRef.current = true;
     if (!acquirePipelineLock('fitting')) {
       stereoOverlayRef.current = false;
       return;
     }
-    await prepareCameraForProcessing();
     const controller = new AbortController();
     stereoAbortRef.current = controller;
-    let stereoMod;
+    let stereoMod: typeof import('@/lib/stereoPipeline') | null = null;
+    let scanId: string | null = null;
+    let pipelineStarted = false;
     try {
+      await prepareCameraForProcessing();
       stereoMod = await getStereoMod();
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
-      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
-      releasePipelineLock();
-      setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
-      return;
-    }
-    setStereoProgress(stereoMod.makeInitialProgress());
-    setStereoOverlayVisible(true);
-    setError(null);
-
-    let scanId: string;
-    try {
+      setStereoProgress(stereoMod.makeInitialProgress());
+      setStereoOverlayVisible(true);
+      setError(null);
       const result = await stereoMod.createScanFromAngleShots(sorted, controller.signal);
       scanId = result.scanId;
-    } catch (err) {
-      if (!isMountedRef.current) return;
+      if (isMountedRef.current) {
+        router.replace({ pathname: '/result/[id]', params: { id: scanId } });
+      }
+      const pipelineShots = [...sorted];
+      pipelineStarted = true;
       stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
-      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
-      releasePipelineLock();
-      setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
-      return;
-    }
-
-    if (isMountedRef.current) {
-      stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
-      router.replace({ pathname: '/result/[id]', params: { id: scanId } });
-    }
-
-    const pipelineShots = [...sorted];
-    nativeHeapCooldownGuard().finally(() => {
-      if (controller.signal.aborted) { releasePipelineLock(); return; }
-      runFittingPipeline(pipelineShots, scanId, undefined, cleanMode, studioSliders, controller.signal).catch(() => {}).finally(() => {
-        if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
-        releasePipelineLock();
+      nativeHeapCooldownGuard().finally(() => {
+        if (controller.signal.aborted) { releasePipelineLock(); return; }
+        runFittingPipeline(pipelineShots, scanId!, undefined, cleanMode, studioSliders, controller.signal).catch(() => {}).finally(() => {
+          if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+          releasePipelineLock();
+        });
       });
-    });
-    sorted.length = 0;
-    validShots.length = 0;
-    shots.length = 0;
+    } catch (err) {
+      if (isMountedRef.current) {
+        setStereoOverlayVisible(false);
+        setError(friendlyError(err, stereoMod ? '이미지 업로드에 실패했습니다. 다시 시도해주세요.' : '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+      }
+    } finally {
+      if (!pipelineStarted) {
+        stereoOverlayRef.current = false;
+        if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+        releasePipelineLock('fitting');
+      }
+      sorted.length = 0;
+      validShots.length = 0;
+      shots.length = 0;
+    }
   }, [router, cleanMode, studioSliders, prepareCameraForProcessing]);
 
   const handleShutterPress = useCallback((target: 'multiAngle' | 'fitting') => {
