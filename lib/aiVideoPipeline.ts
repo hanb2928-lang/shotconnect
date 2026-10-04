@@ -2,7 +2,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { supabase, ensureFreshSession } from './supabase';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
-import { getMultiAngleCache, setMultiAngleCache } from './aiCache';
+import { getMultiAngleCache, setMultiAngleCache, findSimilarMultiAngleCache } from './aiCache';
 import { hashMotionTemplate } from './contentHash';
 import { stepToProgress } from './videoGenSteps';
 import { logError, addBreadcrumb } from './errorLogger';
@@ -288,6 +288,43 @@ export async function generateAiVideo(
         variationSeed: options.variationSeed ?? 0,
         persisted: true,
         provider: 'cache',
+      };
+    }
+  }
+
+  // Cross-user similar-template cache: if no exact match was found, search
+  // for entries with the same motion_template_hash and a compatible tone.
+  // This lets us reuse rendered videos from other users who chose similar
+  // style/duration/camera settings, skipping the GPU pipeline entirely.
+  if (options.contentTone && !isDraft) {
+    const similar = await findSimilarMultiAngleCache(
+      motionTemplateHash,
+      options.contentTone,
+      options.productVision?.productCategory,
+    );
+    if (similar) {
+      report('completed', 1.0, `유사 템플릿 매칭 — 즉시 완료 (유사도 ${Math.round(similar.similarityScore * 100)}%)`);
+      // Store as an exact-match entry for this user's image hash so future
+      // requests don't need the similar-cache lookup.
+      if (options.imageHash) {
+        setMultiAngleCache(
+          options.imageHash,
+          options.contentTone,
+          similar.productContext,
+          similar.hookOptions,
+          similar.renderedVideoUrl,
+          motionTemplateHash,
+        ).catch(() => {});
+      }
+      return {
+        videoUrl: similar.renderedVideoUrl,
+        jobId: '',
+        motionPrompt: '',
+        durationSec: options.durationSec ?? 5,
+        aspectRatio: options.aspectRatio ?? '9:16',
+        variationSeed: options.variationSeed ?? 0,
+        persisted: true,
+        provider: 'similar-cache',
       };
     }
   }

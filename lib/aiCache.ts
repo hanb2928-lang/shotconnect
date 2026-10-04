@@ -239,3 +239,99 @@ export async function setMultiAngleCache(
 }
 
 export { L1_TTL_MS, L2_TTL_DAYS };
+
+// ─── Cross-user similar-template cache (ai_analysis_cache) ───
+
+export interface SimilarCacheMatch {
+  productContext: Record<string, unknown>;
+  hookOptions: Record<string, unknown>;
+  renderedVideoUrl: string;
+  similarityScore: number;
+  sourceImageHash: string;
+}
+
+/**
+ * Searches ai_analysis_cache for entries with the same motion_template_hash
+ * and a compatible tone_manner, ordered by hit_count. This enables cross-user
+ * reuse: if another user already generated a video with the same style/duration/
+ * camera settings and similar product category, we can return their rendered
+ * video URL instantly without hitting the GPU pipeline.
+ *
+ * The lookup is intentionally fuzzy on tone — exact tone match gets priority,
+ * but if none is found, entries with overlapping tone keywords are considered.
+ */
+export async function findSimilarMultiAngleCache(
+  motionTemplateHash: string,
+  toneManner: string,
+  productCategory?: string,
+): Promise<SimilarCacheMatch | null> {
+  if (!motionTemplateHash) return null;
+  try {
+    const { data, error } = await supabase
+      .from('ai_analysis_cache')
+      .select('image_hash, tone_manner, product_context, hook_options, rendered_video_url, expires_at, hit_count')
+      .eq('motion_template_hash', motionTemplateHash)
+      .gte('expires_at', new Date().toISOString())
+      .order('hit_count', { ascending: false })
+      .limit(20);
+
+    if (error || !data || data.length === 0) return null;
+
+    const toneKeys = toneManner.split(/[\s,·]/).filter((s) => s.length > 1);
+
+    let bestMatch: SimilarCacheMatch | null = null;
+    let bestScore = 0;
+
+    for (const row of data) {
+      const rowTone = (row.tone_manner as string) || '';
+      const ctx = (row.product_context as Record<string, unknown>) || {};
+      const rowCategory = (ctx.productCategory as string) || '';
+
+      // Skip entries from the same image_hash (that's the exact-match path)
+      if (row.image_hash === toneManner) continue;
+
+      let score = 0;
+
+      // Exact tone match gets highest priority
+      if (rowTone === toneManner) {
+        score += 0.5;
+      } else if (toneKeys.length > 0 && toneKeys.some((k) => rowTone.includes(k))) {
+        score += 0.3;
+      }
+
+      // Same product category adds weight
+      if (productCategory && rowCategory === productCategory) {
+        score += 0.3;
+      }
+
+      // Popular entries (high hit_count) get a small boost
+      const hits = (row.hit_count as number) || 0;
+      score += Math.min(0.2, hits * 0.02);
+
+      if (score > bestScore && score >= 0.3) {
+        bestScore = score;
+        bestMatch = {
+          productContext: ctx,
+          hookOptions: (row.hook_options as Record<string, unknown>) || {},
+          renderedVideoUrl: row.rendered_video_url as string,
+          similarityScore: Math.round(score * 100) / 100,
+          sourceImageHash: row.image_hash as string,
+        };
+      }
+    }
+
+    if (bestMatch) {
+      // Bump hit count for the matched entry (atomic server-side increment)
+      supabase
+        .rpc('increment_analysis_cache_hit', {
+          p_image_hash: bestMatch.sourceImageHash,
+          p_motion_template_hash: motionTemplateHash,
+        })
+        .then(() => {}, () => {});
+    }
+
+    return bestMatch;
+  } catch {
+    return null;
+  }
+}
