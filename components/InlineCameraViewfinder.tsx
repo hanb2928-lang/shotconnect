@@ -460,6 +460,7 @@ export const InlineCameraViewfinder = forwardRef<
             ref={nativeCameraRef}
             style={StyleSheet.absoluteFillObject}
             facing={facing === 'environment' ? 'back' : 'front'}
+            mode="picture"
             onCameraReady={() => setCameraReady(true)}
             onMountError={(event) => {
               setCameraReady(false);

@@ -801,13 +801,10 @@ export async function fetchBgmRecommendation(imageDataUrl: string, mimeType: str
             }
           } catch { /* fall back to base64 payload below */ }
         } else {
-          const { error: uploadError } = await supabase.storage
-            .from('scans')
-            .upload(fileName, base64ToUint8Array(b64), { contentType: mimeType, cacheControl: '360000' });
-          if (!uploadError) {
-            const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-            imageUrl = urlData.publicUrl;
-          }
+          try {
+            const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+            imageUrl = await uploadBytesToStorage(base64ToUint8Array(b64), 'scans', fileName, mimeType);
+          } catch { /* fall through to base64 payload below */ }
         }
         const payload = imageUrl
           ? { imageUrl }

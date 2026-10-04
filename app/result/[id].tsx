@@ -1702,27 +1702,22 @@ export default function ResultScreen() {
         // shared/downloaded with the narration baked in.
         const ext = result.blob.type.includes('webm') ? 'webm' : 'mp4';
         const fileName = `${scan?.id ?? 'unknown'}/${Date.now()}_muxed.${ext}`;
-        const { data: uploadData } = await supabase.storage
-          .from('videos')
-          .upload(fileName, result.blob, {
-            contentType: result.blob.type,
-            upsert: true,
-          });
-
         let finalUrl = result.url;
-        if (uploadData) {
+        let uploadOk = false;
+        try {
+          const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+          const publicUrl = await uploadBytesToStorage(result.blob, 'videos', fileName, result.blob.type, true);
+          finalUrl = publicUrl;
+          uploadOk = true;
+        } catch { /* upload failed */ }
+
+        if (uploadOk) {
           URL.revokeObjectURL(result.url);
-          const { data: urlData } = supabase.storage
-            .from('videos')
-            .getPublicUrl(fileName);
-          if (urlData?.publicUrl) {
-            finalUrl = urlData.publicUrl;
             await supabase
               .from('scans')
               .update({ muxed_video_url: finalUrl })
               .eq('id', scan?.id ?? '');
             registerStorageObject(scan?.id ?? '', 'videos', fileName, 'video', result.blob.size).catch(() => {});
-          }
         }
         if (!cancelled) {
           if (muxedBlobUrlRef.current && muxedBlobUrlRef.current !== finalUrl) {

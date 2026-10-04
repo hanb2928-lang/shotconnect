@@ -532,14 +532,8 @@ export async function uploadEditedImage(base64: string, mimeType: string): Promi
   // Web fallback
   const fileName = `edited-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const body = base64ToBlob(compressedBase64, uploadMime);
-  const { error } = await supabase.storage
-    .from('scans')
-    .upload(fileName, body, { contentType: uploadMime, cacheControl: '360000' });
-
-  if (error) throw new Error(`업로드 실패: ${error.message}`);
-
-  const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-  return urlData.publicUrl;
+  const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+  return uploadBytesToStorage(body, 'scans', fileName, uploadMime);
 }
 
 export async function saveEditedScan(scanId: string, editedImageUrl: string): Promise<void> {
@@ -1188,4 +1182,56 @@ export async function uploadUriToSupabase(
     : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   return uploadUriToBucket(fileUri, mimeType, 'scans', fileName);
+}
+
+/**
+ * Native direct upload: streams a file URI straight to Supabase Storage
+ * via FileSystem.uploadAsync with BINARY_CONTENT. The file bytes never
+ * enter JS memory or cross the native bridge — the OS networking stack
+ * handles the entire upload. Falls back to MULTIPART for OEM stacks that
+ * mishandle raw binary POST bodies.
+ */
+export async function forceNativeDirectUpload(
+  fileUri: string,
+  bucket: string,
+  path: string,
+  mimeType: string,
+): Promise<string> {
+  return uploadUriToBucket(fileUri, mimeType, bucket, path, true);
+}
+
+/**
+ * Web direct upload: uses fetch() to POST raw bytes straight to the
+ * Supabase Storage REST endpoint. Replaces the Supabase JS SDK .upload()
+ * method entirely — no Blob conversion, no SDK abstraction layer.
+ */
+export async function uploadBytesToStorage(
+  body: Blob | Uint8Array,
+  bucket: string,
+  path: string,
+  mimeType: string,
+  upsert = false,
+): Promise<string> {
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${supabaseAnonKey}`,
+    'Content-Type': mimeType,
+    'x-upsert': upsert ? 'true' : 'false',
+    'Cache-Control': '360000',
+  };
+
+  const fetchBody: BodyInit = body instanceof Blob ? body : new Blob([body as BlobPart], { type: mimeType });
+
+  const resp = await fetch(uploadUrl, {
+    method: 'POST',
+    headers,
+    body: fetchBody,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Upload failed (${resp.status}): ${text}`);
+  }
+
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
 }

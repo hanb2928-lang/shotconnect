@@ -830,6 +830,7 @@ export function StockVideoPicker({
               <CameraView
                 ref={mobileCameraRef as never}
                 facing={mobileFacing}
+                mode="picture"
                 style={styles.mobileCameraView}
                 onMountError={() => { setShowMobileCamera(false); Alert.alert('카메라 오류', '카메라를 초기화할 수 없습니다. 앱을 재시작해주세요.'); }}
               />

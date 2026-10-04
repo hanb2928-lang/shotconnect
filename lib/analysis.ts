@@ -7,7 +7,7 @@ import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base64';
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
-import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes } from '@/lib/imageEdit';
+import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage } from '@/lib/imageEdit';
 import { compressUriToUri, uploadUriToSupabase } from '@/lib/imageEdit';
 import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
@@ -143,7 +143,7 @@ export async function uploadImage(
     }
   }
 
-  // Web fallback: use supabase.storage.upload with Blob
+  // Web: upload raw bytes directly via fetch to Supabase Storage REST API
   const uploadBlob = base64ToBlob(compressedBase64, uploadMime);
   const uploadSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   compressedBase64 = '';
@@ -151,26 +151,23 @@ export async function uploadImage(
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
   const finishLog = logUploadStart({
-    path: 'supabase_js',
+    path: 'rest_fetch',
     url: uploadUrl,
     mimeType: uploadMime,
     fileSize: uploadSize,
   });
 
-  const uploadPromise = supabase.storage
-    .from('scans')
-    .upload(fileName, uploadBlob, { contentType: uploadMime, cacheControl: '360000' });
-
-  const { error } = await withUploadTimeout(uploadPromise, signal);
-
-  if (error) {
-    finishLog({ error: error.message });
-    throw new Error(`Upload failed: ${error.message}`);
+  try {
+    const publicUrl = await withUploadTimeout(
+      uploadBytesToStorage(uploadBlob, 'scans', fileName, uploadMime),
+      signal,
+    );
+    finishLog({ status: 200 });
+    return publicUrl;
+  } catch (err) {
+    finishLog({ error: err instanceof Error ? err.message : String(err) });
+    throw err;
   }
-
-  finishLog({ status: 200 });
-  const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-  return urlData.publicUrl;
 }
 
 export async function uploadImageBlob(
@@ -243,31 +240,28 @@ export async function uploadImageBlob(
     }
   }
 
-  // Web fallback: use supabase.storage.upload with Blob
+  // Web: upload raw bytes directly via fetch to Supabase Storage REST API
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
   const blobSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   const finishLog = logUploadStart({
-    path: 'supabase_js',
+    path: 'rest_fetch',
     url: uploadUrl,
     mimeType: uploadMime,
     fileSize: blobSize,
   });
 
-  const uploadPromise = supabase.storage
-    .from('scans')
-    .upload(fileName, uploadBlob, { contentType: uploadMime, cacheControl: '360000' });
-
-  const { error } = await withUploadTimeout(uploadPromise, signal);
-
-  if (error) {
-    finishLog({ error: error.message });
-    throw new Error(`Upload failed: ${error.message}`);
+  try {
+    const publicUrl = await withUploadTimeout(
+      uploadBytesToStorage(uploadBlob, 'scans', fileName, uploadMime),
+      signal,
+    );
+    finishLog({ status: 200 });
+    return publicUrl;
+  } catch (err) {
+    finishLog({ error: err instanceof Error ? err.message : String(err) });
+    throw err;
   }
-
-  finishLog({ status: 200 });
-  const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-  return urlData.publicUrl;
 }
 
 /**
@@ -481,31 +475,23 @@ export async function uploadVideoBlob(
 
   const videoUploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
   const finishLog = logUploadStart({
-    path: 'supabase_js',
+    path: 'rest_fetch',
     url: videoUploadUrl,
     mimeType,
     fileSize: body.byteLength,
   });
 
-  const uploadPromise = supabase.storage
-    .from('scans')
-    .upload(fileName, body, { contentType: mimeType, cacheControl: '360000' });
+  const uploadPromise = uploadBytesToStorage(body, 'scans', fileName, mimeType);
 
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
   });
   const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
-  const { error } = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
-
-  if (error) {
-    finishLog({ error: error.message });
-    throw new Error(`동영상 업로드 실패: ${error.message}`);
-  }
+  await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
 
   finishLog({ status: 200 });
-  const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-  return urlData.publicUrl;
+  return `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
 }
 
 export async function extractVideoFrameFromServer(
@@ -833,12 +819,12 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
   }
 
   if (!ttsPublicUrl) {
-    const { error: uploadError } = await supabase.storage
-      .from('scans')
-      .upload(fileName, audioBytes, { contentType: 'audio/mpeg', cacheControl: '360000' });
-    if (uploadError) return;
-    const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-    ttsPublicUrl = urlData.publicUrl;
+    try {
+      const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+      ttsPublicUrl = await uploadBytesToStorage(audioBytes, 'scans', fileName, 'audio/mpeg');
+    } catch {
+      return;
+    }
   }
 
   if (!ttsPublicUrl) return;

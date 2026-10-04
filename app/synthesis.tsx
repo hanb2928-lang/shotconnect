@@ -13,7 +13,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-import { compressDataUrlToMaxBytes } from '@/lib/imageEdit';
+import { compressDataUrlToMaxBytes, uploadUriToBucket } from '@/lib/imageEdit';
 import { analyzeAndDownscaleImage, cleanupSmartResizeTemp } from '@/lib/smartResize';
 import { cleanBase64 } from '@/lib/base64';
 import { registerTempFile, unpinTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
@@ -210,34 +210,81 @@ async function uploadImageToStorage(uri: string): Promise<string> {
 }
 
 async function performUpload(finalBase64: string): Promise<string> {
-  const makeBytes = (b64: string) => Platform.OS === 'web'
-    ? new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' })
-    : Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-
   let currentBase64 = finalBase64;
   let currentDim = 540;
   let currentQuality = 0.3;
   const fileName = `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 
+  // Native: write base64 to temp file and upload via FileSystem.uploadAsync,
+  // bypassing the JS bridge entirely — no Uint8Array or Blob in JS memory.
+  if (Platform.OS !== 'web') {
+    for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+      let tmpPath: string | null = null;
+      try {
+        tmpPath = `${FileSystem.cacheDirectory}synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        await FileSystem.writeAsStringAsync(tmpPath, currentBase64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        registerTempFile(tmpPath, 'performUpload', { pin: true });
+        const publicUrl = await withUploadTimeout(
+          uploadUriToBucket(tmpPath, 'image/jpeg', 'scans', fileName),
+          UPLOAD_TIMEOUT_MS,
+        );
+        return publicUrl;
+      } catch (err) {
+        const uploadError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < UPLOAD_MAX_RETRIES && isPayloadTooLargeError(uploadError)) {
+          const emergencyDims = [480, 360, 240];
+          const emergencyQualities = [0.25, 0.18, 0.12];
+          const stepIdx = Math.min(attempt, emergencyDims.length - 1);
+          currentDim = emergencyDims[stepIdx];
+          currentQuality = emergencyQualities[stepIdx];
+          const dataUrl = `data:image/jpeg;base64,${currentBase64}`;
+          try {
+            const recompressed = await compressForUpload(dataUrl, currentDim, currentQuality);
+            currentBase64 = cleanBase64(recompressed);
+          } catch { /* retry with same */ }
+          const backoffDelay = 1000 * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+          await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+          continue;
+        }
+        if (attempt < UPLOAD_MAX_RETRIES && isUploadNetworkError(uploadError)) {
+          const baseDelay = 1000 * Math.pow(2, attempt);
+          const jitter = 0.5 + Math.random() * 0.5;
+          await new Promise((resolve) => setTimeout(resolve, baseDelay * jitter));
+          continue;
+        }
+        if (isTlsOrProxyError(uploadError)) {
+          throw new Error('보안 연결에 실패했습니다. Wi-Fi 환경을 변경하거나 VPN/프록시 설정을 확인해 주세요.');
+        }
+        throw new Error(`이미지 업로드 실패: ${uploadError.message}`);
+      } finally {
+        if (tmpPath) {
+          unpinTempFile(tmpPath);
+          await safeDeleteTempFile(tmpPath).catch(() => {});
+        }
+      }
+    }
+    throw new Error('이미지 업로드 실패: 최대 재시도 횟수 초과');
+  }
+
+  const makeBytes = (b64: string) =>
+    new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' });
+
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     const bytes = makeBytes(currentBase64);
-    const { error: uploadError } = await withUploadTimeout(
-      supabase.storage
-        .from('scans')
-        .upload(fileName, bytes, { contentType: 'image/jpeg', cacheControl: '360000' }),
-      UPLOAD_TIMEOUT_MS,
-    );
-
-    if (!uploadError) {
-      const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-      return urlData.publicUrl;
-    }
-
-    lastError = uploadError instanceof Error ? uploadError : new Error(String(uploadError));
+    try {
+      const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+      const publicUrl = await withUploadTimeout(
+        uploadBytesToStorage(bytes, 'scans', fileName, 'image/jpeg'),
+        UPLOAD_TIMEOUT_MS,
+      );
+      return publicUrl;
+    } catch (uploadError) {
+      lastError = uploadError instanceof Error ? uploadError : new Error(String(uploadError));
 
     // N-002: On 413 Payload Too Large, attempt emergency recompression
-    // before retrying — shrink dimensions and quality further.
     if (attempt < UPLOAD_MAX_RETRIES && isPayloadTooLargeError(uploadError)) {
       const emergencyDims = [480, 360, 240];
       const emergencyQualities = [0.25, 0.18, 0.12];
@@ -264,6 +311,7 @@ async function performUpload(finalBase64: string): Promise<string> {
       continue;
     }
     break;
+    }
   }
 
   // N-003: Provide a user-friendly hint for TLS/proxy/firewall failures

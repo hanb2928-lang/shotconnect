@@ -68,11 +68,9 @@ export async function uploadAssetBlob(
 
   // Web fallback
   try {
+    const { uploadBytesToStorage } = await import('@/lib/imageEdit');
     const result = await withRetry(async () => {
-      const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(path, blob, { contentType: mimeType, upsert: true, cacheControl: '360000' });
-      if (error) throw error;
+      await uploadBytesToStorage(blob, BUCKET, path, mimeType, true);
       return true;
     });
     if (!result) return null;
@@ -80,8 +78,7 @@ export async function uploadAssetBlob(
     return null;
   }
 
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  return `${supabaseUrl}/storage/v1/object/public/${BUCKET}/${path}`;
 }
 
 export async function uploadAssetBlobWithProgress(

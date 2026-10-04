@@ -20,7 +20,7 @@
 
 import { addBreadcrumb } from '@/lib/errorLogger';
 
-export type UploadPath = 'native_uploadAsync' | 'supabase_js' | 'blob_fallback';
+export type UploadPath = 'native_uploadAsync' | 'supabase_js' | 'blob_fallback' | 'rest_fetch';
 
 export interface UploadDebugEvent {
   id: string;

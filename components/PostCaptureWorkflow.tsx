@@ -65,7 +65,7 @@ import { mixBgmIntoVideo, fetchBgmRecommendation, type BgmRecommendation } from 
 import { runSynthesis, getSynthesisSummary, type AngleInput } from '@/lib/aiSynthesisEngine';
 import { buildDirectingPlan, getDirectingSummary } from '@/lib/directingEngine';
 import { buildMultiPlatformPublishPlans, type PublishTarget } from '@/lib/publishManager';
-import { compressImage } from '@/lib/imageEdit';
+import { compressImage, uploadUriToBucket } from '@/lib/imageEdit';
 import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 
@@ -521,15 +521,48 @@ export function PostCaptureWorkflow({
           const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
           await new Promise((r) => setTimeout(r, delayMs));
         }
-        const uploadPromise = supabase.storage
-          .from('videos')
-          .upload(fileName, body, { contentType, upsert: false });
+        const uploadPromise = (async () => {
+          const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+          await uploadBytesToStorage(body, 'videos', fileName, contentType);
+        })();
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error('업로드 시간이 초과되었습니다.')), UPLOAD_TIMEOUT_MS);
         });
-        const { error } = await Promise.race([uploadPromise, timeout]).finally(() => clearTimeout(timer!));
-        if (error) throw error;
+        await Promise.race([uploadPromise, timeout]).finally(() => clearTimeout(timer!));
+        if (mountedRef.current) setUploadRetrying(false);
+        return true;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        if (mountedRef.current) setUploadErrorMsg(lastError);
+      }
+    }
+    if (mountedRef.current) setUploadRetrying(false);
+    return false;
+  }, []);
+
+  const uploadFileUriNative = useCallback(async (
+    fileUri: string,
+    fileName: string,
+    contentType: string,
+  ): Promise<boolean> => {
+    const isVideo = contentType.startsWith('video/');
+    const UPLOAD_TIMEOUT_MS = isVideo ? 120_000 : 60_000;
+    let lastError: string | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) {
+          setUploadRetrying(true);
+          setUploadRetryCount(attempt);
+          const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        const uploadPromise = uploadUriToBucket(fileUri, contentType, 'videos', fileName);
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('업로드 시간이 초과되었습니다.')), UPLOAD_TIMEOUT_MS);
+        });
+        await Promise.race([uploadPromise, timeout]).finally(() => clearTimeout(timer!));
         if (mountedRef.current) setUploadRetrying(false);
         return true;
       } catch (err) {
@@ -585,16 +618,24 @@ export function PostCaptureWorkflow({
               finalUri = uploadUri;
             }
           }
-          const { data: uploadBody, mimeType: detectedMimeType } = await uriToBlob(finalUri);
           const isImage = !!imageUri && !videoUri;
-          const contentType = detectedMimeType || (isImage ? 'image/jpeg' : 'video/mp4');
+          const contentType: string = isImage ? 'image/jpeg' : 'video/mp4';
           const ext = contentType === 'image/png' ? 'png'
             : contentType === 'image/webp' ? 'webp'
             : contentType === 'image/heic' ? 'heic'
             : contentType === 'video/quicktime' ? 'mov'
             : isImage ? 'jpg' : 'mp4';
           const fileName = `shortform-${Date.now()}.${ext}`;
-          cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, contentType);
+
+          // Native: upload file URI directly via FileSystem.uploadAsync,
+          // bypassing JS bridge — no Blob/Uint8Array in JS memory.
+          if (Platform.OS !== 'web' && finalUri.startsWith('file://')) {
+            cloudSuccess = await uploadFileUriNative(finalUri, fileName, contentType);
+          } else {
+            const { data: uploadBody, mimeType: detectedMimeType } = await uriToBlob(finalUri);
+            const actualContentType = detectedMimeType || contentType;
+            cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, actualContentType);
+          }
         } catch {
           cloudSuccess = false;
         }
@@ -648,7 +689,7 @@ export function PostCaptureWorkflow({
       if (mountedRef.current) setIsUploading(false);
       proceedLockRef.current = false;
     }
-  }, [isUploading, uploadDone, videoUri, imageUri, selectedPlatformKey, customPrompt, editPlan.bgmTemplate.id, editPlan.pacingBpm, editPlan, onProceedToAnalysis, uriToBlob, uploadWithRetry, bgmRecommendation]);
+  }, [isUploading, uploadDone, videoUri, imageUri, selectedPlatformKey, customPrompt, editPlan.bgmTemplate.id, editPlan.pacingBpm, editPlan, onProceedToAnalysis, uriToBlob, uploadWithRetry, uploadFileUriNative, bgmRecommendation]);
 
   if (!visible) return null;
 

@@ -82,12 +82,12 @@ export async function analyzeProductVision(
             } catch { /* fall through to JS SDK */ }
           }
           if (!uploaded) {
-            const { error: uploadError } = await supabase.storage
-              .from('scans')
-              .upload(fileName, base64ToUint8Array(b64), { contentType: 'image/jpeg', cacheControl: '360000' });
-            if (!uploadError) {
-              const { data: urlData } = supabase.storage.from('scans').getPublicUrl(fileName);
-              if (urlData.publicUrl) uploadedUrls.push(urlData.publicUrl);
+            try {
+              const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+              const url = await uploadBytesToStorage(base64ToUint8Array(b64), 'scans', fileName, 'image/jpeg');
+              if (url) uploadedUrls.push(url);
+            } catch {
+              // fall through to base64 fallback
             }
           }
         } catch {
