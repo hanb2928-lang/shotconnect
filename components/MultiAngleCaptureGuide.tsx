@@ -101,6 +101,10 @@ export function MultiAngleCaptureGuide({
         clearTimeout(captureSafetyTimerRef.current);
         captureSafetyTimerRef.current = null;
       }
+      viewfinderRef.current?.release();
+      viewfinderRef.current = null;
+      shotsRef.current = {};
+      setShots({});
     };
   }, []);
 

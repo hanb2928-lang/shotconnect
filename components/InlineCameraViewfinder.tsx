@@ -21,6 +21,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 export interface InlineViewfinderHandle {
   capture: () => Promise<{ base64: string; mimeType: string; blob?: Blob; uri?: string } | null>;
   isReady: () => boolean;
+  release: () => void;
 }
 
 interface InlineCameraViewfinderProps {
@@ -325,8 +326,19 @@ export const InlineCameraViewfinder = forwardRef<
     () => ({
       capture: () => (Platform.OS === 'web' ? captureWeb() : captureNative()),
       isReady: () => cameraReady,
+      release: () => {
+        if (Platform.OS === 'web') {
+          stopStream();
+        } else {
+          setNativeCameraActive(false);
+          setCameraReady(false);
+          setCameraKey((k) => k + 1);
+        }
+        nativeCameraRef.current = null;
+        videoRef.current = null;
+      },
     }),
-    [captureWeb, captureNative, cameraReady, nativeCameraActive],
+    [captureWeb, captureNative, cameraReady, nativeCameraActive, stopStream],
   );
 
   const handleFlip = () => {

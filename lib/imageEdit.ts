@@ -26,6 +26,19 @@ export function sanitizeStoragePath(path: string): string {
     .join('/');
 }
 
+/**
+ * Sanitize then percent-encode each path segment for safe URL interpolation.
+ * sanitizeStoragePath strips Unicode/special chars; encodeStoragePath ensures
+ * the remaining ASCII-safe characters (dots, hyphens) are properly encoded
+ * for use in a URL path component.
+ */
+export function encodeStoragePath(path: string): string {
+  return sanitizeStoragePath(path)
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
   return result.uri;
@@ -1127,7 +1140,8 @@ export async function uploadUriToBucket(
   if (Platform.OS === 'web') {
     throw new Error('uploadUriToBucket is not supported on web');
   }
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${fileName}`;
+  const safeFileName = encodeStoragePath(fileName);
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safeFileName}`;
 
   // Android 14+ sandbox can deny read access to cacheDirectory files.
   // Copy to documentDirectory before uploading.
@@ -1135,7 +1149,8 @@ export async function uploadUriToBucket(
   let uploadUri = fileUri;
   let copiedPath: string | null = null;
   if (docDir && !fileUri.startsWith(docDir)) {
-    const baseName = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    const rawBaseName = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    const baseName = sanitizeStoragePath(rawBaseName);
     copiedPath = `${docDir}bucket-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${baseName}`;
     try {
       await withFileSettle('uploadUriToBucket-copy', () =>
@@ -1223,7 +1238,7 @@ export async function uploadUriToBucket(
     throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
   }
 
-  const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${fileName}`;
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${safeFileName}`;
   return publicUrl;
 }
 
@@ -1256,7 +1271,7 @@ export async function uploadFileDirectNative(
     throw new Error('uploadFileDirectNative is not supported on web');
   }
 
-  const safePath = sanitizeStoragePath(path);
+  const safePath = encodeStoragePath(path);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
 
   // Android 14+ sandbox can deny the native upload module read access to
@@ -1267,7 +1282,7 @@ export async function uploadFileDirectNative(
   let copiedPath: string | null = null;
   if (docDir && !fileUri.startsWith(docDir)) {
     const rawFilename = fileUri.split('/').pop() || `upload-${Date.now()}`;
-    const filename = sanitizeStoragePath(rawFilename);
+    const filename = encodeStoragePath(rawFilename);
     copiedPath = `${docDir}native-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${filename}`;
     try {
       await withFileSettle('uploadFileDirectNative-copy', () =>
@@ -1372,7 +1387,7 @@ export async function uploadBytesToStorage(
   mimeType: string,
   upsert = false,
 ): Promise<string> {
-  const safePath = sanitizeStoragePath(path);
+  const safePath = encodeStoragePath(path);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${supabaseAnonKey}`,

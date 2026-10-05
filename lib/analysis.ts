@@ -7,7 +7,7 @@ import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base64';
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
-import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage } from '@/lib/imageEdit';
+import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage, sanitizeStoragePath, encodeStoragePath } from '@/lib/imageEdit';
 import { compressUriToUri, uploadFileDirectNative } from '@/lib/imageEdit';
 import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
@@ -154,7 +154,8 @@ export async function uploadImage(
   compressedBase64 = '';
 
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+  const encodedName = encodeStoragePath(fileName);
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedName}`;
   const finishLog = logUploadStart({
     path: 'rest_fetch',
     url: uploadUrl,
@@ -253,7 +254,8 @@ export async function uploadImageBlob(
 
   // Web: upload raw bytes directly via fetch to Supabase Storage REST API
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+  const encodedName = encodeStoragePath(fileName);
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedName}`;
   const blobSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   const finishLog = logUploadStart({
     path: 'rest_fetch',
@@ -313,7 +315,8 @@ export async function uploadCompressedUri(
         const info = await FileSystem.getInfoAsync(compressedUri);
         if (info.exists) fileSize = info.size;
       } catch { /* best-effort */ }
-      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const uploadFileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodeStoragePath(uploadFileName)}`;
       const finishLog = logUploadStart({
         path: 'native_uploadAsync',
         url: uploadUrl,
@@ -322,7 +325,6 @@ export async function uploadCompressedUri(
         mimeType: 'image/jpeg',
         attempt,
       });
-      const uploadFileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
       try {
         const publicUrl = await withUploadTimeout(
           uploadFileDirectNative(compressedUri, 'scans', uploadFileName, 'image/jpeg'),
@@ -379,6 +381,8 @@ export async function uploadVideoBlob(
 ): Promise<string> {
   const ext = mimeType === 'video/quicktime' ? 'mov' : 'mp4';
   const fileName = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const safeFileName = sanitizeStoragePath(fileName);
+  const encodedFileName = encodeStoragePath(fileName);
 
   // Native: use FileSystem.uploadAsync to stream the file directly from disk
   // to Supabase Storage, completely bypassing the JS bridge. Reading the
@@ -412,7 +416,7 @@ export async function uploadVideoBlob(
         throw new Error('영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.');
       }
 
-      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedFileName}`;
       const finishLog = logUploadStart({
         path: 'native_uploadAsync',
         url: uploadUrl,
@@ -471,7 +475,7 @@ export async function uploadVideoBlob(
       }
 
       finishLog({ status: 200 });
-      const publicUrl = `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
+      const publicUrl = `${supabaseUrl}/storage/v1/object/public/scans/${encodedFileName}`;
       return publicUrl;
     } finally {
       if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
@@ -488,7 +492,7 @@ export async function uploadVideoBlob(
     if (resp.body) resp.body.cancel().catch(() => {});
   }
 
-  const videoUploadUrl = `${supabaseUrl}/storage/v1/object/scans/${fileName}`;
+  const videoUploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedFileName}`;
   const finishLog = logUploadStart({
     path: 'rest_fetch',
     url: videoUploadUrl,
@@ -496,7 +500,7 @@ export async function uploadVideoBlob(
     fileSize: body.byteLength,
   });
 
-  const uploadPromise = uploadBytesToStorage(body, 'scans', fileName, mimeType);
+  const uploadPromise = uploadBytesToStorage(body, 'scans', safeFileName, mimeType);
 
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
@@ -506,7 +510,7 @@ export async function uploadVideoBlob(
   await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
 
   finishLog({ status: 200 });
-  return `${supabaseUrl}/storage/v1/object/public/scans/${fileName}`;
+  return `${supabaseUrl}/storage/v1/object/public/scans/${encodedFileName}`;
 }
 
 export async function extractVideoFrameFromServer(
