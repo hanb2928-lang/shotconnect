@@ -424,33 +424,13 @@ export async function uploadVideoBlob(
         fileSize: info.size,
       });
 
-      // Primary: BINARY_CONTENT. Fallback: MULTIPART for OEM stacks that
-      // mishandle raw binary POST bodies (same rationale as uploadFileDirectNative).
+      // Primary: MULTIPART. The native upload module generates the multipart
+      // boundary internally; setting Content-Type in headers would clobber
+      // that boundary and corrupt the stream. BINARY_CONTENT fallback is for
+      // OEM stacks that mishandle multipart framing.
       let result: { status: number; body?: string } | null = null;
       await new Promise<void>((r) => setTimeout(r, 10));
       try {
-        const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
-          httpMethod: 'POST',
-          headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            'Content-Type': mimeType,
-            'x-upsert': 'false',
-          },
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        });
-        let timer: ReturnType<typeof setTimeout>;
-        const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
-        });
-        const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
-        result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
-        if (result.status >= 400) result = null;
-      } catch {
-        result = null;
-      }
-
-      if (!result) {
-        await new Promise<void>((r) => setTimeout(r, 10));
         const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
           httpMethod: 'POST',
           headers: {
@@ -460,6 +440,30 @@ export async function uploadVideoBlob(
           fieldName: 'file',
           mimeType,
           parameters: { upsert: 'false' },
+        });
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
+        });
+        const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
+        result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
+        if (result.status >= 400 && result.status !== 409) result = null;
+      } catch {
+        result = null;
+      }
+
+      if (!result) {
+        if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
+        await new Promise<void>((r) => setTimeout(r, 10));
+        if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
+        const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
+          httpMethod: 'POST',
+          headers: {
+            Authorization: `Bearer ${supabaseAnonKey}`,
+            'Content-Type': mimeType,
+            'x-upsert': 'false',
+          },
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
         });
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {
