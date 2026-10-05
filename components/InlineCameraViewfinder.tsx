@@ -11,7 +11,7 @@ import { CameraView } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
-import { compressCaptureFrameToBlob, compressImageToBase64WithUri } from '@/lib/imageEdit';
+import { compressCaptureFrameToBlob, compressImageToBase64WithUri, waitForUriFlush } from '@/lib/imageEdit';
 import { debugSaveRawCapture, debugSaveNormalizedCapture } from '@/lib/debugCapture';
 import { withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
@@ -284,6 +284,13 @@ export const InlineCameraViewfinder = forwardRef<
           return null;
         }
         capturedUri = result.uri;
+        const uriReady = await waitForUriFlush(capturedUri);
+        if (!uriReady) {
+          await withFileSettle('deleteUnflushedCapture', () =>
+            FileSystem.deleteAsync(capturedUri!, { idempotent: true }),
+          ).catch(() => {});
+          return null;
+        }
         const docDir = FileSystem.documentDirectory;
         if (docDir && capturedUri.startsWith('file://') && !capturedUri.startsWith(docDir)) {
           const safePath = `${docDir}cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
@@ -295,6 +302,13 @@ export const InlineCameraViewfinder = forwardRef<
             FileSystem.deleteAsync(capturedUri!, { idempotent: true }),
           ).catch(() => {});
           capturedUri = safePath;
+          const copiedReady = await waitForUriFlush(capturedUri);
+          if (!copiedReady) {
+            await withFileSettle('deleteUnflushedCopy', () =>
+              FileSystem.deleteAsync(safePath, { idempotent: true }),
+            ).catch(() => {});
+            return null;
+          }
         }
         const uriToDelete = capturedUri;
         const compressed = await compressImageToBase64WithUri(uriToDelete, 720, 0.8);

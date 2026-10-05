@@ -389,6 +389,7 @@ function CameraScreenInner() {
     setCameraReady(false);
     cameraReadyRef.current = false;
     setIsActive(false);
+    setCameraSessionKey(Date.now());
   }, []);
 
   const scheduleCameraReactivation = useCallback(() => {
@@ -1203,6 +1204,7 @@ function CameraScreenInner() {
     if (captureBtnLockRef.current || processingRef.current || autoSavingRef.current || stereoOverlayRef.current) return;
     setCameraMode('picture');
     captureBtnLockRef.current = true;
+    setCameraSessionKey(Date.now());
     if (target === 'multiAngle') {
       setMultiAngleVisible(true);
     } else {

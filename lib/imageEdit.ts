@@ -982,6 +982,8 @@ export async function compressImageToBase64WithUri(
         { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
       ),
     );
+    await waitForUriFlush(manipulated.uri);
+    await waitForFileChannelFlush();
     registerTempFile(manipulated.uri, 'compressWithUri-output', { pin: true });
     return await withFileLock(manipulated.uri, async () => {
       const fileInfo = await withFileSettle('compressWithUri-getInfo', () => FileSystem.getInfoAsync(manipulated.uri));
@@ -1077,6 +1079,8 @@ export async function compressUriToUri(
         { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
       ),
     );
+    await waitForUriFlush(manipulated.uri);
+    await waitForFileChannelFlush();
     registerTempFile(manipulated.uri, 'compressUriToUri', { pin: true });
     const docDir = FileSystem.documentDirectory;
     if (docDir && !manipulated.uri.startsWith(docDir)) {
@@ -1261,6 +1265,61 @@ export async function uploadUriToSupabase(
  */
 const NATIVE_UPLOAD_TIMEOUT_MS = 30_000;
 
+const MAGIC_NUMBER_SIGNATURES: { mime: string; bytes: number[] }[] = [
+  { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
+  { mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47] },
+  { mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] },
+  { mime: 'image/gif', bytes: [0x47, 0x49, 0x46, 0x38] },
+  { mime: 'image/heic', bytes: [0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63] },
+  { mime: 'video/mp4', bytes: [0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d] },
+  { mime: 'video/quicktime', bytes: [0x66, 0x74, 0x79, 0x70, 0x71, 0x74] },
+];
+
+async function detectMimeFromMagicNumber(uri: string): Promise<string | null> {
+  try {
+    const headerBase64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+      length: 24,
+      position: 0,
+    });
+    if (!headerBase64) return null;
+    const headerBytes = base64ToUint8Array(headerBase64);
+    for (const sig of MAGIC_NUMBER_SIGNATURES) {
+      if (sig.bytes.every((b, i) => headerBytes[i] === b)) {
+        if (sig.mime === 'image/webp') {
+          for (let i = 8; i < 12 && i < headerBytes.length - 3; i++) {
+            if (
+              headerBytes[i] === 0x57 && headerBytes[i + 1] === 0x45 &&
+              headerBytes[i + 2] === 0x42 && headerBytes[i + 3] === 0x50
+            ) return 'image/webp';
+          }
+          continue;
+        }
+        if (sig.mime === 'image/heic' || sig.mime === 'video/mp4' || sig.mime === 'video/quicktime') {
+          let ftypIdx = -1;
+          for (let i = 0; i < headerBytes.length - 3; i++) {
+            if (headerBytes[i] === 0x66 && headerBytes[i + 1] === 0x74 && headerBytes[i + 2] === 0x79 && headerBytes[i + 3] === 0x70) {
+              ftypIdx = i;
+              break;
+            }
+          }
+          if (ftypIdx >= 4 && ftypIdx + 7 < headerBytes.length) {
+            const brand = String.fromCharCode(headerBytes[ftypIdx + 4], headerBytes[ftypIdx + 5], headerBytes[ftypIdx + 6], headerBytes[ftypIdx + 7]);
+            if (brand === 'heic' || brand === 'heix') return 'image/heic';
+            if (brand === 'isom' || brand === 'mp41' || brand === 'mp42') return 'video/mp4';
+            if (brand === 'qt  ') return 'video/quicktime';
+          }
+          continue;
+        }
+        return sig.mime;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function uploadFileDirectNative(
   fileUri: string,
   bucket: string,
@@ -1295,6 +1354,12 @@ export async function uploadFileDirectNative(
     }
   }
 
+  const detectedMime = await detectMimeFromMagicNumber(uploadUri);
+  const effectiveMime = detectedMime ?? mimeType;
+  if (detectedMime && detectedMime !== mimeType) {
+    console.warn(`[uploadFileDirectNative] MIME mismatch: caller=${mimeType} detected=${detectedMime} — using detected`);
+  }
+
   const doUpload = async (): Promise<{ status: number; body?: string }> => {
     let result: { status: number; body?: string } | null = null;
     try {
@@ -1303,7 +1368,7 @@ export async function uploadFileDirectNative(
         uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
         headers: {
           Authorization: `Bearer ${supabaseAnonKey}`,
-          'Content-Type': mimeType,
+          'Content-Type': effectiveMime,
           'x-upsert': 'true',
         },
       });
@@ -1322,13 +1387,13 @@ export async function uploadFileDirectNative(
           },
           uploadType: FileSystem.FileSystemUploadType.MULTIPART,
           fieldName: 'file',
-          mimeType,
+          mimeType: effectiveMime,
           parameters: { upsert: 'true' },
         });
       } catch (err) {
         console.error('[uploadFileDirectNative] MULTIPART fallback failed:', err);
         const errMsg = err instanceof Error ? err.message : String(err);
-        throw new Error(`네이티브 업로드 실패 (경로: ${safePath}): ${errMsg}`);
+        throw new Error(`네이티브 업로드 실패 (경로: ${safePath}, MIME: ${effectiveMime}): ${errMsg}`);
       }
     }
     return result;
@@ -1355,7 +1420,7 @@ export async function uploadFileDirectNative(
     const body = result.body ?? '';
     console.error(`[UPLOAD FAIL] uploadFileDirectNative status=${result.status} path=${safePath} body=${body}`);
     if (result.status === 400) {
-      throw new Error(`업로드 실패 [400] — 경로 인코딩 오류 (path: ${safePath}): ${body || '잘못된 요청'}`);
+      throw new Error(`업로드 실패 [400] — 경로 인코딩 또는 MIME 불일치 (path: ${safePath}, MIME: ${effectiveMime}): ${body || '잘못된 요청'}`);
     }
     throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
   }
