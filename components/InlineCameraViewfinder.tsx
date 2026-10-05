@@ -12,6 +12,7 @@ import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { compressCaptureFrameToBlob, compressImageToBase64WithUri, waitForUriFlush } from '@/lib/imageEdit';
+import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { debugSaveRawCapture, debugSaveNormalizedCapture } from '@/lib/debugCapture';
 import { withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
@@ -302,11 +303,13 @@ export const InlineCameraViewfinder = forwardRef<
             FileSystem.deleteAsync(capturedUri!, { idempotent: true }),
           ).catch(() => {});
           capturedUri = safePath;
+          registerTempFile(safePath, 'inline-capture');
           const copiedReady = await waitForUriFlush(capturedUri);
           if (!copiedReady) {
             await withFileSettle('deleteUnflushedCopy', () =>
               FileSystem.deleteAsync(safePath, { idempotent: true }),
             ).catch(() => {});
+            unregisterTempFile(safePath);
             return null;
           }
         }
@@ -316,6 +319,7 @@ export const InlineCameraViewfinder = forwardRef<
         await withFileSettle('deleteCapturedUri', () =>
           FileSystem.deleteAsync(uriToDelete, { idempotent: true }),
         ).catch(() => {});
+        unregisterTempFile(uriToDelete);
         await waitForFileChannelFlush();
         capturedUri = null;
         return { base64: compressed.base64, mimeType: compressed.mimeType, uri: compressed.compressedUri ?? undefined };

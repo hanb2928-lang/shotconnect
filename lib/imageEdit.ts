@@ -11,6 +11,7 @@ import { registerTempFile, safeDeleteTempFile, unpinTempFile, unregisterTempFile
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
 import { analyzeAndDownscaleImage, withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 import { runProactiveFlush, getHeapUsageRatio } from '@/lib/proactiveMemoryFlush';
+import { logError } from '@/lib/errorLogger';
 
 /**
  * Supabase Storage REST 경로에 사용할 수 없는 유니코드/공백/특수문자를
@@ -1239,6 +1240,10 @@ export async function uploadUriToBucket(
   if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
     const body = result.body ?? '';
     console.error(`[UPLOAD FAIL] uploadUriToBucket status=${result.status} body=${body}`);
+    logError(new Error(`uploadUriToBucket [${result.status}] body=${body}`), { component: 'imageEdit', action: 'uploadUriToBucket', extra: { status: result.status, body } });
+    if (result.status === 403) {
+      throw new Error(`업로드 실패 [403] — 권한 거부: ${body || '접근 권한 없음'}`);
+    }
     throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
   }
 
@@ -1263,7 +1268,8 @@ export async function uploadUriToSupabase(
  * expo-file-system의 FileSystem.uploadAsync가 OS 네이티브 네트워킹 스택으로 파일을 스트리밍하므로
  * Hermes JS 엔진 메모리와 RN Bridge를 완전히 우회한다.
  */
-const NATIVE_UPLOAD_TIMEOUT_MS = 30_000;
+const NATIVE_UPLOAD_TIMEOUT_MS = 15_000;
+const WEB_UPLOAD_TIMEOUT_MS = 15_000;
 
 const MAGIC_NUMBER_SIGNATURES: { mime: string; bytes: number[] }[] = [
   { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
@@ -1419,8 +1425,12 @@ export async function uploadFileDirectNative(
   if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
     const body = result.body ?? '';
     console.error(`[UPLOAD FAIL] uploadFileDirectNative status=${result.status} path=${safePath} body=${body}`);
+    logError(new Error(`uploadFileDirectNative [${result.status}] path=${safePath} body=${body}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { status: result.status, path: safePath, body } });
     if (result.status === 400) {
       throw new Error(`업로드 실패 [400] — 경로 인코딩 또는 MIME 불일치 (path: ${safePath}, MIME: ${effectiveMime}): ${body || '잘못된 요청'}`);
+    }
+    if (result.status === 403) {
+      throw new Error(`업로드 실패 [403] — 권한 거부 (path: ${safePath}): ${body || '접근 권한 없음'}`);
     }
     throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
   }
@@ -1473,14 +1483,32 @@ export async function uploadBytesToStorage(
 
   const fetchBody: BodyInit = body instanceof Blob ? body : new Blob([body as BlobPart], { type: mimeType });
 
-  const resp = await fetch(uploadUrl, {
-    method: 'POST',
-    headers,
-    body: fetchBody,
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.')),
+      WEB_UPLOAD_TIMEOUT_MS,
+    );
   });
+
+  let resp: Response;
+  try {
+    resp = await Promise.race([
+      fetch(uploadUrl, { method: 'POST', headers, body: fetchBody }),
+      timeout,
+    ]).finally(() => clearTimeout(timer!));
+  } catch (err) {
+    logError(err, { component: 'imageEdit', action: 'uploadBytesToStorage' });
+    throw err;
+  }
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
+    console.error(`[UPLOAD FAIL] uploadBytesToStorage status=${resp.status} body=${text}`);
+    logError(new Error(`uploadBytesToStorage [${resp.status}] body=${text}`), { component: 'imageEdit', action: 'uploadBytesToStorage', extra: { status: resp.status, body: text } });
+    if (resp.status === 403) {
+      throw new Error(`업로드 실패 [403] — 권한 거부: ${text || '접근 권한 없음'}`);
+    }
     throw new Error(`Upload failed (${resp.status}): ${text}`);
   }
 

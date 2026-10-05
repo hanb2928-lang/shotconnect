@@ -40,6 +40,7 @@ import { isOnline } from '@/hooks/useNetworkStatus';
 import { buildDataUrl, cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
 import { prepareImageForApi, compressImageToBase64, compressImageToBase64WithUri, compressCaptureUriToBlob, extractVideoFrameBase64, waitForUriFlush, nativeHeapCooldownGuard } from '@/lib/imageEdit';
 import type { MoodFilterType } from '@/lib/imageEdit';
+import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { getDeviceCaptureMaxDim } from '@/lib/captureConstraints';
 import { isLowEndDevice } from '@/lib/devicePerformance';
 import { friendlyError } from '@/lib/errors';
@@ -389,6 +390,7 @@ function CameraScreenInner() {
     setCameraReady(false);
     cameraReadyRef.current = false;
     setIsActive(false);
+    cameraRef.current = null;
     setCameraSessionKey(Date.now());
   }, []);
 
@@ -400,6 +402,7 @@ function CameraScreenInner() {
     setIsActive(false);
     setCameraReady(false);
     cameraReadyRef.current = false;
+    cameraRef.current = null;
     cameraRemountTimerRef.current = setTimeout(() => {
       cameraRemountTimerRef.current = null;
       if (!isMountedRef.current) return;
@@ -961,6 +964,7 @@ function CameraScreenInner() {
           const dest = `${docDir}cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
           await fs.copyAsync({ from: capturedUri, to: dest });
           await fs.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+          registerTempFile(dest, 'multiAngleCapture');
           safeUri = dest;
         }
       } catch { /* if copy fails, proceed with original URI */ }
@@ -1040,6 +1044,7 @@ function CameraScreenInner() {
         if (docDir && assetUri.startsWith('file://') && !assetUri.startsWith(docDir)) {
           const dest = `${docDir}pick-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
           await fs.copyAsync({ from: assetUri, to: dest });
+          registerTempFile(dest, 'multiAnglePick');
           safeUri = dest;
         }
       } catch { /* if copy fails, proceed with original URI */ }
@@ -1453,7 +1458,7 @@ function CameraScreenInner() {
 
           <MultiAngleCaptureGuide
             visible={fittingGuideVisible}
-            onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
+            onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
             onComplete={handleFittingGuideComplete}
             onPickImage={handleMultiAnglePick}
             onCaptureImage={handleMultiAngleCapture}
@@ -1571,7 +1576,7 @@ function CameraScreenInner() {
 
         <MultiAngleCaptureGuide
           visible={fittingGuideVisible}
-          onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
+          onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
           onComplete={handleFittingGuideComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1663,7 +1668,7 @@ function CameraScreenInner() {
 
         <MultiAngleCaptureGuide
           visible={multiAngleVisible}
-          onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
+          onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
           onComplete={handleMultiAngleComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1796,7 +1801,7 @@ function CameraScreenInner() {
       {/* Multi-Angle Capture Guide */}
       <MultiAngleCaptureGuide
         visible={multiAngleVisible}
-        onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; }}
+        onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
         onComplete={handleMultiAngleComplete}
         onPickImage={handleMultiAnglePick}
         onCaptureImage={handleMultiAngleCapture}
