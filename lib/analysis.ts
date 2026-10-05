@@ -56,9 +56,11 @@ function withUploadTimeout<T>(
   externalSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
-  const linkedSignal = externalSignal
-    ? AbortSignal.any([externalSignal, controller.signal])
-    : controller.signal;
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  const linkedSignal = controller.signal;
 
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {

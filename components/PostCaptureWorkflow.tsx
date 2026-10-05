@@ -534,9 +534,11 @@ export function PostCaptureWorkflow({
         }
         const controller = new AbortController();
         const externalSignal = getUploadSignal();
-        const linkedSignal = externalSignal
-          ? AbortSignal.any([externalSignal, controller.signal])
-          : controller.signal;
+        if (externalSignal) {
+          if (externalSignal.aborted) controller.abort();
+          else externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+        const linkedSignal = controller.signal;
         const uploadPromise = (async () => {
           const { uploadBytesToStorage } = await import('@/lib/imageEdit');
           await uploadBytesToStorage(body, 'videos', fileName, contentType, false, linkedSignal, UPLOAD_TIMEOUT_MS);
@@ -580,9 +582,11 @@ export function PostCaptureWorkflow({
         }
         const controller = new AbortController();
         const externalSignal = getUploadSignal();
-        const linkedSignal = externalSignal
-          ? AbortSignal.any([externalSignal, controller.signal])
-          : controller.signal;
+        if (externalSignal) {
+          if (externalSignal.aborted) controller.abort();
+          else externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+        const linkedSignal = controller.signal;
         const uploadPromise = uploadUriToBucket(fileUri, contentType, 'videos', fileName, false, linkedSignal);
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {

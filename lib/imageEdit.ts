@@ -1595,9 +1595,11 @@ async function uploadBytesToStorageImpl(
   await new Promise<void>((r) => setTimeout(r, 10));
 
   const controller = new AbortController();
-  const combinedSignal = signal
-    ? AbortSignal.any([signal, controller.signal])
-    : controller.signal;
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  const combinedSignal = controller.signal;
 
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
