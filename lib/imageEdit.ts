@@ -1186,154 +1186,21 @@ export async function uploadUriToBucket(
   if (Platform.OS === 'web') {
     throw new Error('uploadUriToBucket is not supported on web');
   }
-  const safeFileName = encodeStoragePath(fileName);
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safeFileName}`;
 
-  // Android 14+ sandbox can deny read access to cacheDirectory files.
-  // Copy to documentDirectory before uploading.
-  const docDir = FileSystem.documentDirectory;
-  let uploadUri = fileUri;
-  let copiedPath: string | null = null;
-  if (docDir && !fileUri.startsWith(docDir)) {
-    const rawBaseName = fileUri.split('/').pop() || `upload-${uniqueSuffix()}`;
-    const baseName = sanitizeStoragePath(rawBaseName);
-    copiedPath = `${docDir}bucket-up-${uniqueSuffix()}-${baseName}`;
-    try {
-      await withFileSettle('uploadUriToBucket-copy', () =>
-        FileSystem.copyAsync({ from: fileUri, to: copiedPath! }),
-      );
-      await waitForUriFlush(copiedPath);
-      await waitForFileChannelFlush();
-      uploadUri = copiedPath;
-    } catch (copyErr) {
-      copiedPath = null;
-      if (fileUri.startsWith('content://')) {
-        throw new Error(`content:// URI를 업로드 가능한 경로로 복사하지 못했습니다: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`);
-      }
-    }
-  }
-
-  let fileSize: number | undefined;
+  const readableUri = await normalizeUriForRead(fileUri, 'uploadUriToBucket');
   try {
-    const info = await FileSystem.getInfoAsync(uploadUri);
-    if (info.exists) fileSize = info.size;
-  } catch { /* best-effort */ }
-  if (!fileSize || fileSize <= 0) {
-    if (copiedPath) await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
-    throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
-  }
-
-  const doUpload = async (): Promise<{ status: number; body?: string }> => {
-    // Hermes GC tick: yield so the engine can reclaim buffers from prior
-    // compression/copy steps before the native upload socket opens.
-    await new Promise<void>((r) => setTimeout(r, 10));
-    if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-    let result: { status: number; body?: string } | null = null;
-
-    // MULTIPART primary: see uploadFileDirectNative for rationale. Inline
-    // header literal — no shared reference for the native module to mutate.
-    try {
-      const info = await FileSystem.getInfoAsync(uploadUri);
-      if (!info.exists || (info.size !== undefined && info.size <= 0)) {
-        throw new Error('업로드 직전 파일이 손상되었습니다.');
-      }
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') throw e;
-      const errMsg = e instanceof Error ? e.message : String(e);
-      throw new Error(`업로드 실패 (파일 검증 오류): ${errMsg}`);
-    }
-    try {
-      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
-        httpMethod: 'POST',
-        headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          'x-upsert': upsert ? 'true' : 'false',
-        },
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType: mimeType.toLowerCase().trim(),
-        parameters: { upsert: upsert ? 'true' : 'false' },
-      });
-      if (result.status >= 400 && result.status !== 409) {
-        console.error(`[uploadUriToBucket] MULTIPART rejected: status=${result.status} body=${result.body ?? '(empty)'} mime=${mimeType}`);
-        result = null;
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.warn(`[uploadUriToBucket] MULTIPART failed: ${errMsg}`);
-      result = null;
-    }
-
-    if (!result) {
-      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-      // BINARY_CONTENT fallback: raw byte stream, inline header literal.
-      await new Promise<void>((r) => setTimeout(r, 10));
-      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-      try {
-        result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
-          httpMethod: 'POST',
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-          headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            'Content-Type': mimeType.toLowerCase().trim(),
-            'x-upsert': upsert ? 'true' : 'false',
-          },
-        });
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[uploadUriToBucket] BINARY_CONTENT fallback failed: ${errMsg}`);
-        throw new Error(`네이티브 업로드 실패 (MIME: ${mimeType}): ${errMsg}`);
-      }
-    }
-    return result;
-  };
-
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.')),
-      NATIVE_UPLOAD_TIMEOUT_MS,
-    );
-  });
-
-  let result: { status: number; body?: string };
-  try {
-    result = await Promise.race([doUpload(), timeout]).finally(() => clearTimeout(timer!));
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    throw err;
-  } finally {
-    if (copiedPath) {
-      await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
-    }
-  }
-
-  if (__DEV__) {
-    const { logUploadEvent } = await import('@/lib/uploadDebugLogger');
-    logUploadEvent({
-      path: 'native_uploadAsync',
-      url: uploadUrl,
-      fileUri: uploadUri,
-      fileSize,
-      mimeType,
-      status: result.status,
-      responseBody: typeof result.body === 'string' ? result.body : undefined,
-      error: result.status >= 400 ? `HTTP ${result.status}` : undefined,
+    const base64 = await FileSystem.readAsStringAsync(readableUri, {
+      encoding: FileSystem.EncodingType.Base64,
     });
-  }
-
-  if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
-    const body = result.body ?? '';
-    console.error(`[UPLOAD FAIL] uploadUriToBucket status=${result.status} body=${body}`);
-    logError(new Error(`uploadUriToBucket [${result.status}] body=${body}`), { component: 'imageEdit', action: 'uploadUriToBucket', extra: { status: result.status, body } });
-    if (result.status === 403) {
-      throw new Error(`업로드 실패 [403] — 권한 거부: ${body || '접근 권한 없음'}`);
+    if (!base64) throw new Error('업로드할 파일을 읽을 수 없습니다.');
+    const bytes = base64ToUint8Array(base64);
+    if (!bytes || bytes.byteLength <= 0) {
+      throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
     }
-    throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
+    return await uploadBytesToStorage(bytes, bucket, fileName, mimeType, upsert, signal);
+  } finally {
+    await cleanupNormalizedUri(fileUri, readableUri);
   }
-
-  const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${safeFileName}`;
-  return publicUrl;
 }
 
 export async function uploadUriToSupabase(
@@ -1356,10 +1223,9 @@ export async function uploadUriToSupabase(
  * expo-file-system의 FileSystem.uploadAsync가 OS 네이티브 네트워킹 스택으로 파일을 스트리밍하므로
  * Hermes JS 엔진 메모리와 RN Bridge를 완전히 우회한다.
  */
-const NATIVE_UPLOAD_TIMEOUT_MS = 15_000;
 const WEB_UPLOAD_TIMEOUT_MS = 15_000;
 
-const MAGIC_NUMBER_SIGNATURES: { mime: string; bytes: number[] }[] = [
+const MIME_MAGIC_SIGNATURES: { mime: string; bytes: number[] }[] = [
   { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
   { mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47] },
   { mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] },
@@ -1369,49 +1235,66 @@ const MAGIC_NUMBER_SIGNATURES: { mime: string; bytes: number[] }[] = [
   { mime: 'video/quicktime', bytes: [0x66, 0x74, 0x79, 0x70, 0x71, 0x74] },
 ];
 
-async function detectMimeFromMagicNumber(uri: string): Promise<string | null> {
-  if (Platform.OS === 'web') return null;
-  try {
-    const headerBase64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-      length: 24,
-      position: 0,
-    });
-    if (!headerBase64) return null;
-    const headerBytes = base64ToUint8Array(headerBase64);
-    for (const sig of MAGIC_NUMBER_SIGNATURES) {
-      if (sig.bytes.every((b, i) => headerBytes[i] === b)) {
-        if (sig.mime === 'image/webp') {
-          for (let i = 8; i < 12 && i < headerBytes.length - 3; i++) {
-            if (
-              headerBytes[i] === 0x57 && headerBytes[i + 1] === 0x45 &&
-              headerBytes[i + 2] === 0x42 && headerBytes[i + 3] === 0x50
-            ) return 'image/webp';
+function detectMimeFromBytes(bytes: Uint8Array): string | null {
+  for (const sig of MIME_MAGIC_SIGNATURES) {
+    if (sig.bytes.every((b, i) => bytes[i] === b)) {
+      if (sig.mime === 'image/webp') {
+        for (let i = 8; i < 12 && i < bytes.length - 3; i++) {
+          if (bytes[i] === 0x57 && bytes[i + 1] === 0x45 && bytes[i + 2] === 0x42 && bytes[i + 3] === 0x50) {
+            return 'image/webp';
           }
-          continue;
         }
-        if (sig.mime === 'image/heic' || sig.mime === 'video/mp4' || sig.mime === 'video/quicktime') {
-          let ftypIdx = -1;
-          for (let i = 0; i < headerBytes.length - 3; i++) {
-            if (headerBytes[i] === 0x66 && headerBytes[i + 1] === 0x74 && headerBytes[i + 2] === 0x79 && headerBytes[i + 3] === 0x70) {
-              ftypIdx = i;
-              break;
-            }
-          }
-          if (ftypIdx >= 4 && ftypIdx + 7 < headerBytes.length) {
-            const brand = String.fromCharCode(headerBytes[ftypIdx + 4], headerBytes[ftypIdx + 5], headerBytes[ftypIdx + 6], headerBytes[ftypIdx + 7]);
-            if (brand === 'heic' || brand === 'heix') return 'image/heic';
-            if (brand === 'isom' || brand === 'mp41' || brand === 'mp42') return 'video/mp4';
-            if (brand === 'qt  ') return 'video/quicktime';
-          }
-          continue;
-        }
-        return sig.mime;
+        continue;
       }
+      if (sig.mime === 'image/heic' || sig.mime === 'video/mp4' || sig.mime === 'video/quicktime') {
+        let ftypIdx = -1;
+        for (let i = 0; i < bytes.length - 3; i++) {
+          if (bytes[i] === 0x66 && bytes[i + 1] === 0x74 && bytes[i + 2] === 0x79 && bytes[i + 3] === 0x70) {
+            ftypIdx = i;
+            break;
+          }
+        }
+        if (ftypIdx >= 4 && ftypIdx + 7 < bytes.length) {
+          const brand = String.fromCharCode(bytes[ftypIdx + 4], bytes[ftypIdx + 5], bytes[ftypIdx + 6], bytes[ftypIdx + 7]);
+          if (brand === 'heic' || brand === 'heix') return 'image/heic';
+          if (brand === 'isom' || brand === 'mp41' || brand === 'mp42') return 'video/mp4';
+          if (brand === 'qt  ') return 'video/quicktime';
+        }
+        continue;
+      }
+      return sig.mime;
     }
-    return null;
-  } catch {
-    return null;
+  }
+  return null;
+}
+
+async function normalizeUriForRead(fileUri: string, label: string): Promise<string> {
+  if (Platform.OS === 'web') return fileUri;
+  const docDir = FileSystem.documentDirectory;
+  if (!docDir) return fileUri;
+  const needsCopy =
+    fileUri.startsWith('content://') ||
+    (fileUri.startsWith('file://') && !fileUri.startsWith(docDir));
+  if (!needsCopy) return fileUri;
+  const rawName = fileUri.split('/').pop() || `upload-${uniqueSuffix()}`;
+  const baseName = sanitizeStoragePath(rawName);
+  const target = `${docDir}${label}-${uniqueSuffix()}-${baseName}`;
+  try {
+    await withFileSettle(`${label}-copy`, () =>
+      FileSystem.copyAsync({ from: fileUri, to: target }),
+    );
+    await waitForUriFlush(target);
+    await waitForFileChannelFlush();
+    return target;
+  } catch (copyErr) {
+    throw new Error(`파일을 업로드 가능한 경로로 복사하지 못했습니다: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`);
+  }
+}
+
+async function cleanupNormalizedUri(originalUri: string, normalizedUri: string): Promise<void> {
+  if (normalizedUri !== originalUri) {
+    await FileSystem.deleteAsync(normalizedUri, { idempotent: true }).catch(() => {});
+    await waitForFileChannelFlush();
   }
 }
 
@@ -1426,169 +1309,30 @@ export async function uploadFileDirectNative(
     throw new Error('uploadFileDirectNative is not supported on web');
   }
 
-  const safePath = encodeStoragePath(path);
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
-
-  // Android 14+ sandbox can deny the native upload module read access to
-  // files in cacheDirectory or content:// URIs. Copy to documentDirectory
-  // (app-private, always readable) before uploading.
-  const docDir = FileSystem.documentDirectory;
-  let uploadUri = fileUri;
-  let copiedPath: string | null = null;
-  if (docDir && !fileUri.startsWith(docDir)) {
-    const rawFilename = fileUri.split('/').pop() || `upload-${uniqueSuffix()}`;
-    const filename = sanitizeStoragePath(rawFilename);
-    copiedPath = `${docDir}native-up-${uniqueSuffix()}-${filename}`;
-    try {
-      await withFileSettle('uploadFileDirectNative-copy', () =>
-        FileSystem.copyAsync({ from: fileUri, to: copiedPath! }),
-      );
-      await waitForFileChannelFlush();
-      uploadUri = copiedPath;
-    } catch (copyErr) {
-      copiedPath = null;
-      if (fileUri.startsWith('content://')) {
-        throw new Error(`content:// URI를 업로드 가능한 경로로 복사하지 못했습니다: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`);
-      }
-    }
-  }
-
-  const detectedMime = await detectMimeFromMagicNumber(uploadUri);
-  const effectiveMime = (detectedMime ?? mimeType).toLowerCase().trim();
-  if (detectedMime && detectedMime !== mimeType) {
-    console.warn(`[uploadFileDirectNative] MIME mismatch: caller=${mimeType} detected=${detectedMime} — using detected`);
-  }
-
-  // Zero-byte guard: reject empty/corrupt files before they reach the
-  // native socket, preventing phantom uploads and misleading 400 errors.
-  let preUploadSize: number | undefined;
+  const readableUri = await normalizeUriForRead(fileUri, 'uploadFileDirectNative');
   try {
-    const info = await FileSystem.getInfoAsync(uploadUri);
-    preUploadSize = info.exists ? info.size : undefined;
-  } catch { /* best-effort */ }
-  if (preUploadSize === undefined || preUploadSize <= 0) {
-    if (copiedPath) await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
-    throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
-  }
-
-  const doUpload = async (): Promise<{ status: number; body?: string }> => {
-    // Hermes GC tick: yield to the event loop so the JS engine can collect
-    // any intermediate ArrayBuffer/base64 from compression before the
-    // native socket opens. Prevents memory spikes and socket deadlocks.
-    await new Promise<void>((r) => setTimeout(r, 10));
-    if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-    let result: { status: number; body?: string } | null = null;
-
-    // MULTIPART is the primary path: Expo's native upload module correctly
-    // sets the Content-Type from the `mimeType` parameter, and the multipart
-    // boundary framing prevents OkHttp from second-guessing the stream's
-    // content type against the file's magic number. BINARY_CONTENT mode can
-    // cause the declared Content-Type header to diverge from what OkHttp
-    // actually writes on the wire, leading to 400 Bad Request from Supabase
-    // Storage's gateway when the header doesn't match the byte signature.
-    try {
-      const info = await FileSystem.getInfoAsync(uploadUri);
-      if (!info.exists || (info.size !== undefined && info.size <= 0)) {
-        throw new Error('업로드 직전 파일이 손상되었습니다.');
-      }
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      throw new Error(`네이티브 업로드 실패 (파일 검증 오류): ${errMsg}`);
+    const base64 = await FileSystem.readAsStringAsync(readableUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    if (!base64) throw new Error('업로드할 파일을 읽을 수 없습니다.');
+    const bytes = base64ToUint8Array(base64);
+    if (!bytes || bytes.byteLength <= 0) {
+      throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
     }
-    try {
-      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
-        httpMethod: 'POST',
-        headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          'x-upsert': 'true',
-        },
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType: effectiveMime,
-        parameters: { upsert: 'true' },
-      });
-      if (result.status >= 400 && result.status !== 409) {
-        console.error(`[uploadFileDirectNative] MULTIPART rejected: status=${result.status} body=${result.body ?? '(empty)'} mime=${effectiveMime}`);
-        result = null;
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.warn(`[uploadFileDirectNative] MULTIPART failed: ${errMsg}`);
-      result = null;
+    const detectedMime = detectMimeFromBytes(bytes);
+    const effectiveMime = (detectedMime ?? mimeType).toLowerCase().trim();
+    if (detectedMime && detectedMime !== mimeType) {
+      console.warn(`[uploadFileDirectNative] MIME mismatch: caller=${mimeType} detected=${detectedMime} — using detected`);
     }
-
-    if (!result) {
-      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-      // BINARY_CONTENT fallback: raw byte stream without multipart framing.
-      // Some Android/OkHttp versions handle this correctly when the file
-      // channel is freshly opened, so it's worth trying as a last resort.
-      await new Promise<void>((r) => setTimeout(r, 10));
-      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-      try {
-        result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
-          httpMethod: 'POST',
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-          headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            'Content-Type': effectiveMime,
-            'x-upsert': 'true',
-          },
-        });
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[uploadFileDirectNative] BINARY_CONTENT fallback failed: ${errMsg}`);
-        throw new Error(`네이티브 업로드 실패 (경로: ${safePath}, MIME: ${effectiveMime}): ${errMsg}`);
-      }
-      if (!result || typeof result.status !== 'number') {
-        throw new Error(`네이티브 업로드 실패 — 응답 객체 없음 (경로: ${safePath}, MIME: ${effectiveMime})`);
-      }
-    }
-    return result;
-  };
-
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error('네이티브 업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.')),
-      NATIVE_UPLOAD_TIMEOUT_MS,
-    );
-  });
-
-  let result: { status: number; body?: string };
-  try {
-    result = await Promise.race([doUpload(), timeout]).finally(() => clearTimeout(timer!));
+    return await uploadBytesToStorage(bytes, bucket, path, effectiveMime, true, signal);
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
     const errMsg = err instanceof Error ? err.message : String(err);
-    logError(new Error(`uploadFileDirectNative 네트워크 에러: ${errMsg}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path: safePath, error: errMsg } });
+    logError(new Error(`uploadFileDirectNative: ${errMsg}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path, error: errMsg } });
     throw err;
   } finally {
-    if (copiedPath) {
-      await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
-    }
+    await cleanupNormalizedUri(fileUri, readableUri);
   }
-
-  if (!result || typeof result.status !== 'number') {
-    const detail = result ? JSON.stringify(result) : 'undefined';
-    console.error(`[UPLOAD FAIL] uploadFileDirectNative returned malformed result: ${detail}`);
-    logError(new Error(`uploadFileDirectNative malformed result: ${detail}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path: safePath, result: detail } });
-    throw new Error(`업로드 실패 — 서버 응답이 올바르지 않습니다 (path: ${safePath})`);
-  }
-
-  if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
-    const body = result.body ?? '';
-    console.error(`[UPLOAD FAIL] uploadFileDirectNative status=${result.status} path=${safePath} body=${body}`);
-    logError(new Error(`uploadFileDirectNative [${result.status}] path=${safePath} body=${body}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { status: result.status, path: safePath, body } });
-    if (result.status === 400) {
-      throw new Error(`업로드 실패 [400] — 경로 인코딩 또는 MIME 불일치 (path: ${safePath}, MIME: ${effectiveMime}): ${body || '잘못된 요청'}`);
-    }
-    if (result.status === 403) {
-      throw new Error(`업로드 실패 [403] — 권한 거부 (path: ${safePath}): ${body || '접근 권한 없음'}`);
-    }
-    throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
-  }
-
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
 }
 
 /**
@@ -1625,6 +1369,7 @@ export async function uploadBytesToStorage(
   mimeType: string,
   upsert = false,
   signal?: AbortSignal,
+  timeoutMs = WEB_UPLOAD_TIMEOUT_MS,
 ): Promise<string> {
   const safePath = encodeStoragePath(path);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
@@ -1653,7 +1398,7 @@ export async function uploadBytesToStorage(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
       () => reject(new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.')),
-      WEB_UPLOAD_TIMEOUT_MS,
+      timeoutMs,
     );
   });
 

@@ -382,12 +382,7 @@ export async function uploadVideoBlob(
   const ext = mimeType === 'video/quicktime' ? 'mov' : 'mp4';
   const fileName = `video-${uniqueSuffix()}.${ext}`;
   const safeFileName = sanitizeStoragePath(fileName);
-  const encodedFileName = encodeStoragePath(fileName);
 
-  // Native: use FileSystem.uploadAsync to stream the file directly from disk
-  // to Supabase Storage, completely bypassing the JS bridge. Reading the
-  // entire video into JS memory as base64/Uint8Array causes OOM and bridge
-  // timeouts on large videos.
   if (Platform.OS !== 'web') {
     const FileSystem = await import('expo-file-system/legacy');
     let readableUri = uri;
@@ -416,79 +411,32 @@ export async function uploadVideoBlob(
         throw new Error('영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.');
       }
 
-      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedFileName}`;
       const finishLog = logUploadStart({
-        path: 'native_uploadAsync',
-        url: uploadUrl,
+        path: 'rest_fetch',
+        url: `${supabaseUrl}/storage/v1/object/scans/${encodeStoragePath(fileName)}`,
         mimeType,
         fileSize: info.size,
       });
 
-      // Primary: MULTIPART. The native upload module generates the multipart
-      // boundary internally; setting Content-Type in headers would clobber
-      // that boundary and corrupt the stream. BINARY_CONTENT fallback is for
-      // OEM stacks that mishandle multipart framing.
-      let result: { status: number; body?: string } | null = null;
-      await new Promise<void>((r) => setTimeout(r, 10));
-      try {
-        const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
-          httpMethod: 'POST',
-          headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-          },
-          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-          fieldName: 'file',
-          mimeType,
-          parameters: { upsert: 'false' },
-        });
-        let timer: ReturnType<typeof setTimeout>;
-        const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
-        });
-        const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
-        result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
-        if (result.status >= 400 && result.status !== 409) result = null;
-      } catch {
-        result = null;
+      const base64 = await FileSystem.readAsStringAsync(readableUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      if (!base64) throw new Error('동영상 파일을 읽을 수 없습니다.');
+      const bytes = base64ToUint8Array(base64);
+      if (!bytes || bytes.byteLength <= 0) {
+        throw new Error('동영상 파일이 손상되었습니다.');
       }
 
-      if (!result) {
-        if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-        await new Promise<void>((r) => setTimeout(r, 10));
-        if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-        const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
-          httpMethod: 'POST',
-          headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            'Content-Type': mimeType,
-            'x-upsert': 'false',
-          },
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        });
-        let timer: ReturnType<typeof setTimeout>;
-        const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
-        });
-        const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
-        result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
-      }
-
-      if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
-        const body = result.body ?? '';
-        console.error(`[UPLOAD FAIL] uploadVideoBlob status=${result.status} body=${body}`);
-        finishLog({ error: `HTTP ${result.status}: ${body}` });
-        throw new Error(`동영상 업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
-      }
+      const uploadPromise = uploadBytesToStorage(bytes, 'scans', safeFileName, mimeType, false, signal, VIDEO_UPLOAD_TIMEOUT_MS);
+      await uploadPromise;
 
       finishLog({ status: 200 });
-      const publicUrl = `${supabaseUrl}/storage/v1/object/public/scans/${encodedFileName}`;
-      return publicUrl;
+      return `${supabaseUrl}/storage/v1/object/public/scans/${encodeStoragePath(fileName)}`;
     } finally {
       if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
     }
   }
 
-  // Web fallback: read via fetch and upload through supabase JS SDK
   const resp = await fetch(uri);
   let body: Uint8Array;
   try {
@@ -498,25 +446,17 @@ export async function uploadVideoBlob(
     if (resp.body) resp.body.cancel().catch(() => {});
   }
 
-  const videoUploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedFileName}`;
   const finishLog = logUploadStart({
     path: 'rest_fetch',
-    url: videoUploadUrl,
+    url: `${supabaseUrl}/storage/v1/object/scans/${encodeStoragePath(fileName)}`,
     mimeType,
     fileSize: body.byteLength,
   });
 
-  const uploadPromise = uploadBytesToStorage(body, 'scans', safeFileName, mimeType);
-
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('동영상 업로드 시간이 초과되었습니다.')), VIDEO_UPLOAD_TIMEOUT_MS);
-  });
-  const base = signal ? raceWithAbort(uploadPromise, signal) : uploadPromise;
-  await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
+  await uploadBytesToStorage(body, 'scans', safeFileName, mimeType, false, signal, VIDEO_UPLOAD_TIMEOUT_MS);
 
   finishLog({ status: 200 });
-  return `${supabaseUrl}/storage/v1/object/public/scans/${encodedFileName}`;
+  return `${supabaseUrl}/storage/v1/object/public/scans/${encodeStoragePath(fileName)}`;
 }
 
 export async function extractVideoFrameFromServer(
