@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { SavedAsset } from '@/types/database';
 import { registerTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 import { uploadUriToBucket } from '@/lib/imageEdit';
-import { uint8ArrayToBase64 } from '@/lib/base64';
+import { uint8ArrayToBase64Async } from '@/lib/base64';
 
 const BUCKET = 'assets';
 const MAX_RETRIES = 3;
@@ -52,7 +52,7 @@ export async function uploadAssetBlob(
       } else {
         return null;
       }
-      const b64 = uint8ArrayToBase64(bytes);
+      const b64 = await uint8ArrayToBase64Async(bytes);
       await FileSystem.writeAsStringAsync(tmpPath, b64, {
         encoding: FileSystem.EncodingType.Base64,
       });

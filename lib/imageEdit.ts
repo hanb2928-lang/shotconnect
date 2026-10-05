@@ -2,7 +2,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform, Image as RNImage, AppState, type AppStateStatus } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
-import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
+import { base64ToUint8ArrayAsync, cleanBase64 } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
 import { isLowEndDevice } from '@/lib/devicePerformance';
 import { withFileLock } from '@/lib/fileLock';
@@ -153,8 +153,8 @@ export async function removeBackground(
   }
 }
 
-export function base64ToBlob(base64: string, mimeType: string): Blob | Uint8Array {
-  const bytes = base64ToUint8Array(base64);
+export async function base64ToBlob(base64: string, mimeType: string): Promise<Blob | Uint8Array> {
+  const bytes = await base64ToUint8ArrayAsync(base64);
   if (Platform.OS !== 'web') {
     return bytes;
   }
@@ -261,7 +261,7 @@ export async function compressCaptureFrameToBlob(
       try {
         const { base64: compressedBase64, mimeType: compressedMime } =
           await compressImageToBase64(tmpPath, CAPTURE_MAX_DIMENSION, CAPTURE_QUALITY);
-        const blob = base64ToBlob(compressedBase64, compressedMime);
+        const blob = await base64ToBlob(compressedBase64, compressedMime);
         return { blob, base64: compressedBase64, mimeType: compressedMime };
       } catch {
         // fall through to data-URL path below
@@ -278,10 +278,10 @@ export async function compressCaptureFrameToBlob(
     const compressed = await prepareImageForApi(dataUrl, CAPTURE_MAX_DIMENSION, CAPTURE_QUALITY);
     const compressedMime = compressed.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
     const compressedBase64 = cleanBase64(compressed);
-    const blob = base64ToBlob(compressedBase64, compressedMime);
+    const blob = await base64ToBlob(compressedBase64, compressedMime);
     return { blob, base64: compressedBase64, mimeType: compressedMime };
   } catch {
-    const blob = base64ToBlob(base64, mimeType);
+    const blob = await base64ToBlob(base64, mimeType);
     return { blob, base64, mimeType };
   }
 }
@@ -587,7 +587,7 @@ export async function uploadEditedImage(base64: string, mimeType: string): Promi
 
   // Web fallback
   const fileName = `edited-${uniqueSuffix()}.${ext}`;
-  const body = base64ToBlob(compressedBase64, uploadMime);
+  const body = await base64ToBlob(compressedBase64, uploadMime);
   const { uploadBytesToStorage } = await import('@/lib/imageEdit');
   return uploadBytesToStorage(body, 'scans', fileName, uploadMime);
 }
@@ -1045,7 +1045,7 @@ export async function compressCaptureUriToBlob(
   quality = STANDARD_QUALITY,
 ): Promise<{ blob: Blob | Uint8Array; base64: string; mimeType: string }> {
   const { base64, mimeType } = await compressImageToBase64(uri, maxDimension, quality);
-  const blob = base64ToBlob(base64, mimeType);
+  const blob = await base64ToBlob(base64, mimeType);
   return { blob, base64, mimeType };
 }
 

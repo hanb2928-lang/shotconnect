@@ -5,7 +5,7 @@ import { enqueueJob } from '@/lib/jobQueue';
 import { uploadWithRetry, uploadCompressedUri } from '@/lib/analysis';
 import { generateAffiliateLinks } from '@/lib/affiliate';
 import { getUserSettings } from '@/lib/settings';
-import { base64ToUint8Array } from '@/lib/base64';
+import { base64ToUint8ArrayAsync } from '@/lib/base64';
 import { hashImage, hashMultiAngle } from '@/lib/contentHash';
 import { TTS_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
@@ -385,7 +385,7 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
       const { uploadBytesToStorage } = await import('@/lib/imageEdit');
       let audioBytes: Uint8Array;
       try {
-        audioBytes = base64ToUint8Array(data.audioBase64!);
+        audioBytes = await base64ToUint8ArrayAsync(data.audioBase64!);
       } catch {
         throw new Error('TTS 오디오 데이터를 디코딩하지 못했습니다');
       }

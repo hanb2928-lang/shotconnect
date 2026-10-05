@@ -161,7 +161,7 @@ export async function uploadImage(
   }
 
   // Web: upload raw bytes directly via fetch to Supabase Storage REST API
-  const uploadBlob = base64ToBlob(compressedBase64, uploadMime);
+  const uploadBlob = await base64ToBlob(compressedBase64, uploadMime);
   const uploadSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   compressedBase64 = '';
 
@@ -210,7 +210,7 @@ export async function uploadImageBlob(
       }
       const compressedBase64 = cleanBase64(compressed);
       const compressedMime = compressed.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
-      uploadBlob = base64ToBlob(compressedBase64, compressedMime);
+      uploadBlob = await base64ToBlob(compressedBase64, compressedMime);
       uploadMime = compressedMime;
     } catch {
       // If re-compression fails, proceed with the original blob

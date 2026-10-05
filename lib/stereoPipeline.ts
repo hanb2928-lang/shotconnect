@@ -62,7 +62,7 @@ async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortS
     throw new Error('이미지가 너무 커서 업로드할 수 없습니다. 더 낮은 해상도로 다시 촬영해주세요.');
   }
   let lastErr: unknown = null;
-  const blob = base64ToBlob(base64, mimeType);
+  const blob = await base64ToBlob(base64, mimeType);
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
     if (isUploadCircuitOpen()) {
