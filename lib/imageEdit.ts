@@ -1173,6 +1173,10 @@ export async function uploadUriToBucket(
     const info = await FileSystem.getInfoAsync(uploadUri);
     if (info.exists) fileSize = info.size;
   } catch { /* best-effort */ }
+  if (!fileSize || fileSize <= 0) {
+    if (copiedPath) await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
+    throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
+  }
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${supabaseAnonKey}`,
@@ -1180,6 +1184,9 @@ export async function uploadUriToBucket(
   };
 
   const doUpload = async (): Promise<{ status: number; body?: string }> => {
+    // Hermes GC tick: yield so the engine can reclaim buffers from prior
+    // compression/copy steps before the native upload socket opens.
+    await new Promise<void>((r) => setTimeout(r, 10));
     let result: { status: number; body?: string } | null = null;
     try {
       result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
@@ -1366,7 +1373,23 @@ export async function uploadFileDirectNative(
     console.warn(`[uploadFileDirectNative] MIME mismatch: caller=${mimeType} detected=${detectedMime} — using detected`);
   }
 
+  // Zero-byte guard: reject empty/corrupt files before they reach the
+  // native socket, preventing phantom uploads and misleading 400 errors.
+  let preUploadSize: number | undefined;
+  try {
+    const info = await FileSystem.getInfoAsync(uploadUri);
+    preUploadSize = info.exists ? info.size : undefined;
+  } catch { /* best-effort */ }
+  if (preUploadSize === undefined || preUploadSize <= 0) {
+    if (copiedPath) await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
+    throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
+  }
+
   const doUpload = async (): Promise<{ status: number; body?: string }> => {
+    // Hermes GC tick: yield to the event loop so the JS engine can collect
+    // any intermediate ArrayBuffer/base64 from compression before the
+    // native socket opens. Prevents memory spikes and socket deadlocks.
+    await new Promise<void>((r) => setTimeout(r, 10));
     let result: { status: number; body?: string } | null = null;
     try {
       result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
@@ -1482,6 +1505,17 @@ export async function uploadBytesToStorage(
   };
 
   const fetchBody: BodyInit = body instanceof Blob ? body : new Blob([body as BlobPart], { type: mimeType });
+
+  // Zero-byte guard for web uploads: reject empty payloads before network.
+  const bodySize = body instanceof Blob ? body.size : body.byteLength;
+  if (!bodySize || bodySize <= 0) {
+    throw new Error('업로드할 데이터의 크기가 0바이트입니다.');
+  }
+
+  // Hermes GC tick: yield to the event loop so the JS engine can collect
+  // any intermediate ArrayBuffer/base64 from compression before the
+  // native socket opens. Prevents memory spikes and socket deadlocks.
+  await new Promise<void>((r) => setTimeout(r, 10));
 
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
