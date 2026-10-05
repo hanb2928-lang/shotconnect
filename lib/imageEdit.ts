@@ -1201,9 +1201,22 @@ export async function uploadUriToBucket(
     }
 
     if (!result) {
+      // Fallback isolation: deep-copy headers so the native module cannot
+      // mutate the shared reference from the first attempt. Yield to let the
+      // previous file handle fully release before re-opening.
+      await new Promise<void>((r) => setTimeout(r, 10));
+      try {
+        const info = await FileSystem.getInfoAsync(uploadUri);
+        if (!info.exists || (info.size !== undefined && info.size <= 0)) {
+          throw new Error('폴백 진입 시 파일이 손상되었습니다.');
+        }
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        throw new Error(`업로드 실패 (파일 검증 오류): ${errMsg}`);
+      }
       result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
         httpMethod: 'POST',
-        headers,
+        headers: { ...headers },
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'file',
         mimeType,
@@ -1408,11 +1421,25 @@ export async function uploadFileDirectNative(
     }
 
     if (!result) {
+      // Fallback isolation: rebuild headers from scratch so no state from
+      // the failed BINARY_CONTENT attempt leaks into the MULTIPART request.
+      // Yield to let the native file handle fully release before re-opening.
+      await new Promise<void>((r) => setTimeout(r, 10));
+      try {
+        const info = await FileSystem.getInfoAsync(uploadUri);
+        if (!info.exists || (info.size !== undefined && info.size <= 0)) {
+          throw new Error('폴백 진입 시 파일이 손상되었습니다.');
+        }
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        throw new Error(`네이티브 업로드 실패 (파일 검증 오류): ${errMsg}`);
+      }
       try {
         result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
           httpMethod: 'POST',
           headers: {
             Authorization: `Bearer ${supabaseAnonKey}`,
+            'x-upsert': 'true',
           },
           uploadType: FileSystem.FileSystemUploadType.MULTIPART,
           fieldName: 'file',
