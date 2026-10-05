@@ -1340,22 +1340,33 @@ export async function uploadFileDirectNative(
   try {
     const { uri: uploadUri, cleanedUp } = await compressImageUriIfNeeded(readableUri, mimeType);
     if (cleanedUp) compressedCleanupUri = cleanedUp;
-    const base64 = await FileSystem.readAsStringAsync(uploadUri, {
-      encoding: FileSystem.EncodingType.Base64,
+
+    const safePath = encodeStoragePath(path);
+    const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
+    const effectiveMime = mimeType.toLowerCase().trim();
+
+    const uploadResult = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+      httpMethod: 'POST',
+      headers: {
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        'Content-Type': effectiveMime,
+        'x-upsert': 'true',
+        'Cache-Control': '360000',
+      },
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     });
-    if (!base64) throw new Error('업로드할 파일을 읽을 수 없습니다.');
-    const bytes = base64ToUint8Array(base64);
-    if (!bytes || bytes.byteLength <= 0) {
-      throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
+
+    if (uploadResult.status < 200 || uploadResult.status >= 300) {
+      const bodyText = typeof uploadResult.body === 'string' ? uploadResult.body : '';
+      const err = new Error(`Upload failed (${uploadResult.status}): ${bodyText}`);
+      logError(err, { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path, status: uploadResult.status, body: bodyText } });
+      throw err;
     }
-    const detectedMime = detectMimeFromBytes(bytes);
-    const effectiveMime = (detectedMime ?? mimeType).toLowerCase().trim();
-    if (detectedMime && detectedMime !== mimeType) {
-      console.warn(`[uploadFileDirectNative] MIME mismatch: caller=${mimeType} detected=${detectedMime} — using detected`);
-    }
-    return await uploadBytesToStorage(bytes, bucket, path, effectiveMime, true, signal);
+
+    return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
     const errMsg = err instanceof Error ? err.message : String(err);
     logError(new Error(`uploadFileDirectNative: ${errMsg}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path, error: errMsg } });
     throw err;
@@ -1437,22 +1448,30 @@ export async function uploadBytesToStorage(
   // native socket opens. Prevents memory spikes and socket deadlocks.
   await new Promise<void>((r) => setTimeout(r, 10));
 
+  const controller = new AbortController();
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, controller.signal])
+    : controller.signal;
+
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.')),
-      timeoutMs,
-    );
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.'));
+    }, timeoutMs);
   });
 
   let resp: Response;
   try {
     resp = await Promise.race([
-      fetch(uploadUrl, { method: 'POST', headers, body: fetchBody, signal }),
+      fetch(uploadUrl, { method: 'POST', headers, body: fetchBody, signal: combinedSignal }),
       timeout,
     ]).finally(() => clearTimeout(timer!));
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      if (signal?.aborted) throw err;
+      throw new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');
+    }
     logError(err, { component: 'imageEdit', action: 'uploadBytesToStorage' });
     throw err;
   }

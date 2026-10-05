@@ -51,14 +51,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 function withUploadTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  const controller = new AbortController();
+  const linkedSignal = signal
+    ? AbortSignal.any([signal, controller.signal])
+    : controller.signal;
+
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      if (signal) { try { signal.dispatchEvent(new Event('abort')); } catch { /* ignore */ } }
+      controller.abort();
       reject(new Error('이미지 업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.'));
     }, UPLOAD_TIMEOUT_MS);
   });
-  const base = signal ? raceWithAbort(promise, signal) : promise;
+
+  const base = raceWithAbort(promise, linkedSignal);
   return Promise.race([base, timeout]).finally(() => clearTimeout(timer));
 }
 
