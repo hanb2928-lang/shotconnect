@@ -1205,8 +1205,11 @@ export async function uploadUriToBucket(
       await waitForUriFlush(copiedPath);
       await waitForFileChannelFlush();
       uploadUri = copiedPath;
-    } catch {
+    } catch (copyErr) {
       copiedPath = null;
+      if (fileUri.startsWith('content://')) {
+        throw new Error(`content:// URI를 업로드 가능한 경로로 복사하지 못했습니다: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`);
+      }
     }
   }
 
@@ -1442,8 +1445,11 @@ export async function uploadFileDirectNative(
       );
       await waitForFileChannelFlush();
       uploadUri = copiedPath;
-    } catch {
+    } catch (copyErr) {
       copiedPath = null;
+      if (fileUri.startsWith('content://')) {
+        throw new Error(`content:// URI를 업로드 가능한 경로로 복사하지 못했습니다: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`);
+      }
     }
   }
 
