@@ -637,7 +637,11 @@ export function PostCaptureWorkflow({
 
           // Native: upload file URI directly via FileSystem.uploadAsync,
           // bypassing JS bridge — no Blob/Uint8Array in JS memory.
-          if (Platform.OS !== 'web' && finalUri.startsWith('file://')) {
+          // Covers both file:// and content:// URIs — reading a video file
+          // as base64 into JS memory (uriToBlob path) hangs the JS thread
+          // for 10+ seconds on large files, so we always prefer the native
+          // streaming path on mobile.
+          if (Platform.OS !== 'web' && (finalUri.startsWith('file://') || finalUri.startsWith('content://'))) {
             cloudSuccess = await uploadFileUriNative(finalUri, fileName, contentType);
           } else {
             const { data: uploadBody, mimeType: detectedMimeType } = await uriToBlob(finalUri);
