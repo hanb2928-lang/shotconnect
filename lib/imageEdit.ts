@@ -15,6 +15,18 @@ import { logError } from '@/lib/errorLogger';
 
 let __globalUploadAttemptCount = 0;
 
+async function getStorageHeaders(contentType?: string, upsert?: boolean): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token || supabaseAnonKey;
+  return {
+    Authorization: `Bearer ${token}`,
+    apikey: supabaseAnonKey,
+    ...(contentType ? { 'Content-Type': contentType } : {}),
+    ...(upsert !== undefined ? { 'x-upsert': upsert ? 'true' : 'false' } : {}),
+    'Cache-Control': '360000',
+  };
+}
+
 function isAbortError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'name' in error && (error as { name?: unknown }).name === 'AbortError';
 }
@@ -1255,12 +1267,7 @@ async function uploadUriToBucketImpl(
 
     const uploadPromise = FileSystem.uploadAsync(uploadUrl, uploadUri, {
       httpMethod: 'POST',
-      headers: {
-        Authorization: `Bearer ${supabaseAnonKey}`,
-        'Content-Type': effectiveMime,
-        'x-upsert': upsert ? 'true' : 'false',
-        'Cache-Control': '360000',
-      },
+      headers: await getStorageHeaders(effectiveMime, upsert),
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     });
 
@@ -1468,12 +1475,7 @@ async function uploadFileDirectNativeImpl(
     // caller is unblocked and the result is discarded.
     const uploadPromise = FileSystem.uploadAsync(uploadUrl, uploadUri, {
       httpMethod: 'POST',
-      headers: {
-        Authorization: `Bearer ${supabaseAnonKey}`,
-        'Content-Type': effectiveMime,
-        'x-upsert': 'true',
-        'Cache-Control': '360000',
-      },
+      headers: await getStorageHeaders(effectiveMime, true),
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     });
 
@@ -1519,10 +1521,7 @@ export async function deleteStorageObjects(bucket: string, paths: string[]): Pro
   const deleteUrl = `${supabaseUrl}/storage/v1/object/${bucket}`;
   const resp = await fetch(deleteUrl, {
     method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${supabaseAnonKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: await getStorageHeaders('application/json'),
     body: JSON.stringify({ prefixes: paths }),
   });
   if (!resp.ok) {
@@ -1563,12 +1562,7 @@ async function uploadBytesToStorageImpl(
   const safePath = encodeStoragePath(path);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
   const normalizedMime = mimeType.toLowerCase().trim();
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${supabaseAnonKey}`,
-    'Content-Type': normalizedMime,
-    'x-upsert': upsert ? 'true' : 'false',
-    'Cache-Control': '360000',
-  };
+  const headers = await getStorageHeaders(normalizedMime, upsert);
 
   // On React Native native, the Blob constructor is unreliable — it can
   // mangle binary data or produce a text payload that Supabase Storage
