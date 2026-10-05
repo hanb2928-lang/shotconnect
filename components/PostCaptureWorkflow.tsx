@@ -184,6 +184,7 @@ export function PostCaptureWorkflow({
       setUploadStatusMsg(null);
       setGallerySaved(false);
       setMediaError(null);
+      proceedLockRef.current = false;
     }
     prevVisibleRef.current = visible;
   }, [visible]);
@@ -448,11 +449,11 @@ export function PostCaptureWorkflow({
       const ext = readableUri.split('.').pop()?.toLowerCase() ?? 'jpg';
       const isVideo = ext === 'mp4' || ext === 'mov';
       const isHeic = ext === 'heic' || ext === 'heif';
-      const MAX_NATIVE_READ_BYTES = isVideo ? 30_000_000 : 12_000_000;
+      const MAX_NATIVE_READ_BYTES = isVideo ? 200_000_000 : 12_000_000;
       if (fileInfo.size > MAX_NATIVE_READ_BYTES) {
         if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
         throw new Error(isVideo
-          ? '영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.'
+          ? '영상 파일이 너무 큽니다. 200MB 이하의 영상으로 다시 선택해주세요.'
           : '이미지가 너무 큽니다. 더 낮은 해상도로 다시 촬영해주세요.');
       }
       const mimeType = isVideo
@@ -568,10 +569,18 @@ export function PostCaptureWorkflow({
           const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
           await new Promise((r) => setTimeout(r, delayMs));
         }
-        const uploadPromise = uploadUriToBucket(fileUri, contentType, 'videos', fileName, false, getUploadSignal());
+        const controller = new AbortController();
+        const externalSignal = getUploadSignal();
+        const linkedSignal = externalSignal
+          ? AbortSignal.any([externalSignal, controller.signal])
+          : controller.signal;
+        const uploadPromise = uploadUriToBucket(fileUri, contentType, 'videos', fileName, false, linkedSignal);
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('업로드 시간이 초과되었습니다.')), UPLOAD_TIMEOUT_MS);
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error('업로드 시간이 초과되었습니다.'));
+          }, UPLOAD_TIMEOUT_MS);
         });
         await Promise.race([uploadPromise, timeout]).finally(() => clearTimeout(timer!));
         if (mountedRef.current) setUploadRetrying(false);
@@ -633,7 +642,6 @@ export function PostCaptureWorkflow({
             }
           }
           const isImage = !!imageUri && !videoUri;
-          const contentType: string = isImage ? 'image/jpeg' : 'video/mp4';
 
           // Native: upload file URI directly via FileSystem.uploadAsync,
           // bypassing JS bridge — no Blob/Uint8Array in JS memory.
@@ -642,19 +650,27 @@ export function PostCaptureWorkflow({
           // for 10+ seconds on large files, so we always prefer the native
           // streaming path on mobile.
           if (Platform.OS !== 'web' && (finalUri.startsWith('file://') || finalUri.startsWith('content://'))) {
-            const ext = contentType === 'image/png' ? 'png'
-              : contentType === 'image/webp' ? 'webp'
-              : contentType === 'image/heic' ? 'heic'
-              : contentType === 'video/quicktime' ? 'mov'
+            // Derive MIME type and extension from the URI to avoid
+            // sending video/mp4 headers for a .mov or .webm file.
+            const uriLower = finalUri.toLowerCase();
+            const nativeContentType: string = isImage ? 'image/jpeg'
+              : uriLower.includes('.mov') ? 'video/quicktime'
+              : uriLower.includes('.webm') ? 'video/webm'
+              : uriLower.includes('.avi') ? 'video/x-msvideo'
+              : uriLower.includes('.m4v') ? 'video/x-m4v'
+              : 'video/mp4';
+            const nativeExt = nativeContentType === 'video/quicktime' ? 'mov'
+              : nativeContentType === 'video/webm' ? 'webm'
               : isImage ? 'jpg' : 'mp4';
-            const fileName = `shortform-${Date.now()}.${ext}`;
+            const fileName = `shortform-${Date.now()}.${nativeExt}`;
             if (mountedRef.current) setUploadStatusMsg('파일 업로드 중...');
-            cloudSuccess = await uploadFileUriNative(finalUri, fileName, contentType);
+            cloudSuccess = await uploadFileUriNative(finalUri, fileName, nativeContentType);
           } else {
             if (mountedRef.current) setUploadStatusMsg('파일 준비 중...');
             const { data: uploadBody, mimeType: detectedMimeType } = await uriToBlob(finalUri);
             if (mountedRef.current) setUploadStatusMsg('업로드 중...');
-            const actualContentType = detectedMimeType || contentType;
+            const fallbackContentType: string = isImage ? 'image/jpeg' : 'video/mp4';
+            const actualContentType = detectedMimeType || fallbackContentType;
             const actualExt = actualContentType === 'image/png' ? 'png'
               : actualContentType === 'image/webp' ? 'webp'
               : actualContentType === 'image/heic' ? 'heic'

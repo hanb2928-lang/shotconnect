@@ -925,7 +925,12 @@ export async function extractVideoFrameBase64(
     const { uploadVideoBlob, extractVideoFrameFromServer } = await import('@/lib/analysis');
     const source = await makeReadableNativeUri(videoUri);
     try {
-      const videoUrl = await uploadVideoBlob(source.uri, 'video/mp4');
+      const uriLower = videoUri.toLowerCase();
+      const videoMime = uriLower.includes('.mov') ? 'video/quicktime'
+        : uriLower.includes('.webm') ? 'video/webm'
+        : uriLower.includes('.m4v') ? 'video/x-m4v'
+        : 'video/mp4';
+      const videoUrl = await uploadVideoBlob(source.uri, videoMime);
       const result = await extractVideoFrameFromServer(videoUrl, maxDimension, quality);
       if (result.frameUrl) {
         const FileSystem2 = await import('expo-file-system/legacy');
@@ -1193,6 +1198,18 @@ export async function uploadUriToBucket(
     const { uri: uploadUri, cleanedUp } = await compressImageUriIfNeeded(readableUri, mimeType);
     if (cleanedUp) compressedCleanupUri = cleanedUp;
 
+    // Verify the file exists and has content before attempting upload.
+    // A failed content:// copy can produce a 0-byte file that uploads
+    // "successfully" but is corrupt and unusable downstream.
+    let preUploadSize: number | undefined;
+    try {
+      const info = await FileSystem.getInfoAsync(uploadUri);
+      preUploadSize = info.exists ? info.size : undefined;
+    } catch { /* best-effort */ }
+    if (preUploadSize === undefined || preUploadSize <= 0) {
+      throw new Error(`업로드할 파일이 존재하지 않거나 크기가 0바이트입니다. (경로: ${uploadUri})`);
+    }
+
     const safePath = encodeStoragePath(fileName);
     const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
     const effectiveMime = mimeType.toLowerCase().trim();
@@ -1346,6 +1363,10 @@ async function normalizeUriForRead(fileUri: string, label: string): Promise<stri
     );
     await waitForUriFlush(target);
     await waitForFileChannelFlush();
+    const info = await FileSystem.getInfoAsync(target);
+    if (!info.exists || info.size <= 0) {
+      throw new Error('파일 복사 후 크기가 0바이트입니다. 원본 파일에 접근할 수 없습니다.');
+    }
     return target;
   } catch (copyErr) {
     throw new Error(`파일을 업로드 가능한 경로로 복사하지 못했습니다: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`);
@@ -1375,6 +1396,16 @@ export async function uploadFileDirectNative(
   try {
     const { uri: uploadUri, cleanedUp } = await compressImageUriIfNeeded(readableUri, mimeType);
     if (cleanedUp) compressedCleanupUri = cleanedUp;
+
+    // Verify the file exists and has content before attempting upload.
+    let preUploadSize: number | undefined;
+    try {
+      const info = await FileSystem.getInfoAsync(uploadUri);
+      preUploadSize = info.exists ? info.size : undefined;
+    } catch { /* best-effort */ }
+    if (preUploadSize === undefined || preUploadSize <= 0) {
+      throw new Error(`업로드할 파일이 존재하지 않거나 크기가 0바이트입니다. (경로: ${uploadUri})`);
+    }
 
     const safePath = encodeStoragePath(path);
     const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;

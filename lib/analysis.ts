@@ -404,7 +404,7 @@ export async function uploadVideoBlob(
     if (uri.startsWith('content://')) {
       const upDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
       if (!upDir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
-      tempCopy = `${upDir}video-upload-${uniqueSuffix()}.mp4`;
+      tempCopy = `${upDir}video-upload-${uniqueSuffix()}.${ext}`;
       const COPY_TIMEOUT_MS = 60_000;
       let copyTimer: ReturnType<typeof setTimeout>;
       const copyTimeout = new Promise<never>((_, reject) => {
@@ -421,8 +421,8 @@ export async function uploadVideoBlob(
       if (!info.exists || info.size <= 0) {
         throw new Error('동영상 파일을 찾을 수 없습니다.');
       }
-      if (info.size > 30_000_000) {
-        throw new Error('영상 파일이 너무 큽니다. 30MB 이하의 짧은 영상으로 다시 촬영해주세요.');
+      if (info.size > 200_000_000) {
+        throw new Error('영상 파일이 너무 큽니다. 200MB 이하의 영상으로 다시 선택해주세요.');
       }
 
       const finishLog = logUploadStart({
