@@ -391,7 +391,6 @@ function CameraScreenInner() {
     cameraReadyRef.current = false;
     setIsActive(false);
     cameraRef.current = null;
-    setCameraSessionKey(Date.now());
   }, []);
 
   const scheduleCameraReactivation = useCallback(() => {
@@ -823,11 +822,11 @@ function CameraScreenInner() {
     try {
       stereoMod = await getStereoMod();
     } catch (err) {
-      if (!isMountedRef.current) return;
       stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
       if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
       releasePipelineLock();
+      if (!isMountedRef.current) return;
+      setStereoOverlayVisible(false);
       setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
       return;
     }
@@ -846,11 +845,11 @@ function CameraScreenInner() {
       scanId = result.scanId;
       uploadedUrls = result.uploadedUrls;
     } catch (err) {
-      if (!isMountedRef.current) return;
       stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
       if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
       releasePipelineLock();
+      if (!isMountedRef.current) return;
+      setStereoOverlayVisible(false);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
@@ -1199,11 +1198,11 @@ function CameraScreenInner() {
     try {
       stereoMod = await getStereoMod();
     } catch (err) {
-      if (!isMountedRef.current) return;
       stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
       if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
       releasePipelineLock();
+      if (!isMountedRef.current) return;
+      setStereoOverlayVisible(false);
       setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
       return;
     }
@@ -1221,11 +1220,11 @@ function CameraScreenInner() {
       const result = await stereoMod.createScanFromAngleShots(sorted, controller.signal);
       scanId = result.scanId;
     } catch (err) {
-      if (!isMountedRef.current) return;
       stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
       if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
       releasePipelineLock();
+      if (!isMountedRef.current) return;
+      setStereoOverlayVisible(false);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
