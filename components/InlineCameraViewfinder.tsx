@@ -207,7 +207,21 @@ export const InlineCameraViewfinder = forwardRef<
   useEffect(() => {
     return () => {
       mountedRef.current = false;
-      if (Platform.OS === 'web') stopStream();
+      if (safetyNetTimerRef.current) {
+        clearTimeout(safetyNetTimerRef.current);
+        safetyNetTimerRef.current = null;
+      }
+      if (Platform.OS === 'web') {
+        stopStream();
+      } else {
+        setNativeCameraActive(false);
+        setCameraReady(false);
+        setCameraKey((k) => k + 1);
+        nativeCameraRef.current = null;
+      }
+      captureInProgressRef.current = false;
+      captureLockRef.current = false;
+      captureQueueRef.current = Promise.resolve();
     };
   }, [stopStream]);
 

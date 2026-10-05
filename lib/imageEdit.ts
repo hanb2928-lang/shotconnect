@@ -1308,21 +1308,28 @@ export async function uploadFileDirectNative(
         },
       });
       if (result.status >= 400 && result.status !== 409) result = null;
-    } catch {
+    } catch (err) {
+      console.warn('[uploadFileDirectNative] BINARY_CONTENT failed:', err);
       result = null;
     }
 
     if (!result) {
-      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
-        httpMethod: 'POST',
-        headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType,
-        parameters: { upsert: 'true' },
-      });
+      try {
+        result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+          httpMethod: 'POST',
+          headers: {
+            Authorization: `Bearer ${supabaseAnonKey}`,
+          },
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName: 'file',
+          mimeType,
+          parameters: { upsert: 'true' },
+        });
+      } catch (err) {
+        console.error('[uploadFileDirectNative] MULTIPART fallback failed:', err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        throw new Error(`네이티브 업로드 실패 (경로: ${safePath}): ${errMsg}`);
+      }
     }
     return result;
   };
@@ -1346,7 +1353,10 @@ export async function uploadFileDirectNative(
 
   if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
     const body = result.body ?? '';
-    console.error(`[UPLOAD FAIL] uploadFileDirectNative status=${result.status} body=${body}`);
+    console.error(`[UPLOAD FAIL] uploadFileDirectNative status=${result.status} path=${safePath} body=${body}`);
+    if (result.status === 400) {
+      throw new Error(`업로드 실패 [400] — 경로 인코딩 오류 (path: ${safePath}): ${body || '잘못된 요청'}`);
+    }
     throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
   }
 
