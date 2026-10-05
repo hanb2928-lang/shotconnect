@@ -345,7 +345,9 @@ export const InlineCameraViewfinder = forwardRef<
           await withFileSettle('deleteCapturedUriErr', () =>
             FileSystem.deleteAsync(errUri, { idempotent: true }),
           ).catch(() => {});
+          unregisterTempFile(errUri);
           await waitForFileChannelFlush();
+          capturedUri = null;
         }
         // Remount the camera session only on actual failure.
         setCameraKey((k) => k + 1);

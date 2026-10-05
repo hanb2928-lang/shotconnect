@@ -13,7 +13,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-import { compressDataUrlToMaxBytes, uploadUriToBucket } from '@/lib/imageEdit';
+import { compressDataUrlToMaxBytes, uploadUriToBucket, waitForUriFlush } from '@/lib/imageEdit';
+import { waitForFileChannelFlush } from '@/lib/smartResize';
 import { analyzeAndDownscaleImage, cleanupSmartResizeTemp } from '@/lib/smartResize';
 import { cleanBase64 } from '@/lib/base64';
 import { registerTempFile, unpinTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
@@ -167,6 +168,10 @@ async function uploadImageToStorage(uri: string): Promise<string> {
         [{ resize: { width: dimSteps[pass] } }],
         { compress: qualitySteps[pass], format: ImageManipulator.SaveFormat.JPEG },
       );
+      if (Platform.OS !== 'web') {
+        await waitForUriFlush(manipulated.uri);
+        await waitForFileChannelFlush();
+      }
       if (prevCompressedUri && prevCompressedUri !== uri && Platform.OS !== 'web' && !prevCompressedUri.startsWith('data:')) {
         unpinTempFile(prevCompressedUri);
         await safeDeleteTempFile(prevCompressedUri).catch(() => {});

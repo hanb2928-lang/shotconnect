@@ -346,6 +346,12 @@ async function cropOnNative(
     compress: 0.85,
     format: ImageManipulator.SaveFormat.JPEG,
   });
+  if (Platform.OS !== 'web') {
+    const { waitForUriFlush } = await import('@/lib/imageEdit');
+    const { waitForFileChannelFlush } = await import('@/lib/smartResize');
+    await waitForUriFlush(result.uri);
+    await waitForFileChannelFlush();
+  }
 
   const base64 = await FileSystem.readAsStringAsync(result.uri, {
     encoding: FileSystem.EncodingType.Base64,

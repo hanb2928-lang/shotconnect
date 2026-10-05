@@ -908,6 +908,7 @@ function CameraScreenInner() {
     setCameraMode('picture');
     if (bufferReleaseTimerRef.current) clearTimeout(bufferReleaseTimerRef.current);
     bufferReleasedRef.current = false;
+    let registeredTempDest: string | null = null;
     try {
       const attemptCapture = async () => {
         await new Promise((r) => setTimeout(r, 150));
@@ -985,6 +986,7 @@ function CameraScreenInner() {
           await fs.copyAsync({ from: capturedUri, to: dest });
           await fs.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
           registerTempFile(dest, 'multiAngleCapture');
+          registeredTempDest = dest;
           safeUri = dest;
         }
       } catch { /* if copy fails, proceed with original URI */ }
@@ -1018,6 +1020,10 @@ function CameraScreenInner() {
       return { base64, mimeType, ...(compressedUri ? { uri: compressedUri } : {}) };
     } catch (err) {
       logError(err, { component: 'CameraScreen', action: 'handleMultiAngleCapture' });
+      if (registeredTempDest) {
+        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {});
+        unregisterTempFile(registeredTempDest);
+      }
       multiAngleCaptureInProgressRef.current = false;
       return null;
     } finally {
@@ -1039,6 +1045,7 @@ function CameraScreenInner() {
         return null;
       }
     }
+    let registeredTempDest: string | null = null;
     try {
       const ImagePicker = await getImagePicker();
       const result = await withTimeout(
@@ -1065,6 +1072,7 @@ function CameraScreenInner() {
           const dest = `${docDir}pick-${uniqueSuffix()}.jpg`;
           await fs.copyAsync({ from: assetUri, to: dest });
           registerTempFile(dest, 'multiAnglePick');
+          registeredTempDest = dest;
           safeUri = dest;
         }
       } catch { /* if copy fails, proceed with original URI */ }
@@ -1083,6 +1091,10 @@ function CameraScreenInner() {
       if (!isMountedRef.current) return null;
       return { base64, mimeType, ...(compressedUri ? { uri: compressedUri } : {}) };
     } catch {
+      if (registeredTempDest) {
+        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {});
+        unregisterTempFile(registeredTempDest);
+      }
       return null;
     }
   };

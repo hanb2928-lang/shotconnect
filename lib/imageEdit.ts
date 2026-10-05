@@ -48,11 +48,19 @@ export function encodeStoragePath(path: string): string {
 
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
+  if (Platform.OS !== 'web') {
+    await waitForUriFlush(result.uri);
+    await waitForFileChannelFlush();
+  }
   return result.uri;
 }
 
 export async function flipImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ flip: ImageManipulator.FlipType.Horizontal }]);
+  if (Platform.OS !== 'web') {
+    await waitForUriFlush(result.uri);
+    await waitForFileChannelFlush();
+  }
   return result.uri;
 }
 
@@ -70,6 +78,10 @@ export async function cropImage(
       },
     },
   ]);
+  if (Platform.OS !== 'web') {
+    await waitForUriFlush(result.uri);
+    await waitForFileChannelFlush();
+  }
   return result.uri;
 }
 
@@ -155,6 +167,10 @@ export async function compressImage(uri: string, maxWidth = 720, quality = 0.8):
     [{ resize: { width: maxWidth } }],
     { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
   );
+  if (Platform.OS !== 'web') {
+    await waitForUriFlush(result.uri);
+    await waitForFileChannelFlush();
+  }
   return result.uri;
 }
 
@@ -499,6 +515,8 @@ export async function compressImageToBase64(
         NATIVE_READ_TIMEOUT_MS,
         '이미지 변환',
       );
+      await waitForUriFlush(manipulated.uri);
+      await waitForFileChannelFlush();
       registerTempFile(manipulated.uri, 'compressImageToBase64', { pin: true });
       return await withFileLock(manipulated.uri, async () => {
         const fileInfo = await withTimeout(
@@ -751,6 +769,8 @@ export async function prepareImageForApi(
         { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
       ),
     );
+    await waitForUriFlush(manipulated.uri);
+    await waitForFileChannelFlush();
 
     registerTempFile(manipulated.uri, 'prepareImageForApi-native', { pin: true });
     return await withFileLock(manipulated.uri, async () => {
@@ -813,6 +833,8 @@ export async function prepareImageForEdit(
         { compress: 1, format: ImageManipulator.SaveFormat.PNG },
       ),
     );
+    await waitForUriFlush(manipulated.uri);
+    await waitForFileChannelFlush();
 
     registerTempFile(manipulated.uri, 'prepareImageForEdit-native', { pin: true });
     return await withFileLock(manipulated.uri, async () => {
@@ -1028,10 +1050,21 @@ export async function compressCaptureUriToBlob(
 }
 
 export async function waitForUriFlush(uri: string): Promise<boolean> {
+  let lastSize = -1;
+  let stableCount = 0;
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const info = await FileSystem.getInfoAsync(uri);
-      if (info.exists && (info.size === undefined || info.size > 0)) return true;
+      if (info.exists && (info.size === undefined || info.size > 0)) {
+        if (info.size === undefined) return true;
+        if (info.size === lastSize && info.size > 0) {
+          stableCount += 1;
+          if (stableCount >= 2) return true;
+        } else {
+          stableCount = 0;
+          lastSize = info.size;
+        }
+      }
     } catch {
       // The camera may still be committing the file on Android.
     }
@@ -1095,6 +1128,7 @@ export async function compressUriToUri(
       await withFileSettle('compressUriToUri-copy', () =>
         FileSystem.copyAsync({ from: manipulated.uri, to: dest }),
       );
+      await waitForUriFlush(dest);
       await waitForFileChannelFlush();
       await withFileSettle('compressUriToUri-deleteManip', () =>
         FileSystem.deleteAsync(manipulated.uri, { idempotent: true }),
@@ -1168,6 +1202,7 @@ export async function uploadUriToBucket(
       await withFileSettle('uploadUriToBucket-copy', () =>
         FileSystem.copyAsync({ from: fileUri, to: copiedPath! }),
       );
+      await waitForUriFlush(copiedPath);
       await waitForFileChannelFlush();
       uploadUri = copiedPath;
     } catch {
@@ -1298,6 +1333,9 @@ export async function uploadUriToSupabase(
   fileUri: string,
   mimeType: string,
 ): Promise<string> {
+  if (Platform.OS === 'web') {
+    throw new Error('uploadUriToSupabase is not supported on web — use uploadBytesToStorage instead');
+  }
   const ext = mimeType === 'image/png' ? 'png'
     : mimeType === 'image/webp' ? 'webp'
     : mimeType === 'image/heic' ? 'heic'
@@ -1325,6 +1363,7 @@ const MAGIC_NUMBER_SIGNATURES: { mime: string; bytes: number[] }[] = [
 ];
 
 async function detectMimeFromMagicNumber(uri: string): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
   try {
     const headerBase64 = await FileSystem.readAsStringAsync(uri, {
       encoding: FileSystem.EncodingType.Base64,

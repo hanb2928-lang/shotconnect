@@ -104,7 +104,6 @@ export function MultiAngleCaptureGuide({
       viewfinderRef.current?.release();
       viewfinderRef.current = null;
       shotsRef.current = {};
-      setShots({});
     };
   }, []);
 
@@ -129,6 +128,7 @@ export function MultiAngleCaptureGuide({
 
   const handleAddShot = useCallback(
     async (angleId: string, base64: string, mimeType: string, uri?: string) => {
+      if (!mountedRef.current) return;
       if (maxReached) return;
       const guideIndex = guides.findIndex((g) => g.id === angleId);
       const guide = guides[guideIndex];
@@ -221,10 +221,11 @@ export function MultiAngleCaptureGuide({
         if (!result && onCaptureImage) {
           result = await onCaptureImage(angleId);
         }
+        if (!mountedRef.current) return;
         if (result?.base64) {
           await handleAddShot(angleId, result.base64, result.mimeType, result.uri);
         } else {
-          if (mountedRef.current) setCaptureError('카메라 캡처에 실패했습니다. 다시 촬영해 주세요.');
+          setCaptureError('카메라 캡처에 실패했습니다. 다시 촬영해 주세요.');
         }
       } catch (err) {
         if (mountedRef.current) setCaptureError('카메라 캡처 중 오류가 발생했습니다. 다시 촬영해 주세요.');
@@ -275,6 +276,7 @@ export function MultiAngleCaptureGuide({
       captureSafetyTimerRef.current = null;
     }
     onComplete(ordered);
+    if (!mountedRef.current) return;
     setShots({});
     shotsRef.current = {};
     setCurrentAngle(0);

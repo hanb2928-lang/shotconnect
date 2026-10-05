@@ -427,6 +427,7 @@ export async function uploadVideoBlob(
       // Primary: BINARY_CONTENT. Fallback: MULTIPART for OEM stacks that
       // mishandle raw binary POST bodies (same rationale as uploadFileDirectNative).
       let result: { status: number; body?: string } | null = null;
+      await new Promise<void>((r) => setTimeout(r, 10));
       try {
         const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
           httpMethod: 'POST',
@@ -449,6 +450,7 @@ export async function uploadVideoBlob(
       }
 
       if (!result) {
+        await new Promise<void>((r) => setTimeout(r, 10));
         const uploadPromise = FileSystem.uploadAsync(uploadUrl, readableUri, {
           httpMethod: 'POST',
           headers: {

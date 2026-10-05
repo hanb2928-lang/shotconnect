@@ -123,6 +123,9 @@ export async function analyzeAndDownscaleImage(uri: string): Promise<ImageAnalys
         format: ImageManipulator.SaveFormat.JPEG,
       }),
     );
+    const { waitForUriFlush } = await import('@/lib/imageEdit');
+    await waitForUriFlush(manipulated.uri);
+    await waitForFileChannelFlush();
     registerTempFile(manipulated.uri, 'smartResize-image', { pin: true });
 
     const { width: newW, height: newH } = await getImageDimensions(manipulated.uri);
