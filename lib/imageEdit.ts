@@ -1192,15 +1192,36 @@ export async function uploadUriToBucket(
   try {
     const { uri: uploadUri, cleanedUp } = await compressImageUriIfNeeded(readableUri, mimeType);
     if (cleanedUp) compressedCleanupUri = cleanedUp;
-    const base64 = await FileSystem.readAsStringAsync(uploadUri, {
-      encoding: FileSystem.EncodingType.Base64,
+
+    const safePath = encodeStoragePath(fileName);
+    const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
+    const effectiveMime = mimeType.toLowerCase().trim();
+
+    const uploadResult = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+      httpMethod: 'POST',
+      headers: {
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        'Content-Type': effectiveMime,
+        'x-upsert': upsert ? 'true' : 'false',
+        'Cache-Control': '360000',
+      },
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     });
-    if (!base64) throw new Error('업로드할 파일을 읽을 수 없습니다.');
-    const bytes = base64ToUint8Array(base64);
-    if (!bytes || bytes.byteLength <= 0) {
-      throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
+
+    if (uploadResult.status < 200 || uploadResult.status >= 300) {
+      const bodyText = typeof uploadResult.body === 'string' ? uploadResult.body : '';
+      throw new Error(`Upload failed (${uploadResult.status}): ${bodyText}`);
     }
-    return await uploadBytesToStorage(bytes, bucket, fileName, mimeType, upsert, signal);
+
+    if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+
+    return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logError(new Error(`uploadUriToBucket: ${errMsg}`), { component: 'imageEdit', action: 'uploadUriToBucket', extra: { fileName, error: errMsg } });
+    throw err;
   } finally {
     if (compressedCleanupUri) await FileSystem.deleteAsync(compressedCleanupUri, { idempotent: true }).catch(() => {});
     await cleanupNormalizedUri(fileUri, readableUri);

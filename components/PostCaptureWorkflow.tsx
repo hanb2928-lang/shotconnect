@@ -643,8 +643,13 @@ export function PostCaptureWorkflow({
             const actualContentType = detectedMimeType || contentType;
             cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, actualContentType);
           }
-        } catch {
-          cloudSuccess = false;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') { cloudSuccess = false; }
+          else {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            if (mountedRef.current) setUploadErrorMsg(errMsg);
+            cloudSuccess = false;
+          }
         }
       }
 
@@ -1154,6 +1159,11 @@ export function PostCaptureWorkflow({
             {fallbackUsed && !uploadDone && (
               <Text style={styles.fallbackHint}>
                 클라우드 업로드 실패 — 로컬 다운로드 및 {platformLabel} 공유로 자동 전환되었습니다. 발행을 계속 진행하세요.
+              </Text>
+            )}
+            {uploadErrorMsg && !uploadDone && (
+              <Text style={[styles.fallbackHint, { color: theme.colors.error[400] }]}>
+                업로드 오류: {uploadErrorMsg}
               </Text>
             )}
           </VerticalStepCard>
