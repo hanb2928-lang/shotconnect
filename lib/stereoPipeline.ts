@@ -22,6 +22,72 @@ const UPLOAD_MAX_RETRIES = 3;
 const UPLOAD_RETRY_DELAY_MS = 1500;
 const UPLOAD_CONCURRENCY = Platform.OS === 'web' ? 2 : 1;
 
+interface ShotDiagnostic {
+  label: string;
+  hasBase64: boolean;
+  base64Bytes: number;
+  hasUri: boolean;
+  uri: string | null;
+  mimeType: string;
+  fileSize: number | null;
+  fileExists: boolean | null;
+  issues: string[];
+}
+
+async function diagnoseShot(shot: AngleShot): Promise<ShotDiagnostic> {
+  const issues: string[] = [];
+  const base64Bytes = shot.base64 ? shot.base64.length : 0;
+  if (!shot.base64 && !shot.uri) {
+    issues.push('이미지 데이터 없음 (base64/URI 모두 비어있음)');
+  }
+  if (shot.base64 && base64Bytes > UPLOAD_MAX_BASE64_BYTES && !shot.uri) {
+    issues.push(`base64 크기 초과 (${(base64Bytes / 1_000_000).toFixed(1)}MB / ${(UPLOAD_MAX_BASE64_BYTES / 1_000_000).toFixed(0)}MB)`);
+  }
+  let fileSize: number | null = null;
+  let fileExists: boolean | null = null;
+  if (shot.uri && Platform.OS !== 'web') {
+    try {
+      const FileSystem = await import('expo-file-system/legacy');
+      const info = await FileSystem.getInfoAsync(shot.uri);
+      fileExists = info.exists;
+      fileSize = info.exists ? info.size : null;
+      if (!info.exists) {
+        issues.push(`파일이 존재하지 않음 (URI: ${shot.uri.slice(0, 60)}...)`);
+      } else if (info.size !== undefined && info.size <= 0) {
+        issues.push(`파일 크기가 0바이트 (빈 파일)`);
+      }
+    } catch (e) {
+      issues.push(`파일 확인 실패: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return {
+    label: shot.label,
+    hasBase64: !!shot.base64,
+    base64Bytes,
+    hasUri: !!shot.uri,
+    uri: shot.uri ?? null,
+    mimeType: shot.mimeType || 'image/jpeg',
+    fileSize,
+    fileExists,
+    issues,
+  };
+}
+
+async function preFlightDiagnose(shots: AngleShot[]): Promise<ShotDiagnostic[]> {
+  const diagnostics = await Promise.all(shots.map(diagnoseShot));
+  const allIssues = diagnostics.flatMap((d) => d.issues);
+  if (allIssues.length > 0) {
+    const summary = diagnostics
+      .filter((d) => d.issues.length > 0)
+      .map((d) => `${d.label}: ${d.issues.join(', ')}`)
+      .join(' | ');
+    addBreadcrumb('stereoPipeline', `pre-flight 진단 실패 — ${allIssues.length}건 문제`, 'warning', { summary, shotCount: shots.length });
+  } else {
+    addBreadcrumb('stereoPipeline', `pre-flight 진단 통과 — ${shots.length}각도 정상`, 'warning', { shotCount: shots.length });
+  }
+  return diagnostics;
+}
+
 function extractStoragePath(publicUrl: string): string | null {
   const marker = '/storage/v1/object/public/scans/';
   const idx = publicUrl.indexOf(marker);
@@ -113,7 +179,30 @@ async function uploadAngleShotsConcurrently(
       }
       const idx = cursor++;
       const shot = shots[idx];
+      const shotLabel = shot.label;
       try {
+        if (!shot.base64 && !shot.uri) {
+          throw new Error(`${shotLabel}: 이미지 데이터가 없습니다 (base64/URI 모두 비어있음). 다시 촬영해주세요.`);
+        }
+        if (shot.uri && Platform.OS !== 'web') {
+          try {
+            const FileSystem = await import('expo-file-system/legacy');
+            const info = await FileSystem.getInfoAsync(shot.uri);
+            if (!info.exists) {
+              throw new Error(`${shotLabel}: 촬영 파일을 찾을 수 없습니다. 다시 촬영해주세요. (URI: ${shot.uri.slice(0, 50)}...)`);
+            }
+            if (info.size !== undefined && info.size <= 0) {
+              throw new Error(`${shotLabel}: 촬영 파일이 손상되었습니다 (0바이트). 다시 촬영해주세요.`);
+            }
+            addBreadcrumb('stereoPipeline', `${shotLabel} 업로드 시작 — ${(info.size / 1024).toFixed(0)}KB`, 'warning', { angle: shotLabel, fileSize: info.size, uri: shot.uri });
+          } catch (checkErr) {
+            if (checkErr instanceof Error && checkErr.message.includes('다시 촬영해주세요')) throw checkErr;
+            addBreadcrumb('stereoPipeline', `${shotLabel} 파일 확인 스킵: ${checkErr instanceof Error ? checkErr.message : String(checkErr)}`, 'warning');
+          }
+        } else if (shot.base64) {
+          const sizeMB = (shot.base64.length / 1_000_000).toFixed(1);
+          addBreadcrumb('stereoPipeline', `${shotLabel} 업로드 시작 (base64) — ${sizeMB}MB`, 'warning', { angle: shotLabel, base64Bytes: shot.base64.length });
+        }
         const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg', signal, shot.uri);
         if (fatalThreshold) {
           const p = extractStoragePath(url);
@@ -124,15 +213,16 @@ async function uploadAngleShotsConcurrently(
         const p = extractStoragePath(url);
         if (p) uploadedPaths.push(p);
         (shot as { base64?: string }).base64 = undefined;
+        addBreadcrumb('stereoPipeline', `${shotLabel} 업로드 성공`, 'warning', { angle: shotLabel, path: p });
         await nativeHeapCooldownGuard();
       } catch (err: unknown) {
         failures++;
         const message = err instanceof Error ? err.message : String(err);
-        failureDetails.push(`${shot.label}: ${message}`);
+        failureDetails.push(`${shotLabel}: ${message}`);
         logError(err, {
           component: 'stereoPipeline',
           action: 'uploadAngleShot',
-          extra: { angle: shot.label, orderIndex: shot.orderIndex, failureNumber: failures },
+          extra: { angle: shotLabel, orderIndex: shot.orderIndex, failureNumber: failures },
         });
         if (failures >= 2) fatalThreshold = true;
       }
@@ -305,6 +395,18 @@ export async function createScanFromAngleShots(
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
 
+  const diagnostics = await preFlightDiagnose(allShots);
+  const blockingIssues = diagnostics.filter((d) => d.issues.length > 0);
+  if (blockingIssues.length > 0) {
+    const fatalShots = blockingIssues.filter((d) =>
+      d.issues.some((i) => i.includes('이미지 데이터 없음') || i.includes('파일이 존재하지 않음') || i.includes('0바이트')),
+    );
+    if (fatalShots.length > 0) {
+      const summary = fatalShots.map((d) => `${d.label}: ${d.issues.join(', ')}`).join(' | ');
+      throw new Error(`업로드 불가 — ${summary}`);
+    }
+  }
+
   const { results, failures, uploadedPaths, failureDetails } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
   if (aborted()) {
     await rollbackUploads(uploadedPaths);
@@ -378,6 +480,18 @@ export async function runStereoPipeline(
     additionalUrls = existingUploadUrls.slice(1);
   } else {
     steps[0].status = 'active';
+    steps[0].detail = `${allShots.length}각도 이미지 사전 점검 중...`;
+    report(0, 0.03);
+
+    const diagnostics = await preFlightDiagnose(allShots);
+    const fatalShots = diagnostics.filter((d) =>
+      d.issues.some((i) => i.includes('이미지 데이터 없음') || i.includes('파일이 존재하지 않음') || i.includes('0바이트')),
+    );
+    if (fatalShots.length > 0) {
+      const summary = fatalShots.map((d) => `${d.label}: ${d.issues.join(', ')}`).join(' | ');
+      throw new Error(`업로드 불가 — ${summary}`);
+    }
+
     steps[0].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
     report(0, 0.05);
 
