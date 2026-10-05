@@ -130,6 +130,10 @@ const CONVERSION_MODES: { key: ConversionMode; label: string; desc: string; icon
   { key: 'virtual_fitting', label: 'AI 범용 합성', desc: '제품 합성 영상', icon: Layers },
 ];
 
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error && (error as { name?: unknown }).name === 'AbortError';
+}
+
 export function PostCaptureWorkflow({
   visible,
   videoUri,
@@ -554,7 +558,7 @@ export function PostCaptureWorkflow({
         if (mountedRef.current) setUploadRetrying(false);
         return true;
       } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') break;
+        if (isAbortError(err)) break;
         lastError = err instanceof Error ? err.message : String(err);
         if (mountedRef.current) setUploadErrorMsg(lastError);
       }
@@ -599,7 +603,7 @@ export function PostCaptureWorkflow({
         if (mountedRef.current) setUploadRetrying(false);
         return true;
       } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') break;
+        if (isAbortError(err)) break;
         lastError = err instanceof Error ? err.message : String(err);
         if (mountedRef.current) setUploadErrorMsg(lastError);
       }
@@ -700,7 +704,7 @@ export function PostCaptureWorkflow({
             cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, actualContentType);
           }
         } catch (err) {
-          if (err instanceof DOMException && err.name === 'AbortError') { cloudSuccess = false; }
+          if (isAbortError(err)) { cloudSuccess = false; }
           else {
             const errMsg = err instanceof Error ? err.message : String(err);
             if (mountedRef.current) setUploadErrorMsg(errMsg);

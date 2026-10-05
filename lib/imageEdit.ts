@@ -15,6 +15,10 @@ import { logError } from '@/lib/errorLogger';
 
 let __globalUploadAttemptCount = 0;
 
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error && (error as { name?: unknown }).name === 'AbortError';
+}
+
 async function forceTrackedNativeUpload<T>(
   uploadFn: () => Promise<T>,
   contextName: string,
@@ -1281,7 +1285,7 @@ async function uploadUriToBucketImpl(
 
     return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    if (isAbortError(err)) throw err;
     if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
     const errMsg = err instanceof Error ? err.message : String(err);
     logError(new Error(`uploadUriToBucket: ${errMsg}`), { component: 'imageEdit', action: 'uploadUriToBucket', extra: { fileName, error: errMsg } });
@@ -1494,7 +1498,7 @@ async function uploadFileDirectNativeImpl(
 
     return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    if (isAbortError(err)) throw err;
     if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
     const errMsg = err instanceof Error ? err.message : String(err);
     logError(new Error(`uploadFileDirectNative: ${errMsg}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path, error: errMsg } });
@@ -1616,7 +1620,7 @@ async function uploadBytesToStorageImpl(
       timeout,
     ]).finally(() => clearTimeout(timer!));
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (isAbortError(err)) {
       if (signal?.aborted) throw err;
       throw new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');
     }
