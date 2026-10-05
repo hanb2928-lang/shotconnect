@@ -741,7 +741,9 @@ export default function AffiliateScreen() {
     setAnalyzeError(null);
     try {
       const imageUrl = await uploadImage(selectedImage, selectedImageMime);
+      if (!mounted.current) return;
       const scanId = await saveManualScan(imageUrl);
+      if (!mounted.current) return;
       let analysisResult = null;
       try {
         const dataUrl = selectedImage.startsWith('data:') ? selectedImage : buildDataUrl(selectedImage, selectedImageMime);
@@ -771,6 +773,7 @@ export default function AffiliateScreen() {
       } catch {
         // analysis enhancement is best-effort; scan already saved
       }
+      if (!mounted.current) return;
       markCompleted('platform');
       setLastScanId(scanId);
 
@@ -783,6 +786,7 @@ export default function AffiliateScreen() {
           oneLiner: analysisResult?.oneLiner || '',
           fallbackHashtags: analysisResult?.templateData?.hashtags || [],
         });
+        if (!mounted.current) return;
         setAiBundle(bundle);
         setAiRecommendation(bundle.templateLabel);
         const match = TEMPLATE_STYLES.find((t) => bundle.templateLabel.includes(t.label));
@@ -790,13 +794,14 @@ export default function AffiliateScreen() {
         setRecommendedVoiceKey(bundle.voice.key);
         setSelectedVoiceKey(bundle.voice.key);
       } catch {
-        setAiRecommendation('웹툰형 만화');
+        if (mounted.current) setAiRecommendation('웹툰형 만화');
       } finally {
-        setAiRecommendLoading(false);
+        if (mounted.current) setAiRecommendLoading(false);
       }
 
-      setAnalyzing(false);
+      if (mounted.current) setAnalyzing(false);
     } catch (err) {
+      if (!mounted.current) return;
       setAnalyzeError(friendlyError(err, 'AI 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'));
       setAnalyzing(false);
     }

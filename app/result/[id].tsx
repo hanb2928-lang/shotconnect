@@ -1535,11 +1535,13 @@ export default function ResultScreen() {
         let cloudUrl: string | null = null;
         if (Platform.OS === 'web') {
           const res = await fetch(videoUrl);
+          if (!mountedRef.current) return;
           const blob = await res.blob();
           cloudUrl = await uploadAssetBlobWithProgress(blob, fileName, 'video/mp4', () => {});
         } else {
           cloudUrl = await uploadAssetFromFileUriWithProgress(videoUrl, fileName, 'video/mp4', () => {});
         }
+        if (!mountedRef.current) return;
         if (cloudUrl) {
           const saved = await saveAssetRecord({
             scan_id: scan.id,
@@ -2338,6 +2340,7 @@ export default function ResultScreen() {
           } else {
             cloudUrl = await uploadAssetFromFileUriWithProgress(uri, fileName, 'image/png', () => {});
           }
+          if (!mountedRef.current) return;
           if (cloudUrl) {
             await saveAssetRecord({
               scan_id: scan?.id ?? null,

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
   Text,
@@ -787,6 +788,7 @@ export function MultiPlatformExport({
   const [cloudSaving, setCloudSaving] = useState(false);
   const [autoDisclosure, setAutoDisclosure] = useState(true);
   const cloudSavingRef = useRef(false);
+  const mounted = useMountedRef();
   const cardRefs = useRef<(View | null)[]>([]);
 
   const formats = useMemo(() => getFormatsForPlatform(platform), [platform]);
@@ -983,6 +985,7 @@ export function MultiPlatformExport({
     let saved = 0;
     try {
       for (const r of results) {
+        if (!mounted.current) break;
         const cloudName = `${fileName.replace(/\.\w+$/, '')}-${r.format.key}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
         let fileUrl: string | null = null;
 
@@ -992,6 +995,7 @@ export function MultiPlatformExport({
           fileUrl = await uploadAssetFromFileUri(r.uri, cloudName, 'image/png');
         }
 
+        if (!mounted.current) break;
         if (!fileUrl) continue;
         await saveAssetRecord({
           scan_id: null,
@@ -1007,17 +1011,18 @@ export function MultiPlatformExport({
         });
         saved++;
       }
+      if (!mounted.current) return;
       if (saved > 0) {
         showToast(`${saved}개를 클라우드에 저장했어요. 내 제작물에서 확인하세요`);
       } else {
         showToast('클라우드 저장에 실패했어요');
       }
     } catch {
-      showToast('저장 중 오류가 발생했어요');
+      if (mounted.current) showToast('저장 중 오류가 발생했어요');
     }
     cloudSavingRef.current = false;
-    setCloudSaving(false);
-  }, [results, fileName, title, imageUrl, affiliatePlatforms, showToast]);
+    if (mounted.current) setCloudSaving(false);
+  }, [results, fileName, title, imageUrl, affiliatePlatforms, showToast, mounted]);
 
   const handleReset = useCallback(() => {
     if (Platform.OS === 'web') {

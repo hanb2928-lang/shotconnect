@@ -430,7 +430,7 @@ export default function SettingsScreen() {
       } catch {
         Alert.alert('업로드 실패', '로고 업로드 중 오류가 발생했어요');
       }
-      setLogoUploading(false);
+      if (mounted.current) setLogoUploading(false);
     };
     input.click();
   };

@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Share, Platform, Linking, Mod
 import { CachedImage } from '@/components/CachedImage';
 import { Copy, Check, Clapperboard, Download, CloudUpload, Loader as Loader2, Instagram, MessageCircle, Globe, ClipboardCheck, ChevronDown, Share2, X, ExternalLink, Eye, ArrowLeft, Send } from 'lucide-react-native';
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { useMountedRef } from '@/hooks/useMountedRef';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, withDelay, Easing, cancelAnimation } from 'react-native-reanimated';
 import { theme } from '@/lib/theme';
 import { getShareDisclosureForPlatforms } from '@/lib/disclosure';
@@ -37,6 +38,7 @@ export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName,
   const [cooldownInfo, setCooldownInfo] = useState<CooldownResult | null>(null);
   const [pendingShare, setPendingShare] = useState<{ fn: () => void; platform: string } | null>(null);
   const toastAnim = useSharedValue(0);
+  const mounted = useMountedRef();
   const accordionHeight = useSharedValue(0);
   const accordionOpacity = useSharedValue(0);
   const chevronRot = useSharedValue(0);
@@ -294,18 +296,21 @@ export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName,
       const uri = await captureCard();
       if (!uri) {
         showToast('이미지 캡처에 실패했어요');
-        setCloudSaving(false);
+        if (mounted.current) setCloudSaving(false);
         return;
       }
+      if (!mounted.current) return;
 
       if (Platform.OS === 'web') {
         const res = await fetch(uri);
+        if (!mounted.current) return;
         const blob = await res.blob();
         const cloudFileName = fileName.replace(/\.png$/, '') + '-' + Date.now() + '.png';
         const fileUrl = await uploadAssetBlob(blob, cloudFileName, 'image/png');
+        if (!mounted.current) return;
         if (!fileUrl) {
           showToast('클라우드 업로드에 실패했어요');
-          setCloudSaving(false);
+          if (mounted.current) setCloudSaving(false);
           return;
         }
         await saveAssetRecord({
@@ -319,15 +324,15 @@ export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName,
           platform: affiliatePlatforms[0] || null,
           affiliate_platform: affiliatePlatforms[0] || null,
         });
-        showToast('클라우드에 저장됐어요. 내 제작물 탭에서 확인하세요');
+        if (mounted.current) showToast('클라우드에 저장됐어요. 내 제작물 탭에서 확인하세요');
       } else {
         showToast('클라우드 저장은 웹에서만 가능해요. 갤러리 저장을 이용하세요');
       }
     } catch {
-      showToast('저장 중 오류가 발생했어요');
+      if (mounted.current) showToast('저장 중 오류가 발생했어요');
     }
-    setCloudSaving(false);
-  }, [captureCard, fileName, affiliatePlatforms, showToast]);
+    if (mounted.current) setCloudSaving(false);
+  }, [captureCard, fileName, affiliatePlatforms, showToast, mounted]);
 
   const handleInstagramShare = useCallback(() => {
     startPreview('https://www.instagram.com', '인스타그램', 'instagram');
