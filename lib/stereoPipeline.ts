@@ -96,10 +96,11 @@ async function uploadAngleShotsConcurrently(
   shots: AngleShot[],
   concurrency: number,
   signal?: AbortSignal,
-): Promise<{ results: ParallelUploadResult[]; failures: number; uploadedPaths: string[] }> {
+): Promise<{ results: ParallelUploadResult[]; failures: number; uploadedPaths: string[]; failureDetails: string[] }> {
   const results: ParallelUploadResult[] = [];
   let failures = 0;
   const uploadedPaths: string[] = [];
+  const failureDetails: string[] = [];
   let cursor = 0;
   let fatalThreshold = false;
 
@@ -124,8 +125,15 @@ async function uploadAngleShotsConcurrently(
         if (p) uploadedPaths.push(p);
         (shot as { base64?: string }).base64 = undefined;
         await nativeHeapCooldownGuard();
-      } catch {
+      } catch (err: unknown) {
         failures++;
+        const message = err instanceof Error ? err.message : String(err);
+        failureDetails.push(`${shot.label}: ${message}`);
+        logError(err, {
+          component: 'stereoPipeline',
+          action: 'uploadAngleShot',
+          extra: { angle: shot.label, orderIndex: shot.orderIndex, failureNumber: failures },
+        });
         if (failures >= 2) fatalThreshold = true;
       }
     }
@@ -135,7 +143,7 @@ async function uploadAngleShotsConcurrently(
   await Promise.all(workers);
 
   results.sort((a, b) => a.shot.orderIndex - b.shot.orderIndex);
-  return { results, failures, uploadedPaths };
+  return { results, failures, uploadedPaths, failureDetails };
 }
 
 export interface AngleImagePayload {
@@ -297,7 +305,7 @@ export async function createScanFromAngleShots(
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
 
-  const { results, failures, uploadedPaths } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
+  const { results, failures, uploadedPaths, failureDetails } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
   if (aborted()) {
     await rollbackUploads(uploadedPaths);
     throw new Error('업로드가 취소되었습니다.');
@@ -305,12 +313,12 @@ export async function createScanFromAngleShots(
 
   if (results.length === 0) {
     await rollbackUploads(uploadedPaths);
-    throw new Error('이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');
+    throw new Error(`이미지 업로드에 실패했습니다. ${failureDetails.join(' | ') || '네트워크 연결을 확인 후 다시 시도해주세요.'}`);
   }
 
   if (failures >= 2) {
     await rollbackUploads(uploadedPaths);
-    throw new Error('이미지 업로드 중 네트워크 연결이 불안정합니다. 다시 시도해주세요.');
+    throw new Error(`이미지 업로드 중 네트워크 연결이 불안정합니다. ${failureDetails.join(' | ')}`);
   }
 
   const imageUrl = results[0].url;
@@ -373,15 +381,15 @@ export async function runStereoPipeline(
     steps[0].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
     report(0, 0.05);
 
-    const { results: uploadResults, failures, uploadedPaths: uploadedPathsResult } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
+    const { results: uploadResults, failures, uploadedPaths: uploadedPathsResult, failureDetails } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
     uploadedPaths = uploadedPathsResult;
 
     if (uploadResults.length === 0) {
-      throw new Error('이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');
+      throw new Error(`이미지 업로드에 실패했습니다. ${failureDetails.join(' | ') || '네트워크 연결을 확인 후 다시 시도해주세요.'}`);
     }
 
     if (failures >= 2) {
-      throw new Error('이미지 업로드 중 네트워크 연결이 불안정합니다. 다시 시도해주세요.');
+      throw new Error(`이미지 업로드 중 네트워크 연결이 불안정합니다. ${failureDetails.join(' | ')}`);
     }
 
     imageUrl = uploadResults[0].url;
