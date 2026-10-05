@@ -19,6 +19,7 @@ import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
 import { waitForFileChannelFlush } from '@/lib/smartResize';
 import { isUploadCircuitOpen, recordUploadSuccess, recordUploadFailure } from '@/lib/uploadCircuitBreaker';
 import { logUploadStart, logUploadEvent } from '@/lib/uploadDebugLogger';
+import { logError } from '@/lib/errorLogger';
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   const abortError = () => {
@@ -50,10 +51,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function withUploadTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+function withUploadTimeout<T>(
+  factory: (signal: AbortSignal) => Promise<T>,
+  externalSignal?: AbortSignal,
+): Promise<T> {
   const controller = new AbortController();
-  const linkedSignal = signal
-    ? AbortSignal.any([signal, controller.signal])
+  const linkedSignal = externalSignal
+    ? AbortSignal.any([externalSignal, controller.signal])
     : controller.signal;
 
   let timer: ReturnType<typeof setTimeout>;
@@ -64,8 +68,10 @@ function withUploadTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promis
     }, UPLOAD_TIMEOUT_MS);
   });
 
-  const base = raceWithAbort(promise, linkedSignal);
-  return Promise.race([base, timeout]).finally(() => clearTimeout(timer));
+  return Promise.race([
+    raceWithAbort(factory(linkedSignal), linkedSignal),
+    timeout,
+  ]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -142,7 +148,7 @@ export async function uploadImage(
           : 'jpg';
         const fileName2 = `scan-${uniqueSuffix()}.${ext2}`;
         const publicUrl = await withUploadTimeout(
-          uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime),
+          (s) => uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime, s),
           signal,
         );
         return publicUrl;
@@ -171,7 +177,7 @@ export async function uploadImage(
 
   try {
     const publicUrl = await withUploadTimeout(
-      uploadBytesToStorage(uploadBlob, 'scans', fileName, uploadMime),
+      (s) => uploadBytesToStorage(uploadBlob, 'scans', fileName, uploadMime, false, s),
       signal,
     );
     finishLog({ status: 200 });
@@ -246,7 +252,7 @@ export async function uploadImageBlob(
           : 'jpg';
         const fileName2 = `scan-${uniqueSuffix()}.${ext2}`;
         const publicUrl = await withUploadTimeout(
-          uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime),
+          (s) => uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime, s),
           signal,
         );
         return publicUrl;
@@ -272,7 +278,7 @@ export async function uploadImageBlob(
 
   try {
     const publicUrl = await withUploadTimeout(
-      uploadBytesToStorage(uploadBlob, 'scans', fileName, uploadMime),
+      (s) => uploadBytesToStorage(uploadBlob, 'scans', fileName, uploadMime, false, s),
       signal,
     );
     finishLog({ status: 200 });
@@ -333,7 +339,7 @@ export async function uploadCompressedUri(
       });
       try {
         const publicUrl = await withUploadTimeout(
-          uploadFileDirectNative(compressedUri, 'scans', uploadFileName, 'image/jpeg'),
+          (s) => uploadFileDirectNative(compressedUri!, 'scans', uploadFileName, 'image/jpeg', s),
           signal,
         );
         finishLog({ status: 200 });
@@ -424,19 +430,26 @@ export async function uploadVideoBlob(
         fileSize: info.size,
       });
 
-      const base64 = await FileSystem.readAsStringAsync(readableUri, {
-        encoding: FileSystem.EncodingType.Base64,
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodeStoragePath(fileName)}`;
+      const uploadResult = await FileSystem.uploadAsync(uploadUrl, readableUri, {
+        httpMethod: 'POST',
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          'Content-Type': mimeType,
+          'x-upsert': 'true',
+          'Cache-Control': '360000',
+        },
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
       });
-      if (!base64) throw new Error('동영상 파일을 읽을 수 없습니다.');
-      const bytes = base64ToUint8Array(base64);
-      if (!bytes || bytes.byteLength <= 0) {
-        throw new Error('동영상 파일이 손상되었습니다.');
+
+      if (uploadResult.status < 200 || uploadResult.status >= 300) {
+        const bodyText = typeof uploadResult.body === 'string' ? uploadResult.body : '';
+        const uploadErr = new Error(`동영상 업로드 실패 (${uploadResult.status}): ${bodyText}`);
+        logError(uploadErr, { component: 'analysis', action: 'uploadVideoBlob', extra: { status: uploadResult.status, body: bodyText } });
+        throw uploadErr;
       }
 
-      const uploadPromise = uploadBytesToStorage(bytes, 'scans', safeFileName, mimeType, false, signal, VIDEO_UPLOAD_TIMEOUT_MS);
-      await uploadPromise;
-
-      finishLog({ status: 200 });
+      finishLog({ status: uploadResult.status });
       return `${supabaseUrl}/storage/v1/object/public/scans/${encodeStoragePath(fileName)}`;
     } finally {
       if (tempCopy) await FileSystem.deleteAsync(tempCopy, { idempotent: true }).catch(() => {});
@@ -768,7 +781,6 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
   }
   if (!data?.audioBase64) return;
 
-  const audioBytes = base64ToUint8Array(data.audioBase64);
   const fileName = `tts-${scanId.replace(/[^a-zA-Z0-9_-]/g, '')}-${Date.now()}.mp3`;
   let ttsPublicUrl = '';
 
@@ -786,12 +798,13 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
           await safeDeleteTempFile(tmpPath).catch(() => {});
         }
       }
-    } catch { /* fall back to JS SDK */ }
+    } catch { /* fall back to web upload */ }
   }
 
   if (!ttsPublicUrl) {
     try {
       const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+      const audioBytes = base64ToUint8Array(data.audioBase64);
       ttsPublicUrl = await uploadBytesToStorage(audioBytes, 'scans', fileName, 'audio/mpeg');
     } catch {
       return;

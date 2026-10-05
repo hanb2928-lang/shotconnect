@@ -353,15 +353,6 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
     throw new Error('TTS 응답에 유효한 오디오 데이터가 없습니다');
   }
 
-  let audioBytes: Uint8Array;
-  try {
-    audioBytes = base64ToUint8Array(data.audioBase64);
-  } catch {
-    throw new Error('TTS 오디오 데이터를 디코딩하지 못했습니다');
-  }
-  if (audioBytes.length === 0) {
-    throw new Error('TTS 오디오 데이터가 비어 있습니다');
-  }
   const audioFileName = `tts-${scanId}-${Date.now()}.mp3`;
   let audioPublicUrl = '';
 
@@ -392,6 +383,15 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
   if (!audioPublicUrl) {
     try {
       const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+      let audioBytes: Uint8Array;
+      try {
+        audioBytes = base64ToUint8Array(data.audioBase64!);
+      } catch {
+        throw new Error('TTS 오디오 데이터를 디코딩하지 못했습니다');
+      }
+      if (audioBytes.length === 0) {
+        throw new Error('TTS 오디오 데이터가 비어 있습니다');
+      }
       audioPublicUrl = await uploadBytesToStorage(audioBytes, 'scans', audioFileName, 'audio/mpeg');
     } catch {
       throw new Error('TTS 오디오 업로드 실패');
