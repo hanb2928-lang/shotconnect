@@ -1179,54 +1179,63 @@ export async function uploadUriToBucket(
     throw new Error('업로드할 파일의 크기가 0바이트이거나 존재하지 않습니다.');
   }
 
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${supabaseAnonKey}`,
-    'x-upsert': upsert ? 'true' : 'false',
-  };
-
   const doUpload = async (): Promise<{ status: number; body?: string }> => {
     // Hermes GC tick: yield so the engine can reclaim buffers from prior
     // compression/copy steps before the native upload socket opens.
     await new Promise<void>((r) => setTimeout(r, 10));
     if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
     let result: { status: number; body?: string } | null = null;
+
+    // MULTIPART primary: see uploadFileDirectNative for rationale. Inline
+    // header literal — no shared reference for the native module to mutate.
+    try {
+      const info = await FileSystem.getInfoAsync(uploadUri);
+      if (!info.exists || (info.size !== undefined && info.size <= 0)) {
+        throw new Error('업로드 직전 파일이 손상되었습니다.');
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') throw e;
+      const errMsg = e instanceof Error ? e.message : String(e);
+      throw new Error(`업로드 실패 (파일 검증 오류): ${errMsg}`);
+    }
     try {
       result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
         httpMethod: 'POST',
-        headers: { ...headers, 'Content-Type': mimeType },
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        mimeType,
-      });
-      if (result.status >= 400 && result.status !== 409) result = null;
-    } catch {
-      result = null;
-    }
-
-    if (!result) {
-      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-      // Fallback isolation: deep-copy headers so the native module cannot
-      // mutate the shared reference from the first attempt. Yield to let the
-      // previous file handle fully release before re-opening.
-      await new Promise<void>((r) => setTimeout(r, 10));
-      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-      try {
-        const info = await FileSystem.getInfoAsync(uploadUri);
-        if (!info.exists || (info.size !== undefined && info.size <= 0)) {
-          throw new Error('폴백 진입 시 파일이 손상되었습니다.');
-        }
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') throw e;
-        const errMsg = e instanceof Error ? e.message : String(e);
-        throw new Error(`업로드 실패 (파일 검증 오류): ${errMsg}`);
-      }
-      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
-        httpMethod: 'POST',
-        headers: { ...headers },
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          'x-upsert': upsert ? 'true' : 'false',
+        },
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'file',
         mimeType,
         parameters: { upsert: upsert ? 'true' : 'false' },
       });
+      if (result.status >= 400 && result.status !== 409) result = null;
+    } catch (err) {
+      console.warn('[uploadUriToBucket] MULTIPART failed:', err);
+      result = null;
+    }
+
+    if (!result) {
+      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
+      // BINARY_CONTENT fallback: raw byte stream, inline header literal.
+      await new Promise<void>((r) => setTimeout(r, 10));
+      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
+      try {
+        result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            Authorization: `Bearer ${supabaseAnonKey}`,
+            'Content-Type': mimeType,
+            'x-upsert': upsert ? 'true' : 'false',
+          },
+        });
+      } catch (err) {
+        console.error('[uploadUriToBucket] BINARY_CONTENT fallback failed:', err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        throw new Error(`네이티브 업로드 실패 (MIME: ${mimeType}): ${errMsg}`);
+      }
     }
     return result;
   };
