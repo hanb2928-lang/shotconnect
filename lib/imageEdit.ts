@@ -12,6 +12,20 @@ import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
 import { analyzeAndDownscaleImage, withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 import { runProactiveFlush, getHeapUsageRatio } from '@/lib/proactiveMemoryFlush';
 
+/**
+ * Supabase Storage REST 경로에 사용할 수 없는 유니코드/공백/특수문자를
+ * 영문 알파벳·숫자·언더바·하이픈·슬래시 조합으로 강제 정규화한다.
+ * 모바일에서 파일명에 한글이나 특수기호가 섞이면 REST API가 경로를
+ * 해석하지 못하고 400 에러를 내거나 업로드 프로미스가 증발한다.
+ */
+export function sanitizeStoragePath(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => segment.replace(/[^a-zA-Z0-9_.-]/g, '_').replace(/_+/g, '_').replace(/^[-_.]+|[-_.]+$/g, ''))
+    .filter(Boolean)
+    .join('/');
+}
+
 export async function rotateImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: 90 }]);
   return result.uri;
@@ -1203,8 +1217,10 @@ export async function uploadUriToBucket(
     });
   }
 
-  if (result.status >= 400) {
-    throw new Error(`업로드 실패 (${result.status})`);
+  if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
+    const body = result.body ?? '';
+    console.error(`[UPLOAD FAIL] uploadUriToBucket status=${result.status} body=${body}`);
+    throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
   }
 
   const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${fileName}`;
@@ -1240,7 +1256,8 @@ export async function uploadFileDirectNative(
     throw new Error('uploadFileDirectNative is not supported on web');
   }
 
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+  const safePath = sanitizeStoragePath(path);
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
 
   // Android 14+ sandbox can deny the native upload module read access to
   // files in cacheDirectory or content:// URIs. Copy to documentDirectory
@@ -1249,7 +1266,8 @@ export async function uploadFileDirectNative(
   let uploadUri = fileUri;
   let copiedPath: string | null = null;
   if (docDir && !fileUri.startsWith(docDir)) {
-    const filename = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    const rawFilename = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    const filename = sanitizeStoragePath(rawFilename);
     copiedPath = `${docDir}native-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${filename}`;
     try {
       await withFileSettle('uploadFileDirectNative-copy', () =>
@@ -1311,11 +1329,13 @@ export async function uploadFileDirectNative(
     }
   }
 
-  if (result.status >= 400) {
-    throw new Error(`Native Direct Upload Failed [${result.status}]: ${result.body ?? ''}`);
+  if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
+    const body = result.body ?? '';
+    console.error(`[UPLOAD FAIL] uploadFileDirectNative status=${result.status} body=${body}`);
+    throw new Error(`업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
   }
 
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
 }
 
 /**
@@ -1352,7 +1372,8 @@ export async function uploadBytesToStorage(
   mimeType: string,
   upsert = false,
 ): Promise<string> {
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+  const safePath = sanitizeStoragePath(path);
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${supabaseAnonKey}`,
     'Content-Type': mimeType,
@@ -1373,5 +1394,5 @@ export async function uploadBytesToStorage(
     throw new Error(`Upload failed (${resp.status}): ${text}`);
   }
 
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
 }

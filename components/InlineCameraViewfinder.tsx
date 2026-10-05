@@ -48,12 +48,14 @@ export const InlineCameraViewfinder = forwardRef<
   const captureLockRef = useRef(false);
   const captureInProgressRef = useRef(false);
   const captureQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const safetyNetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
   const [cameraKey, setCameraKey] = useState(0);
   const [nativeCameraActive, setNativeCameraActive] = useState(false);
+  const [shutterLocked, setShutterLocked] = useState(false);
 
   useEffect(() => {
     onReadyChange?.(cameraReady);
@@ -212,6 +214,7 @@ export const InlineCameraViewfinder = forwardRef<
     if (Platform.OS !== 'web' || !videoRef.current || !cameraReady) return null;
     if (captureInProgressRef.current) return null;
     captureInProgressRef.current = true;
+    setShutterLocked(true);
     try {
       const video = videoRef.current;
       const rawW = video.videoWidth || 1080;
@@ -241,6 +244,7 @@ export const InlineCameraViewfinder = forwardRef<
     } finally {
       captureInProgressRef.current = false;
       captureLockRef.current = false;
+      setShutterLocked(false);
     }
   }, [cameraReady, facing]);
 
@@ -253,6 +257,7 @@ export const InlineCameraViewfinder = forwardRef<
         return null;
       }
       captureInProgressRef.current = true;
+      setShutterLocked(true);
       let capturedUri: string | null = null;
       try {
         await new Promise((resolve) => setTimeout(resolve, 400));
@@ -304,6 +309,7 @@ export const InlineCameraViewfinder = forwardRef<
         await new Promise((resolve) => setTimeout(resolve, 150));
         captureInProgressRef.current = false;
         captureLockRef.current = false;
+        setShutterLocked(false);
       }
     };
 
@@ -330,11 +336,21 @@ export const InlineCameraViewfinder = forwardRef<
   const handleCapturePress = useCallback(() => {
     if (captureLockRef.current || captureInProgressRef.current || processing) return;
     captureLockRef.current = true;
+    setShutterLocked(true);
     onCapture?.();
-    // Safety net: if the parent's onCapture early-returns without calling
-    // viewfinder.capture() (which resets the lock in its finally block),
-    // release the lock after a short delay so the shutter doesn't freeze.
-    setTimeout(() => { captureLockRef.current = false; }, 2000);
+    // Safety net: only release the lock if capture never actually started
+    // (captureInProgressRef still false after 3s means onCapture early-returned
+    // without calling viewfinder.capture()). If capture IS in progress, the
+    // finally block in captureNative/captureWeb owns the lock release — this
+    // timer must NOT override it and create a window for a duplicate capture.
+    if (safetyNetTimerRef.current) clearTimeout(safetyNetTimerRef.current);
+    safetyNetTimerRef.current = setTimeout(() => {
+      if (!captureInProgressRef.current) {
+        captureLockRef.current = false;
+        setShutterLocked(false);
+      }
+      safetyNetTimerRef.current = null;
+    }, 3000);
   }, [onCapture, processing]);
 
   if (Platform.OS === 'web') {
@@ -409,9 +425,9 @@ export const InlineCameraViewfinder = forwardRef<
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.captureSmallBtn, !cameraReady && styles.captureSmallBtnDisabled]}
+            style={[styles.captureSmallBtn, (!cameraReady || processing || shutterLocked) && styles.captureSmallBtnDisabled]}
             onPress={handleCapturePress}
-            disabled={!cameraReady || processing}
+            disabled={!cameraReady || processing || shutterLocked}
             activeOpacity={0.85}
           >
             {processing ? (
@@ -520,9 +536,9 @@ export const InlineCameraViewfinder = forwardRef<
           <Text style={styles.smallBtnLabel}>갤러리</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.captureSmallBtn, !cameraReady && styles.captureSmallBtnDisabled]}
+          style={[styles.captureSmallBtn, (!cameraReady || processing || shutterLocked) && styles.captureSmallBtnDisabled]}
           onPress={handleCapturePress}
-          disabled={!cameraReady || processing}
+          disabled={!cameraReady || processing || shutterLocked}
           activeOpacity={0.85}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >

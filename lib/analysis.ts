@@ -463,9 +463,11 @@ export async function uploadVideoBlob(
         result = await Promise.race([base, timeout]).finally(() => clearTimeout(timer!));
       }
 
-      if (result.status >= 400) {
-        finishLog({ error: `HTTP ${result.status}` });
-        throw new Error(`동영상 업로드 실패 (${result.status})`);
+      if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
+        const body = result.body ?? '';
+        console.error(`[UPLOAD FAIL] uploadVideoBlob status=${result.status} body=${body}`);
+        finishLog({ error: `HTTP ${result.status}: ${body}` });
+        throw new Error(`동영상 업로드 실패 [${result.status}]: ${body || '서버 응답 본문 없음'}`);
       }
 
       finishLog({ status: 200 });
@@ -811,7 +813,7 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
   if (!data?.audioBase64) return;
 
   const audioBytes = base64ToUint8Array(data.audioBase64);
-  const fileName = `tts-${scanId}-${Date.now()}.mp3`;
+  const fileName = `tts-${scanId.replace(/[^a-zA-Z0-9_-]/g, '')}-${Date.now()}.mp3`;
   let ttsPublicUrl = '';
 
   // Native: write audio to temp file and upload via FileSystem.uploadAsync

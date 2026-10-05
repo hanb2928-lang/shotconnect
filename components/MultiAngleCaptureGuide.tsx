@@ -85,15 +85,23 @@ export function MultiAngleCaptureGuide({
   const [processing, setProcessing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
+  const [shutterLocked, setShutterLocked] = useState(false);
   const pickLockRef = useRef(false);
   const isCapturingRef = useRef(false);
   const shotsRef = useRef<Record<string, AngleShot>>({});
   const viewfinderRef = useRef<InlineViewfinderHandle | null>(null);
   const mountedRef = useRef(true);
+  const captureSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      if (captureSafetyTimerRef.current) {
+        clearTimeout(captureSafetyTimerRef.current);
+        captureSafetyTimerRef.current = null;
+      }
+    };
   }, []);
 
   const effectiveMinShots = minShots ?? guides.length;
@@ -180,7 +188,26 @@ export function MultiAngleCaptureGuide({
       isCapturingRef.current = true;
       pickLockRef.current = true;
       setProcessing(true);
+      setShutterLocked(true);
       setCaptureError(null);
+      // Safety net: if the capture promise hangs (camera HAL deadlock,
+      // native module crash, etc.) the refs would stay locked forever and
+      // the shutter would be permanently unresponsive. Auto-release after
+      // 15s so the user can at least retry or switch to gallery.
+      if (captureSafetyTimerRef.current) clearTimeout(captureSafetyTimerRef.current);
+      captureSafetyTimerRef.current = setTimeout(() => {
+        if (isCapturingRef.current || pickLockRef.current) {
+          console.warn('[MultiAngleGuide] capture safety net triggered — force-releasing locks after 15s timeout');
+          isCapturingRef.current = false;
+          pickLockRef.current = false;
+          if (mountedRef.current) {
+            setProcessing(false);
+            setShutterLocked(false);
+            setCaptureError('촬영이 지연되고 있습니다. 다시 시도해 주세요.');
+          }
+        }
+        captureSafetyTimerRef.current = null;
+      }, 15000);
       try {
         const viewfinder = viewfinderRef.current;
         let result: { base64: string; mimeType: string; uri?: string } | null = null;
@@ -206,7 +233,12 @@ export function MultiAngleCaptureGuide({
         await new Promise((resolve) => setTimeout(resolve, 400)).catch(() => {});
         isCapturingRef.current = false;
         pickLockRef.current = false;
+        if (captureSafetyTimerRef.current) {
+          clearTimeout(captureSafetyTimerRef.current);
+          captureSafetyTimerRef.current = null;
+        }
         if (mountedRef.current) setProcessing(false);
+        if (mountedRef.current) setShutterLocked(false);
         try { await nativeHeapCooldownGuard(); } catch { /* cooldown must not block lock release */ }
       }
     },
@@ -234,6 +266,10 @@ export function MultiAngleCaptureGuide({
     if (!mountedRef.current) return;
     pickLockRef.current = false;
     isCapturingRef.current = false;
+    if (captureSafetyTimerRef.current) {
+      clearTimeout(captureSafetyTimerRef.current);
+      captureSafetyTimerRef.current = null;
+    }
     onComplete(ordered);
     setShots({});
     shotsRef.current = {};
@@ -243,16 +279,21 @@ export function MultiAngleCaptureGuide({
   const handleClose = useCallback(() => {
     pickLockRef.current = false;
     isCapturingRef.current = false;
+    if (captureSafetyTimerRef.current) {
+      clearTimeout(captureSafetyTimerRef.current);
+      captureSafetyTimerRef.current = null;
+    }
     setShots({});
     shotsRef.current = {};
     setCurrentAngle(0);
     setCaptureError(null);
     setCameraReady(false);
     setProcessing(false);
+    setShutterLocked(false);
     onClose();
   }, [onClose]);
 
-  const canCapture = cameraReady && !processing && !isCapturingRef.current && !pickLockRef.current && !maxReached;
+  const canCapture = cameraReady && !processing && !shutterLocked && !maxReached;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
