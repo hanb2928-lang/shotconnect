@@ -890,14 +890,14 @@ export async function extractVideoFrameBase64(
     video.preload = 'auto';
 
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('동영상 로딩 시간 초과')), 15000);
+      const timer = setTimeout(() => reject(new Error('동영상 로딩 시간 초과 (30초)')), 30000);
       video.onloadeddata = () => { clearTimeout(timer); resolve(); };
-      video.onerror = () => { clearTimeout(timer); reject(new Error('동영상을 불러올 수 없습니다')); };
+      video.onerror = () => { clearTimeout(timer); reject(new Error('동영상을 불러올 수 없습니다. 웹M 형식이 브라우저에서 지원되지 않거나 메모리가 부족할 수 있습니다.')); };
     });
 
     video.currentTime = Math.min(video.duration / 2, 1);
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('동영상 프레임 탐색 시간 초과')), 10000);
+      const timer = setTimeout(() => reject(new Error('동영상 프레임 탐색 시간 초과 (20초)')), 20000);
       video.onseeked = () => { clearTimeout(timer); resolve(); };
       video.onerror = () => { clearTimeout(timer); reject(new Error('동영상 프레임 탐색 실패')); };
     });

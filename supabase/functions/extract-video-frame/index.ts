@@ -43,7 +43,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const randSuffix = Math.random().toString(36).slice(2, 8);
-    const tempVideoPath = `/tmp/input-video-${Date.now()}-${randSuffix}.mp4`;
+    // Derive the file extension from the video URL so ffmpeg gets the
+    // correct container format hint. A .mp4 extension on a WebM file
+    // can cause ffmpeg to fail or produce corrupt output.
+    const urlExt = videoUrl.match(/\.(webm|mov|avi|mkv|m4v)(\?|$)/i)?.[1]?.toLowerCase() || 'mp4';
+    const tempVideoPath = `/tmp/input-video-${Date.now()}-${randSuffix}.${urlExt}`;
     const tempFramePath = `/tmp/frame-${Date.now()}-${randSuffix}.jpg`;
     await Deno.writeFile(tempVideoPath, videoBytes);
     videoBytes = new Uint8Array(0);

@@ -391,7 +391,9 @@ export async function uploadVideoBlob(
   mimeType: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const ext = mimeType === 'video/quicktime' ? 'mov' : 'mp4';
+  const ext = mimeType === 'video/quicktime' ? 'mov'
+    : mimeType === 'video/webm' ? 'webm'
+    : 'mp4';
   const fileName = `video-${uniqueSuffix()}.${ext}`;
   const safeFileName = sanitizeStoragePath(fileName);
 

@@ -634,12 +634,6 @@ export function PostCaptureWorkflow({
           }
           const isImage = !!imageUri && !videoUri;
           const contentType: string = isImage ? 'image/jpeg' : 'video/mp4';
-          const ext = contentType === 'image/png' ? 'png'
-            : contentType === 'image/webp' ? 'webp'
-            : contentType === 'image/heic' ? 'heic'
-            : contentType === 'video/quicktime' ? 'mov'
-            : isImage ? 'jpg' : 'mp4';
-          const fileName = `shortform-${Date.now()}.${ext}`;
 
           // Native: upload file URI directly via FileSystem.uploadAsync,
           // bypassing JS bridge — no Blob/Uint8Array in JS memory.
@@ -648,6 +642,12 @@ export function PostCaptureWorkflow({
           // for 10+ seconds on large files, so we always prefer the native
           // streaming path on mobile.
           if (Platform.OS !== 'web' && (finalUri.startsWith('file://') || finalUri.startsWith('content://'))) {
+            const ext = contentType === 'image/png' ? 'png'
+              : contentType === 'image/webp' ? 'webp'
+              : contentType === 'image/heic' ? 'heic'
+              : contentType === 'video/quicktime' ? 'mov'
+              : isImage ? 'jpg' : 'mp4';
+            const fileName = `shortform-${Date.now()}.${ext}`;
             if (mountedRef.current) setUploadStatusMsg('파일 업로드 중...');
             cloudSuccess = await uploadFileUriNative(finalUri, fileName, contentType);
           } else {
@@ -655,6 +655,13 @@ export function PostCaptureWorkflow({
             const { data: uploadBody, mimeType: detectedMimeType } = await uriToBlob(finalUri);
             if (mountedRef.current) setUploadStatusMsg('업로드 중...');
             const actualContentType = detectedMimeType || contentType;
+            const actualExt = actualContentType === 'image/png' ? 'png'
+              : actualContentType === 'image/webp' ? 'webp'
+              : actualContentType === 'image/heic' ? 'heic'
+              : actualContentType === 'video/quicktime' ? 'mov'
+              : actualContentType === 'video/webm' ? 'webm'
+              : isImage ? 'jpg' : 'mp4';
+            const fileName = `shortform-${Date.now()}.${actualExt}`;
             cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, actualContentType);
           }
         } catch (err) {
