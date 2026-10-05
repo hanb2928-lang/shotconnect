@@ -1087,7 +1087,8 @@ export async function compressAndUploadUri(
   }
   const compressedUri = await compressUriToUri(uri, maxDimension, quality);
   try {
-    return await uploadUriToSupabase(compressedUri, 'image/jpeg');
+    const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    return await uploadFileDirectNative(compressedUri, 'scans', fileName, 'image/jpeg');
   } finally {
     await safeDeleteTempFile(compressedUri).catch(() => {});
     await waitForFileChannelFlush();
@@ -1181,7 +1182,7 @@ export async function uploadUriToSupabase(
     : mimeType === 'image/heic' ? 'heic'
     : 'jpg';
   const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  return uploadUriToBucket(fileUri, mimeType, 'scans', fileName);
+  return uploadFileDirectNative(fileUri, 'scans', fileName, mimeType);
 }
 
 /**

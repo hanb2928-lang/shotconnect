@@ -11,7 +11,7 @@ import { CameraView } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
-import { compressCaptureFrameToBlob, compressImageToBase64 } from '@/lib/imageEdit';
+import { compressCaptureFrameToBlob, compressImageToBase64WithUri } from '@/lib/imageEdit';
 import { debugSaveRawCapture, debugSaveNormalizedCapture } from '@/lib/debugCapture';
 import { withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
 import { getSafeVideoConstraints, clampCaptureDimensions } from '@/lib/captureConstraints';
@@ -19,7 +19,7 @@ import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery
 import * as FileSystem from 'expo-file-system/legacy';
 
 export interface InlineViewfinderHandle {
-  capture: () => Promise<{ base64: string; mimeType: string; blob?: Blob } | null>;
+  capture: () => Promise<{ base64: string; mimeType: string; blob?: Blob; uri?: string } | null>;
   isReady: () => boolean;
 }
 
@@ -186,7 +186,7 @@ export const InlineCameraViewfinder = forwardRef<
     };
   }, [stopStream]);
 
-  const captureWeb = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
+  const captureWeb = useCallback(async (): Promise<{ base64: string; mimeType: string; uri?: string } | null> => {
     if (Platform.OS !== 'web' || !videoRef.current || !cameraReady) return null;
     if (captureInProgressRef.current) return null;
     captureInProgressRef.current = true;
@@ -222,16 +222,10 @@ export const InlineCameraViewfinder = forwardRef<
     }
   }, [cameraReady, facing]);
 
-  const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
+  const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string; uri?: string } | null> => {
     if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady) return null;
 
-    // Serial FIFO queue: chain every capture onto the previous one so that
-    // takePictureAsync, compressImageToBase64, and FileSystem.deleteAsync
-    // never overlap on the native bridge. Overlapping these operations is
-    // what causes the camera hardware to report "busy" and silently drop
-    // the capture — especially in multi-angle and stereo-cut-auto modes
-    // where shots come in rapid succession.
-    const runCapture = async (): Promise<{ base64: string; mimeType: string } | null> => {
+    const runCapture = async (): Promise<{ base64: string; mimeType: string; uri?: string } | null> => {
       if (captureInProgressRef.current) {
         captureLockRef.current = false;
         return null;
@@ -239,8 +233,6 @@ export const InlineCameraViewfinder = forwardRef<
       captureInProgressRef.current = true;
       let capturedUri: string | null = null;
       try {
-        // Pre-capture stabilization: give the native camera buffer time to
-        // settle before issuing the next takePictureAsync.
         await new Promise((resolve) => setTimeout(resolve, 400));
         if (!mountedRef.current || !nativeCameraRef.current || !cameraReady) return null;
         const result = await nativeCameraRef.current.takePictureAsync({
@@ -250,10 +242,6 @@ export const InlineCameraViewfinder = forwardRef<
           return null;
         }
         capturedUri = result.uri;
-        // Immediately copy the captured photo from the camera's cache URI to
-        // the app's persistent document directory. The OS can evict cache
-        // files at any time, and content:// URIs from the camera may become
-        // inaccessible after the camera session closes.
         const docDir = FileSystem.documentDirectory;
         if (docDir && capturedUri.startsWith('file://') && !capturedUri.startsWith(docDir)) {
           const safePath = `${docDir}cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
@@ -261,24 +249,20 @@ export const InlineCameraViewfinder = forwardRef<
             FileSystem.copyAsync({ from: capturedUri!, to: safePath }),
           );
           await waitForFileChannelFlush();
-          // Delete the original cache URI to avoid leaving stale temp files
           await withFileSettle('deleteOrigCapture', () =>
             FileSystem.deleteAsync(capturedUri!, { idempotent: true }),
           ).catch(() => {});
           capturedUri = safePath;
         }
         const uriToDelete = capturedUri;
-        const compressed = await compressImageToBase64(uriToDelete, 720, 0.8);
+        const compressed = await compressImageToBase64WithUri(uriToDelete, 720, 0.8);
         await debugSaveNormalizedCapture(compressed.base64, compressed.mimeType, 720, 720, 'inline-native-normalized');
-        // Wait for temp file cleanup to finish before releasing the lock.
-        // Use withFileSettle to retry on transient EBUSY from the camera
-        // session still holding the file handle.
         await withFileSettle('deleteCapturedUri', () =>
           FileSystem.deleteAsync(uriToDelete, { idempotent: true }),
         ).catch(() => {});
         await waitForFileChannelFlush();
         capturedUri = null;
-        return compressed;
+        return { base64: compressed.base64, mimeType: compressed.mimeType, uri: compressed.compressedUri ?? undefined };
       } catch (err) {
         console.error('[InlineCameraViewfinder] native capture failed:', err);
         if (capturedUri) {
