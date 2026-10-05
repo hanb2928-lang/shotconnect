@@ -181,8 +181,12 @@ function assertNativeBase64Size(base64: string): void {
 }
 
 export async function writeBase64ToTempFile(base64: string, ext: string): Promise<string | null> {
-  if (Platform.OS === 'web' || !FileSystem.cacheDirectory) return null;
-  const path = `${FileSystem.cacheDirectory}b64tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  if (Platform.OS === 'web') return null;
+  // Android 14+ sandbox restricts read access to cacheDirectory for the
+  // native upload module. Use documentDirectory (app-private, always readable).
+  const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+  if (!dir) return null;
+  const path = `${dir}b64tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   try {
     await withFileSettle('writeB64Temp', () =>
       FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 }),
@@ -1111,9 +1115,28 @@ export async function uploadUriToBucket(
   }
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${fileName}`;
 
+  // Android 14+ sandbox can deny read access to cacheDirectory files.
+  // Copy to documentDirectory before uploading.
+  const docDir = FileSystem.documentDirectory;
+  let uploadUri = fileUri;
+  let copiedPath: string | null = null;
+  if (docDir && !fileUri.startsWith(docDir)) {
+    const baseName = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    copiedPath = `${docDir}bucket-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${baseName}`;
+    try {
+      await withFileSettle('uploadUriToBucket-copy', () =>
+        FileSystem.copyAsync({ from: fileUri, to: copiedPath! }),
+      );
+      await waitForFileChannelFlush();
+      uploadUri = copiedPath;
+    } catch {
+      copiedPath = null;
+    }
+  }
+
   let fileSize: number | undefined;
   try {
-    const info = await FileSystem.getInfoAsync(fileUri);
+    const info = await FileSystem.getInfoAsync(uploadUri);
     if (info.exists) fileSize = info.size;
   } catch { /* best-effort */ }
 
@@ -1122,33 +1145,48 @@ export async function uploadUriToBucket(
     'x-upsert': upsert ? 'true' : 'false',
   };
 
-  // Primary: BINARY_CONTENT streams the raw file as the request body — fastest
-  // and lowest overhead. Some Android devices/OEM network stacks mishandle
-  // raw binary POST bodies (silently truncating or sending empty bodies),
-  // so we fall back to MULTIPART which wraps the file in a standard
-  // multipart/form-data envelope that all HTTP stacks handle correctly.
-  let result: { status: number; body?: string } | null = null;
-  try {
-    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
-      httpMethod: 'POST',
-      headers: { ...headers, 'Content-Type': mimeType },
-      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-      mimeType,
-    });
-    if (result.status >= 400 && result.status !== 409) result = null;
-  } catch {
-    result = null;
-  }
+  const doUpload = async (): Promise<{ status: number; body?: string }> => {
+    let result: { status: number; body?: string } | null = null;
+    try {
+      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+        httpMethod: 'POST',
+        headers: { ...headers, 'Content-Type': mimeType },
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        mimeType,
+      });
+      if (result.status >= 400 && result.status !== 409) result = null;
+    } catch {
+      result = null;
+    }
 
-  if (!result) {
-    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
-      httpMethod: 'POST',
-      headers,
-      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-      fieldName: 'file',
-      mimeType,
-      parameters: { upsert: upsert ? 'true' : 'false' },
-    });
+    if (!result) {
+      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+        httpMethod: 'POST',
+        headers,
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType,
+        parameters: { upsert: upsert ? 'true' : 'false' },
+      });
+    }
+    return result;
+  };
+
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.')),
+      NATIVE_UPLOAD_TIMEOUT_MS,
+    );
+  });
+
+  let result: { status: number; body?: string };
+  try {
+    result = await Promise.race([doUpload(), timeout]).finally(() => clearTimeout(timer!));
+  } finally {
+    if (copiedPath) {
+      await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
+    }
   }
 
   if (__DEV__) {
@@ -1156,7 +1194,7 @@ export async function uploadUriToBucket(
     logUploadEvent({
       path: 'native_uploadAsync',
       url: uploadUrl,
-      fileUri,
+      fileUri: uploadUri,
       fileSize,
       mimeType,
       status: result.status,
@@ -1190,41 +1228,87 @@ export async function uploadUriToSupabase(
  * expo-file-system의 FileSystem.uploadAsync가 OS 네이티브 네트워킹 스택으로 파일을 스트리밍하므로
  * Hermes JS 엔진 메모리와 RN Bridge를 완전히 우회한다.
  */
+const NATIVE_UPLOAD_TIMEOUT_MS = 30_000;
+
 export async function uploadFileDirectNative(
   fileUri: string,
   bucket: string,
   path: string,
   mimeType: string,
 ): Promise<string> {
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
-
-  let result: { status: number; body?: string } | null = null;
-  try {
-    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
-      httpMethod: 'POST',
-      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-      headers: {
-        Authorization: `Bearer ${supabaseAnonKey}`,
-        'Content-Type': mimeType,
-        'x-upsert': 'true',
-      },
-    });
-    if (result.status >= 400 && result.status !== 409) result = null;
-  } catch {
-    result = null;
+  if (Platform.OS === 'web') {
+    throw new Error('uploadFileDirectNative is not supported on web');
   }
 
-  if (!result) {
-    result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
-      httpMethod: 'POST',
-      headers: {
-        Authorization: `Bearer ${supabaseAnonKey}`,
-      },
-      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-      fieldName: 'file',
-      mimeType,
-      parameters: { upsert: 'true' },
-    });
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+
+  // Android 14+ sandbox can deny the native upload module read access to
+  // files in cacheDirectory or content:// URIs. Copy to documentDirectory
+  // (app-private, always readable) before uploading.
+  const docDir = FileSystem.documentDirectory;
+  let uploadUri = fileUri;
+  let copiedPath: string | null = null;
+  if (docDir && !fileUri.startsWith(docDir)) {
+    const filename = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    copiedPath = `${docDir}native-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${filename}`;
+    try {
+      await withFileSettle('uploadFileDirectNative-copy', () =>
+        FileSystem.copyAsync({ from: fileUri, to: copiedPath! }),
+      );
+      await waitForFileChannelFlush();
+      uploadUri = copiedPath;
+    } catch {
+      copiedPath = null;
+    }
+  }
+
+  const doUpload = async (): Promise<{ status: number; body?: string }> => {
+    let result: { status: number; body?: string } | null = null;
+    try {
+      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          'Content-Type': mimeType,
+          'x-upsert': 'true',
+        },
+      });
+      if (result.status >= 400 && result.status !== 409) result = null;
+    } catch {
+      result = null;
+    }
+
+    if (!result) {
+      result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+        httpMethod: 'POST',
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+        },
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType,
+        parameters: { upsert: 'true' },
+      });
+    }
+    return result;
+  };
+
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('네이티브 업로드 시간이 초과되었습니다. 네트워크 연결을 확인 후 다시 시도해주세요.')),
+      NATIVE_UPLOAD_TIMEOUT_MS,
+    );
+  });
+
+  let result: { status: number; body?: string };
+  try {
+    result = await Promise.race([doUpload(), timeout]).finally(() => clearTimeout(timer!));
+  } finally {
+    if (copiedPath) {
+      await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
+    }
   }
 
   if (result.status >= 400) {

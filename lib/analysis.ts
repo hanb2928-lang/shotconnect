@@ -215,8 +215,9 @@ export async function uploadImageBlob(
   if (Platform.OS !== 'web') {
     const FileSystem = await import('expo-file-system/legacy');
     const { registerTempFile, unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
-    if (FileSystem.cacheDirectory) {
-      const tmpPath = `${FileSystem.cacheDirectory}blob-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    if (docDir) {
+      const tmpPath = `${docDir}blob-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       try {
         // Convert blob/Uint8Array to base64 for writeAsStringAsync
         let bytes: Uint8Array;
@@ -388,8 +389,9 @@ export async function uploadVideoBlob(
     let readableUri = uri;
     let tempCopy: string | null = null;
     if (uri.startsWith('content://')) {
-      if (!FileSystem.cacheDirectory) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
-      tempCopy = `${FileSystem.cacheDirectory}video-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
+      const upDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      if (!upDir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
+      tempCopy = `${upDir}video-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
       const COPY_TIMEOUT_MS = 60_000;
       let copyTimer: ReturnType<typeof setTimeout>;
       const copyTimeout = new Promise<never>((_, reject) => {
