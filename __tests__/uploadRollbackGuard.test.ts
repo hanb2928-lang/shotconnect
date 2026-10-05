@@ -45,6 +45,7 @@ jest.mock('@/lib/imageEdit', () => ({
   }),
   base64ToBlob: jest.fn().mockReturnValue(new Blob(['fake'], { type: 'image/jpeg' })),
   nativeHeapCooldownGuard: jest.fn().mockResolvedValue(undefined),
+  deleteStorageObjects: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('expo-linking', () => ({ createURL: jest.fn(), openURL: jest.fn() }));
@@ -68,9 +69,10 @@ import { supabase } from '@/lib/supabase';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { resetUploadCircuit } from '@/lib/uploadCircuitBreaker';
 import { createScanFromAngleShots } from '@/lib/stereoPipeline';
+import { deleteStorageObjects } from '@/lib/imageEdit';
 
 function getStorageRemoveMock(): jest.Mock {
-  return (supabase.storage.from as jest.Mock)().remove as jest.Mock;
+  return deleteStorageObjects as unknown as jest.Mock;
 }
 
 function makeShot(orderIndex: number, base64 = 'fake-base64-data') {
@@ -113,7 +115,7 @@ describe('Upload Rollback Guard', () => {
 
     const removeMock = getStorageRemoveMock();
     expect(removeMock).toHaveBeenCalled();
-    const removedPaths = removeMock.mock.calls[0][0] as string[];
+    const removedPaths = removeMock.mock.calls[0][1] as string[];
     expect(removedPaths.length).toBeGreaterThanOrEqual(1);
     expect(removedPaths[0]).toContain('scan-');
   }, 60000);
@@ -128,7 +130,7 @@ describe('Upload Rollback Guard', () => {
 
     const removeMock = getStorageRemoveMock();
     expect(removeMock).toHaveBeenCalled();
-    const removedPaths = removeMock.mock.calls[0][0] as string[];
+    const removedPaths = removeMock.mock.calls[0][1] as string[];
     expect(removedPaths.length).toBeGreaterThanOrEqual(2);
   }, 30000);
 

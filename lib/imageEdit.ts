@@ -1499,7 +1499,8 @@ export async function uploadFileDirectNative(
       });
       if (result.status >= 400 && result.status !== 409) result = null;
     } catch (err) {
-      console.warn('[uploadFileDirectNative] MULTIPART failed:', err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`[uploadFileDirectNative] MULTIPART failed: ${errMsg}`);
       result = null;
     }
 
@@ -1521,9 +1522,12 @@ export async function uploadFileDirectNative(
           },
         });
       } catch (err) {
-        console.error('[uploadFileDirectNative] BINARY_CONTENT fallback failed:', err);
         const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[uploadFileDirectNative] BINARY_CONTENT fallback failed: ${errMsg}`);
         throw new Error(`네이티브 업로드 실패 (경로: ${safePath}, MIME: ${effectiveMime}): ${errMsg}`);
+      }
+      if (!result || typeof result.status !== 'number') {
+        throw new Error(`네이티브 업로드 실패 — 응답 객체 없음 (경로: ${safePath}, MIME: ${effectiveMime})`);
       }
     }
     return result;
@@ -1542,11 +1546,20 @@ export async function uploadFileDirectNative(
     result = await Promise.race([doUpload(), timeout]).finally(() => clearTimeout(timer!));
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logError(new Error(`uploadFileDirectNative 네트워크 에러: ${errMsg}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path: safePath, error: errMsg } });
     throw err;
   } finally {
     if (copiedPath) {
       await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
     }
+  }
+
+  if (!result || typeof result.status !== 'number') {
+    const detail = result ? JSON.stringify(result) : 'undefined';
+    console.error(`[UPLOAD FAIL] uploadFileDirectNative returned malformed result: ${detail}`);
+    logError(new Error(`uploadFileDirectNative malformed result: ${detail}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path: safePath, result: detail } });
+    throw new Error(`업로드 실패 — 서버 응답이 올바르지 않습니다 (path: ${safePath})`);
   }
 
   if (result.status !== 200 && result.status !== 201 && result.status !== 205) {
