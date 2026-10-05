@@ -1188,8 +1188,11 @@ export async function uploadUriToBucket(
   }
 
   const readableUri = await normalizeUriForRead(fileUri, 'uploadUriToBucket');
+  let compressedCleanupUri: string | null = null;
   try {
-    const base64 = await FileSystem.readAsStringAsync(readableUri, {
+    const { uri: uploadUri, cleanedUp } = await compressImageUriIfNeeded(readableUri, mimeType);
+    if (cleanedUp) compressedCleanupUri = cleanedUp;
+    const base64 = await FileSystem.readAsStringAsync(uploadUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
     if (!base64) throw new Error('업로드할 파일을 읽을 수 없습니다.');
@@ -1199,6 +1202,7 @@ export async function uploadUriToBucket(
     }
     return await uploadBytesToStorage(bytes, bucket, fileName, mimeType, upsert, signal);
   } finally {
+    if (compressedCleanupUri) await FileSystem.deleteAsync(compressedCleanupUri, { idempotent: true }).catch(() => {});
     await cleanupNormalizedUri(fileUri, readableUri);
   }
 }
@@ -1268,6 +1272,28 @@ function detectMimeFromBytes(bytes: Uint8Array): string | null {
   return null;
 }
 
+const IMAGE_COMPRESS_THRESHOLD_BYTES = 2_000_000;
+const IMAGE_COMPRESS_MAX_DIMENSION = 1280;
+const IMAGE_COMPRESS_QUALITY = 0.75;
+
+async function compressImageUriIfNeeded(uri: string, mimeType: string): Promise<{ uri: string; compressed: boolean; cleanedUp?: string }> {
+  if (!mimeType.startsWith('image/')) return { uri, compressed: false };
+  let size: number | undefined;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    size = info.exists ? info.size : undefined;
+  } catch { /* best-effort */ }
+  if (size === undefined || size <= IMAGE_COMPRESS_THRESHOLD_BYTES) {
+    return { uri, compressed: false };
+  }
+  try {
+    const compressed = await compressUriToUri(uri, IMAGE_COMPRESS_MAX_DIMENSION, IMAGE_COMPRESS_QUALITY);
+    return { uri: compressed, compressed: true, cleanedUp: compressed };
+  } catch {
+    return { uri, compressed: false };
+  }
+}
+
 async function normalizeUriForRead(fileUri: string, label: string): Promise<string> {
   if (Platform.OS === 'web') return fileUri;
   const docDir = FileSystem.documentDirectory;
@@ -1310,8 +1336,11 @@ export async function uploadFileDirectNative(
   }
 
   const readableUri = await normalizeUriForRead(fileUri, 'uploadFileDirectNative');
+  let compressedCleanupUri: string | null = null;
   try {
-    const base64 = await FileSystem.readAsStringAsync(readableUri, {
+    const { uri: uploadUri, cleanedUp } = await compressImageUriIfNeeded(readableUri, mimeType);
+    if (cleanedUp) compressedCleanupUri = cleanedUp;
+    const base64 = await FileSystem.readAsStringAsync(uploadUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
     if (!base64) throw new Error('업로드할 파일을 읽을 수 없습니다.');
@@ -1331,6 +1360,7 @@ export async function uploadFileDirectNative(
     logError(new Error(`uploadFileDirectNative: ${errMsg}`), { component: 'imageEdit', action: 'uploadFileDirectNative', extra: { path, error: errMsg } });
     throw err;
   } finally {
+    if (compressedCleanupUri) await FileSystem.deleteAsync(compressedCleanupUri, { idempotent: true }).catch(() => {});
     await cleanupNormalizedUri(fileUri, readableUri);
   }
 }
