@@ -435,11 +435,12 @@ export async function uploadVideoBlob(
         httpMethod: 'POST',
         headers: {
           Authorization: `Bearer ${supabaseAnonKey}`,
-          'Content-Type': mimeType,
           'x-upsert': 'true',
           'Cache-Control': '360000',
         },
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType,
       });
 
       if (uploadResult.status < 200 || uploadResult.status >= 300) {
