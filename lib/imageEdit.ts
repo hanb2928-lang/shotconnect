@@ -2,7 +2,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform, Image as RNImage, AppState, type AppStateStatus } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
-import { base64ToUint8ArrayAsync, cleanBase64 } from '@/lib/base64';
+import { base64ToUint8ArrayAsync, cleanBase64, uint8ArrayToBase64Async } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
 import { isLowEndDevice } from '@/lib/devicePerformance';
 import { withFileLock } from '@/lib/fileLock';
@@ -1588,6 +1588,26 @@ async function uploadBytesToStorageImpl(
   }
   if (!bodySize || bodySize <= 0) {
     throw new Error('업로드할 데이터의 크기가 0바이트입니다.');
+  }
+
+  if (Platform.OS !== 'web') {
+    const directory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    if (directory) {
+      const nativePath = `${directory}bytes-upload-${uniqueSuffix()}.${normalizedMime === 'image/png' ? 'png' : normalizedMime.startsWith('video/') ? 'mp4' : 'jpg'}`;
+      const bytes = body instanceof Blob
+        ? new Uint8Array(await body.arrayBuffer())
+        : body;
+      const base64 = await uint8ArrayToBase64Async(bytes);
+      try {
+        await FileSystem.writeAsStringAsync(nativePath, base64, { encoding: FileSystem.EncodingType.Base64 });
+        registerTempFile(nativePath, 'uploadBytesToStorage-native', { pin: true });
+        return await uploadFileDirectNative(nativePath, bucket, path, normalizedMime, signal);
+      } finally {
+        unpinTempFile(nativePath);
+        unregisterTempFile(nativePath);
+        await safeDeleteTempFile(nativePath).catch(() => {});
+      }
+    }
   }
 
   // Hermes GC tick: yield to the event loop so the JS engine can collect
