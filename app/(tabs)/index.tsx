@@ -1716,6 +1716,7 @@ function CameraScreenInner() {
           onCaptureImage={handleMultiAngleCapture}
         />
 
+        <Suspense fallback={null}>
         <PostCaptureWorkflow
           key={`pcw-web-${workflowMountKey}`}
           visible={postCaptureVisible}
@@ -1724,6 +1725,7 @@ function CameraScreenInner() {
           onProceedToAnalysis={handlePostCaptureProceed}
           onClose={handlePostCaptureClose}
         />
+        </Suspense>
 
         <CreditPurchaseModal
           visible={creditModalVisible}
@@ -1881,6 +1883,7 @@ function CameraScreenInner() {
         </View>
       </Modal>
 
+      <Suspense fallback={null}>
       <PostCaptureWorkflow
         key={`pcw-native-${workflowMountKey}`}
         visible={postCaptureVisible}
@@ -1889,6 +1892,7 @@ function CameraScreenInner() {
         onProceedToAnalysis={handlePostCaptureProceed}
         onClose={handlePostCaptureClose}
       />
+      </Suspense>
 
       <CreditPurchaseModal
         visible={creditModalVisible}
