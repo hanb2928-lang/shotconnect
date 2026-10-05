@@ -52,8 +52,9 @@ describe('friendlyError', () => {
     expect(friendlyError(new Error('Permission denied'), '기본')).toContain('권한');
   });
 
-  it('매칭되지 않는 에러는 기본 메시지를 반환한다', () => {
-    expect(friendlyError(new Error('something weird'), '기본 메시지')).toBe('기본 메시지');
+  it('매칭되지 않는 에러는 기본 메시지와 원본 에러를 함께 반환한다', () => {
+    expect(friendlyError(new Error('something weird'), '기본 메시지')).toContain('기본 메시지');
+    expect(friendlyError(new Error('something weird'), '기본 메시지')).toContain('something weird');
   });
 
   it('문자열 에러도 처리한다', () => {

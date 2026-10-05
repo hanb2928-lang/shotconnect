@@ -61,8 +61,13 @@ export function friendlyError(err: unknown, fallback: string): string {
     return `이미지를 읽을 수 없습니다. 다른 사진으로 시도해주세요.${suffix}`;
   }
 
-  // If we couldn't match any pattern but the error has a status code,
-  // include it so the user (and support) has something actionable.
+  // If no pattern matched, surface the raw error message so the user and
+  // support can see exactly what the server returned — never just a generic
+  // fallback that hides the real cause.
+  const rawDetail = msg.trim();
+  if (rawDetail && rawDetail !== fallback) {
+    return `${fallback}${suffix ? `${suffix}` : ''} [${rawDetail}]`;
+  }
   if (hasStatus) return `${fallback}${suffix}`;
   return fallback;
 }
