@@ -689,7 +689,7 @@ function CameraScreenInner() {
             ]);
           }
         });
-        if (!shouldProceed) return;
+        if (!shouldProceed || !isMountedRef.current) return;
       }
       const mimeType = asset.mimeType?.startsWith('video/') ? asset.mimeType : 'video/mp4';
       setPostCaptureBase64(null);
@@ -810,6 +810,13 @@ function CameraScreenInner() {
       return;
     }
     await prepareCameraForProcessing();
+    if (!isMountedRef.current) {
+      stereoOverlayRef.current = false;
+      setStereoOverlayVisible(false);
+      if (stereoAbortRef.current) stereoAbortRef.current = null;
+      releasePipelineLock();
+      return;
+    }
     const controller = new AbortController();
     stereoAbortRef.current = controller;
     let stereoMod;
@@ -822,6 +829,11 @@ function CameraScreenInner() {
       if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
       releasePipelineLock();
       setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+      return;
+    }
+    if (!isMountedRef.current) {
+      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+      releasePipelineLock();
       return;
     }
     setStereoProgress(stereoMod.makeInitialProgress());
@@ -1162,6 +1174,13 @@ function CameraScreenInner() {
       return;
     }
     await prepareCameraForProcessing();
+    if (!isMountedRef.current) {
+      stereoOverlayRef.current = false;
+      setStereoOverlayVisible(false);
+      if (stereoAbortRef.current) stereoAbortRef.current = null;
+      releasePipelineLock();
+      return;
+    }
     const controller = new AbortController();
     stereoAbortRef.current = controller;
     let stereoMod;
@@ -1174,6 +1193,11 @@ function CameraScreenInner() {
       if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
       releasePipelineLock();
       setError(friendlyError(err, '모듈을 불러오는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+      return;
+    }
+    if (!isMountedRef.current) {
+      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+      releasePipelineLock();
       return;
     }
     setStereoProgress(stereoMod.makeInitialProgress());
