@@ -475,6 +475,19 @@ function CameraScreenInner() {
     };
   }, [scheduleCameraReactivation, deactivateCamera]);
 
+  // When the guide modal closes, the modal's InlineCameraViewfinder unmounts
+  // and releases the camera HAL FD. The main screen's CameraView must not
+  // re-mount in the same render cycle — it needs to wait for the HAL FD to
+  // be fully released before re-acquiring, otherwise the camera silently
+  // fails to initialize. scheduleCameraReactivation handles the 300ms
+  // unmount→remount cooldown with key rotation.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!multiAngleVisible && !fittingGuideVisible) {
+      scheduleCameraReactivation();
+    }
+  }, [multiAngleVisible, fittingGuideVisible, scheduleCameraReactivation]);
+
   const runAutoAnalysis = useCallback(async (base64: string, mimeType: string, additionalB64s: string[] = []) => {
     if (autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
     if (!isOnline()) {
