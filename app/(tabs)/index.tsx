@@ -618,7 +618,7 @@ function CameraScreenInner() {
       router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
     } catch (err) {
       if (!isMountedRef.current || controller.signal.aborted) return;
-      setError(friendlyError(err, '편집 화면을 여는 중 오류가 발생했습니다. 다시 시도해주세요.'));
+      setError(friendlyError(err, '이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.'));
     } finally {
       if (autoAnalysisAbortRef.current === controller) autoAnalysisAbortRef.current = null;
       autoSavingRef.current = false;

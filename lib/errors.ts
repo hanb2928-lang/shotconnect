@@ -36,6 +36,12 @@ export function friendlyError(err: unknown, fallback: string): string {
   if (lower.includes('413') || lower.includes('payload too large') || lower.includes('entity too large')) {
     return `이미지 크기가 서버 허용 한도를 초과했습니다. 더 작은 이미지로 다시 시도해주세요.${suffix}`;
   }
+  if (lower.includes('403') || lower.includes('forbidden')) {
+    return `접근 권한이 거부되었습니다. 스토리지 설정을 확인해주세요.${suffix}`;
+  }
+  if (lower.includes('409') || lower.includes('conflict')) {
+    return `이미 존재하는 파일입니다. 다시 시도해주세요.${suffix}`;
+  }
   if (lower.includes('tls') || lower.includes('ssl') || lower.includes('certificate') || lower.includes('handshake') || lower.includes('secure connection')) {
     return `보안 연결에 실패했습니다. Wi-Fi 환경을 변경하거나 VPN/프록시 설정을 확인해 주세요.${suffix}`;
   }
@@ -43,7 +49,7 @@ export function friendlyError(err: unknown, fallback: string): string {
     return `촬영된 이미지가 만료되었거나 삭제되었습니다. 다시 촬영해주세요.${suffix}`;
   }
   if (lower.includes('upload') || lower.includes('storage')) {
-    return `이미지 업로드에 실패했습니다. 네트워크 연결을 확인해주세요.${suffix}`;
+    return `이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.${suffix}`;
   }
   if (lower.includes('capture') || lower.includes('camera')) {
     return `사진 촬영에 실패했습니다. 카메라를 다시 시도해주세요.${suffix}`;

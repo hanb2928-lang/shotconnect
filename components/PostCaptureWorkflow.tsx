@@ -69,6 +69,7 @@ import { compressImage, uploadUriToBucket } from '@/lib/imageEdit';
 import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { useCancellableUpload } from '@/hooks/useCancellableUpload';
+import { friendlyError } from '@/lib/errors';
 
 type PlatformOption = {
   key: string;
@@ -674,6 +675,11 @@ export function PostCaptureWorkflow({
         if (!mountedRef.current) return;
         setUploadStatusMsg(null);
         setFallbackUsed(true);
+        if (uploadErrorMsg) {
+          setUploadErrorMsg(friendlyError(uploadErrorMsg, '업로드에 실패했습니다.'));
+        } else {
+          setUploadErrorMsg('업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.');
+        }
       }
 
       const deepLink = getDeepLink(selectedPlatformKey);
