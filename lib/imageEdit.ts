@@ -19,6 +19,12 @@ import { logError } from '@/lib/errorLogger';
  * 모바일에서 파일명에 한글이나 특수기호가 섞이면 REST API가 경로를
  * 해석하지 못하고 400 에러를 내거나 업로드 프로미스가 증발한다.
  */
+let uniqueCounter = 0;
+export function uniqueSuffix(): string {
+  uniqueCounter += 1;
+  return `${Date.now()}-${uniqueCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function sanitizeStoragePath(path: string): string {
   return path
     .split('/')
@@ -214,7 +220,7 @@ export async function writeBase64ToTempFile(base64: string, ext: string): Promis
   // native upload module. Use documentDirectory (app-private, always readable).
   const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
   if (!dir) return null;
-  const path = `${dir}b64tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const path = `${dir}b64tmp-${uniqueSuffix()}.${ext}`;
   try {
     await withFileSettle('writeB64Temp', () =>
       FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 }),
@@ -413,7 +419,7 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
     (uri.startsWith('file://') && appCacheDir && !uri.startsWith(appCacheDir) && !(docDir && uri.startsWith(docDir)));
   if (!needsCopy) return { uri, temporary: false };
   if (!docDir) throw new Error('저장 공간을 사용할 수 없습니다.');
-  const target = `${docDir}shot-connect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const target = `${docDir}shot-connect-${uniqueSuffix()}.jpg`;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let bgAbortController: AbortController | null = null;
   const releaseSlot = await acquireNativeCopySlot();
@@ -562,7 +568,7 @@ export async function uploadEditedImage(base64: string, mimeType: string): Promi
   }
 
   // Web fallback
-  const fileName = `edited-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const fileName = `edited-${uniqueSuffix()}.${ext}`;
   const body = base64ToBlob(compressedBase64, uploadMime);
   const { uploadBytesToStorage } = await import('@/lib/imageEdit');
   return uploadBytesToStorage(body, 'scans', fileName, uploadMime);
@@ -901,7 +907,7 @@ export async function extractVideoFrameBase64(
       const result = await extractVideoFrameFromServer(videoUrl, maxDimension, quality);
       if (result.frameUrl) {
         const FileSystem2 = await import('expo-file-system/legacy');
-        const localPath = `${FileSystem2.cacheDirectory}server-frame-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        const localPath = `${FileSystem2.cacheDirectory}server-frame-${uniqueSuffix()}.jpg`;
         try {
           await FileSystem2.downloadAsync(result.frameUrl, localPath);
           registerTempFile(localPath, 'extractVideoFrameBase64', { pin: true });
@@ -1085,7 +1091,7 @@ export async function compressUriToUri(
     registerTempFile(manipulated.uri, 'compressUriToUri', { pin: true });
     const docDir = FileSystem.documentDirectory;
     if (docDir && !manipulated.uri.startsWith(docDir)) {
-      const dest = `${docDir}compressed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const dest = `${docDir}compressed-${uniqueSuffix()}.jpg`;
       await withFileSettle('compressUriToUri-copy', () =>
         FileSystem.copyAsync({ from: manipulated.uri, to: dest }),
       );
@@ -1123,7 +1129,7 @@ export async function compressAndUploadUri(
   }
   const compressedUri = await compressUriToUri(uri, maxDimension, quality);
   try {
-    const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const fileName = `scan-${uniqueSuffix()}.jpg`;
     return await uploadFileDirectNative(compressedUri, 'scans', fileName, 'image/jpeg');
   } finally {
     await safeDeleteTempFile(compressedUri).catch(() => {});
@@ -1155,9 +1161,9 @@ export async function uploadUriToBucket(
   let uploadUri = fileUri;
   let copiedPath: string | null = null;
   if (docDir && !fileUri.startsWith(docDir)) {
-    const rawBaseName = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    const rawBaseName = fileUri.split('/').pop() || `upload-${uniqueSuffix()}`;
     const baseName = sanitizeStoragePath(rawBaseName);
-    copiedPath = `${docDir}bucket-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${baseName}`;
+    copiedPath = `${docDir}bucket-up-${uniqueSuffix()}-${baseName}`;
     try {
       await withFileSettle('uploadUriToBucket-copy', () =>
         FileSystem.copyAsync({ from: fileUri, to: copiedPath! }),
@@ -1296,7 +1302,7 @@ export async function uploadUriToSupabase(
     : mimeType === 'image/webp' ? 'webp'
     : mimeType === 'image/heic' ? 'heic'
     : 'jpg';
-  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const fileName = `scan-${uniqueSuffix()}.${ext}`;
   return uploadFileDirectNative(fileUri, 'scans', fileName, mimeType);
 }
 
@@ -1384,9 +1390,9 @@ export async function uploadFileDirectNative(
   let uploadUri = fileUri;
   let copiedPath: string | null = null;
   if (docDir && !fileUri.startsWith(docDir)) {
-    const rawFilename = fileUri.split('/').pop() || `upload-${Date.now()}`;
+    const rawFilename = fileUri.split('/').pop() || `upload-${uniqueSuffix()}`;
     const filename = encodeStoragePath(rawFilename);
-    copiedPath = `${docDir}native-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${filename}`;
+    copiedPath = `${docDir}native-up-${uniqueSuffix()}-${filename}`;
     try {
       await withFileSettle('uploadFileDirectNative-copy', () =>
         FileSystem.copyAsync({ from: fileUri, to: copiedPath! }),

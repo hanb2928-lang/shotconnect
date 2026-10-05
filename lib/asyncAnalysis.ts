@@ -9,7 +9,7 @@ import { base64ToUint8Array } from '@/lib/base64';
 import { hashImage, hashMultiAngle } from '@/lib/contentHash';
 import { TTS_FUNCTION_URL, supabaseAnonKey } from '@/lib/supabase';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
-import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
+import { nativeHeapCooldownGuard, uniqueSuffix } from '@/lib/imageEdit';
 import { safeFetch } from '@/lib/apiClient';
 
 const SUPABASE_TIMEOUT_MS = 30000;
@@ -65,7 +65,7 @@ export async function startAsyncAnalysis(
   captureUri?: string,
 ): Promise<AsyncAnalysisResult> {
   const aborted = (): boolean => signal?.aborted === true;
-  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const fileName = `scan-${uniqueSuffix()}`;
   const imageHash = additionalBase64Images.length > 0
     ? hashMultiAngle([base64, ...additionalBase64Images], preferredStyle)
     : hashImage(base64);

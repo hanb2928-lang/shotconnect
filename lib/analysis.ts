@@ -7,7 +7,7 @@ import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base64';
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
-import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage, sanitizeStoragePath, encodeStoragePath } from '@/lib/imageEdit';
+import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage, sanitizeStoragePath, encodeStoragePath, uniqueSuffix } from '@/lib/imageEdit';
 import { compressUriToUri, uploadFileDirectNative } from '@/lib/imageEdit';
 import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
@@ -134,7 +134,7 @@ export async function uploadImage(
           : uploadMime === 'image/webp' ? 'webp'
           : uploadMime === 'image/heic' ? 'heic'
           : 'jpg';
-        const fileName2 = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext2}`;
+        const fileName2 = `scan-${uniqueSuffix()}.${ext2}`;
         const publicUrl = await withUploadTimeout(
           uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime),
           signal,
@@ -153,7 +153,7 @@ export async function uploadImage(
   const uploadSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
   compressedBase64 = '';
 
-  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const fileName = `scan-${uniqueSuffix()}.${ext}`;
   const encodedName = encodeStoragePath(fileName);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedName}`;
   const finishLog = logUploadStart({
@@ -218,7 +218,7 @@ export async function uploadImageBlob(
     const { registerTempFile, unpinTempFile, safeDeleteTempFile } = await import('@/lib/tempFileManager');
     const docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
     if (docDir) {
-      const tmpPath = `${docDir}blob-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const tmpPath = `${docDir}blob-up-${uniqueSuffix()}.${ext}`;
       try {
         // Convert blob/Uint8Array to base64 for writeAsStringAsync
         let bytes: Uint8Array;
@@ -238,7 +238,7 @@ export async function uploadImageBlob(
           : uploadMime === 'image/webp' ? 'webp'
           : uploadMime === 'image/heic' ? 'heic'
           : 'jpg';
-        const fileName2 = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext2}`;
+        const fileName2 = `scan-${uniqueSuffix()}.${ext2}`;
         const publicUrl = await withUploadTimeout(
           uploadFileDirectNative(tmpPath, 'scans', fileName2, uploadMime),
           signal,
@@ -253,7 +253,7 @@ export async function uploadImageBlob(
   }
 
   // Web: upload raw bytes directly via fetch to Supabase Storage REST API
-  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const fileName = `scan-${uniqueSuffix()}.${ext}`;
   const encodedName = encodeStoragePath(fileName);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodedName}`;
   const blobSize = uploadBlob instanceof Blob ? uploadBlob.size : (uploadBlob as Uint8Array).byteLength;
@@ -315,7 +315,7 @@ export async function uploadCompressedUri(
         const info = await FileSystem.getInfoAsync(compressedUri);
         if (info.exists) fileSize = info.size;
       } catch { /* best-effort */ }
-      const uploadFileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const uploadFileName = `scan-${uniqueSuffix()}.jpg`;
       const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodeStoragePath(uploadFileName)}`;
       const finishLog = logUploadStart({
         path: 'native_uploadAsync',
@@ -380,7 +380,7 @@ export async function uploadVideoBlob(
   signal?: AbortSignal,
 ): Promise<string> {
   const ext = mimeType === 'video/quicktime' ? 'mov' : 'mp4';
-  const fileName = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const fileName = `video-${uniqueSuffix()}.${ext}`;
   const safeFileName = sanitizeStoragePath(fileName);
   const encodedFileName = encodeStoragePath(fileName);
 
@@ -395,7 +395,7 @@ export async function uploadVideoBlob(
     if (uri.startsWith('content://')) {
       const upDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
       if (!upDir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
-      tempCopy = `${upDir}video-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
+      tempCopy = `${upDir}video-upload-${uniqueSuffix()}.mp4`;
       const COPY_TIMEOUT_MS = 60_000;
       let copyTimer: ReturnType<typeof setTimeout>;
       const copyTimeout = new Promise<never>((_, reject) => {

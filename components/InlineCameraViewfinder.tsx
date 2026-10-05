@@ -11,7 +11,7 @@ import { CameraView } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
-import { compressCaptureFrameToBlob, compressImageToBase64WithUri, waitForUriFlush } from '@/lib/imageEdit';
+import { compressCaptureFrameToBlob, compressImageToBase64WithUri, waitForUriFlush, uniqueSuffix } from '@/lib/imageEdit';
 import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { debugSaveRawCapture, debugSaveNormalizedCapture } from '@/lib/debugCapture';
 import { withFileSettle, waitForFileChannelFlush } from '@/lib/smartResize';
@@ -294,7 +294,7 @@ export const InlineCameraViewfinder = forwardRef<
         }
         const docDir = FileSystem.documentDirectory;
         if (docDir && capturedUri.startsWith('file://') && !capturedUri.startsWith(docDir)) {
-          const safePath = `${docDir}cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const safePath = `${docDir}cap-${uniqueSuffix()}.jpg`;
           await withFileSettle('copyToDocDir', () =>
             FileSystem.copyAsync({ from: capturedUri!, to: safePath }),
           );

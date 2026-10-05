@@ -38,7 +38,7 @@ import { saveManualScan, uploadImage, uploadCompressedUri } from '@/lib/analysis
 import { supabase } from '@/lib/supabase';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { buildDataUrl, cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
-import { prepareImageForApi, compressImageToBase64, compressImageToBase64WithUri, compressCaptureUriToBlob, extractVideoFrameBase64, waitForUriFlush, nativeHeapCooldownGuard } from '@/lib/imageEdit';
+import { prepareImageForApi, compressImageToBase64, compressImageToBase64WithUri, compressCaptureUriToBlob, extractVideoFrameBase64, waitForUriFlush, nativeHeapCooldownGuard, uniqueSuffix } from '@/lib/imageEdit';
 import type { MoodFilterType } from '@/lib/imageEdit';
 import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { getDeviceCaptureMaxDim } from '@/lib/captureConstraints';
@@ -981,7 +981,7 @@ function CameraScreenInner() {
         const fs = await import('expo-file-system/legacy');
         const docDir = fs.documentDirectory;
         if (docDir && capturedUri.startsWith('file://') && !capturedUri.startsWith(docDir)) {
-          const dest = `${docDir}cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const dest = `${docDir}cap-${uniqueSuffix()}.jpg`;
           await fs.copyAsync({ from: capturedUri, to: dest });
           await fs.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
           registerTempFile(dest, 'multiAngleCapture');
@@ -1062,7 +1062,7 @@ function CameraScreenInner() {
         const fs = await import('expo-file-system/legacy');
         const docDir = fs.documentDirectory;
         if (docDir && assetUri.startsWith('file://') && !assetUri.startsWith(docDir)) {
-          const dest = `${docDir}pick-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const dest = `${docDir}pick-${uniqueSuffix()}.jpg`;
           await fs.copyAsync({ from: assetUri, to: dest });
           registerTempFile(dest, 'multiAnglePick');
           safeUri = dest;
