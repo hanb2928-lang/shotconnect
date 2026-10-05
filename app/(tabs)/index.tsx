@@ -1019,13 +1019,13 @@ function CameraScreenInner() {
       return { base64, mimeType, ...(compressedUri ? { uri: compressedUri } : {}) };
     } catch (err) {
       logError(err, { component: 'CameraScreen', action: 'handleMultiAngleCapture' });
+      multiAngleCaptureInProgressRef.current = false;
+      return null;
+    } finally {
       if (registeredTempDest) {
         import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {});
         unregisterTempFile(registeredTempDest);
       }
-      multiAngleCaptureInProgressRef.current = false;
-      return null;
-    } finally {
       if (bufferReleaseTimerRef.current) clearTimeout(bufferReleaseTimerRef.current);
       bufferReleaseTimerRef.current = setTimeout(() => {
         bufferReleasedRef.current = true;
@@ -1090,11 +1090,12 @@ function CameraScreenInner() {
       if (!isMountedRef.current) return null;
       return { base64, mimeType, ...(compressedUri ? { uri: compressedUri } : {}) };
     } catch {
+      return null;
+    } finally {
       if (registeredTempDest) {
         import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {});
         unregisterTempFile(registeredTempDest);
       }
-      return null;
     }
   };
 

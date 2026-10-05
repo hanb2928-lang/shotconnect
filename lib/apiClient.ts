@@ -377,5 +377,9 @@ export async function safeFetchJson<T>(
     } catch {}
     throw new ApiError(msg, response.status);
   }
-  return response.json() as Promise<T>;
+  try {
+    return await response.json() as T;
+  } catch {
+    throw new ApiError('서버 응답을 파싱하지 못했습니다.', response.status);
+  }
 }

@@ -2227,9 +2227,11 @@ export default function ResultScreen() {
         const fileUri = `${dir}${fileName}`;
         const downloadResult = await FileSystem.downloadAsync(generatedVideoUrl, fileUri);
         if (downloadResult.status !== 200) {
+          FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
           throw new Error(`영상 다운로드 실패 (${downloadResult.status})`);
         }
         await MediaLibrary.createAssetAsync(downloadResult.uri);
+        FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {});
       }
 
       if (!mountedRef.current) return;
@@ -2312,10 +2314,14 @@ export default function ResultScreen() {
           const dir = FileSystem.cacheDirectory;
           if (!dir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
           const fileUri = `${dir}${fileName}`;
-          await FileSystem.writeAsStringAsync(fileUri, base64, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          await MediaLibrary.createAssetAsync(fileUri);
+          try {
+            await FileSystem.writeAsStringAsync(fileUri, base64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            await MediaLibrary.createAssetAsync(fileUri);
+          } finally {
+            FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+          }
         }
       }
 
@@ -4423,7 +4429,11 @@ export default function ResultScreen() {
                       const fileUri = `${FileSystem.documentDirectory}ai_image_${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
                       const base64 = uri.split(',')[1] ?? '';
                       await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-                      await MediaLibrary.saveToLibraryAsync(fileUri);
+                      try {
+                        await MediaLibrary.saveToLibraryAsync(fileUri);
+                      } finally {
+                        FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+                      }
                     } catch { /* non-fatal */ }
                   }}
                   activeOpacity={0.7}

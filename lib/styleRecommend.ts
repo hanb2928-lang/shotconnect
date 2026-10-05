@@ -50,7 +50,7 @@ export async function fetchStyleRecommendation(params: {
           throw new Error(errData.error || `AI 스타일 추천 실패 (${response.status})`);
         }
 
-        const data = await response.json();
+        const data = await response.json().catch(() => { throw new Error('AI 스타일 추천 응답을 파싱하지 못했습니다.'); });
         if (data.error) throw new Error(data.error);
 
         return data as StyleRecommendation;

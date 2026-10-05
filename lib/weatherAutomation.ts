@@ -201,7 +201,12 @@ export async function fetchLiveWeather(
     timeoutMs: 30000,
   });
   if (!res.ok) throw new Error(`Weather API failed: ${res.status}`);
-  const data: unknown = await res.json();
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error('Weather API 응답을 파싱하지 못했습니다.');
+  }
   if (!data || typeof data !== 'object') throw new Error('Weather API returned an invalid response.');
   const value = data as Record<string, unknown>;
   if (

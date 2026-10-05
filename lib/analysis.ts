@@ -532,7 +532,7 @@ export async function extractVideoFrameFromServer(
       throw new Error(errData.error || `프레임 추출 실패 (${response.status})`);
     }
 
-    const data = await response.json();
+    const data = await response.json().catch(() => { throw new Error('프레임 추출 응답을 파싱하지 못했습니다.'); });
     if (data?.error) throw new Error(data.error);
     if (!data?.base64 && !data?.frameUrl) throw new Error('프레임 추출 결과가 없습니다.');
 

@@ -86,8 +86,8 @@ export async function fetchVideoEditPlan(params: {
         const errData = await resp.json().catch(() => ({ error: '편집 계획 생성에 실패했습니다.' }));
         throw new Error(errData.error || `요청 실패 (${resp.status})`);
       }
-      const respData = (await resp.json()) as EditPlanResponse;
-      if (!respData.plan || typeof respData.plan !== 'object') {
+      const respData = (await resp.json().catch(() => null)) as EditPlanResponse | null;
+      if (!respData || !respData.plan || typeof respData.plan !== 'object') {
         throw new Error('편집 계획을 불러오지 못했습니다.');
       }
       const p = respData.plan;

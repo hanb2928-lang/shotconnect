@@ -46,8 +46,8 @@ export async function searchStockVideos(
           const errData = await resp.json().catch(() => ({ error: '영상 검색에 실패했습니다.' }));
           throw new Error(errData.error || `검색 실패 (${resp.status})`);
         }
-        const data = (await resp.json()) as SearchResponse;
-        if (!data.clips || !Array.isArray(data.clips)) {
+        const data = (await resp.json().catch(() => null)) as SearchResponse | null;
+        if (!data || !data.clips || !Array.isArray(data.clips)) {
           return [];
         }
         return data.clips;
