@@ -1249,6 +1249,8 @@ export async function uploadUriToSupabase(
  * Hermes JS 엔진 메모리와 RN Bridge를 완전히 우회한다.
  */
 const WEB_UPLOAD_TIMEOUT_MS = 15_000;
+const VIDEO_UPLOAD_TIMEOUT_MS = 120_000;
+const IMAGE_UPLOAD_TIMEOUT_MS = 60_000;
 
 const MIME_MAGIC_SIGNATURES: { mime: string; bytes: number[] }[] = [
   { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },

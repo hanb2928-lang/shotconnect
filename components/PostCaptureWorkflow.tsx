@@ -528,7 +528,8 @@ export function PostCaptureWorkflow({
         }
         const uploadPromise = (async () => {
           const { uploadBytesToStorage } = await import('@/lib/imageEdit');
-          await uploadBytesToStorage(body, 'videos', fileName, contentType, false, getUploadSignal());
+          const uploadTimeout = contentType.startsWith('video/') ? 120_000 : 60_000;
+          await uploadBytesToStorage(body, 'videos', fileName, contentType, false, getUploadSignal(), uploadTimeout);
         })();
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {
