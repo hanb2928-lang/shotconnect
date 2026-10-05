@@ -794,7 +794,7 @@ function CameraScreenInner() {
     if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
     stereoOverlayRef.current = true;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
-    const validShots = sorted.filter((s) => s.base64);
+    const validShots = sorted.filter((s) => s.base64 && typeof s.base64 === 'string' && s.base64.length > 0);
     setMultiAngleVisible(false);
     captureActiveRef.current = false;
     captureBtnLockRef.current = false;
@@ -1101,6 +1101,14 @@ function CameraScreenInner() {
 
   const handleWebCapture = useCallback(async (payload: string, mimeType: string) => {
     if (processingRef.current || autoSavingRef.current || stereoOverlayRef.current) return;
+    if (!payload || typeof payload !== 'string' || payload.length === 0) {
+      if (isMountedRef.current) setError('촬영 데이터가 비어 있습니다. 다시 촬영해주세요.');
+      return;
+    }
+    if (!mimeType || typeof mimeType !== 'string' || mimeType.length === 0) {
+      if (isMountedRef.current) setError('촬영 데이터 형식을 인식하지 못했습니다. 다시 촬영해주세요.');
+      return;
+    }
     processingRef.current = true;
     setProcessing(true);
     try {
@@ -1161,6 +1169,7 @@ function CameraScreenInner() {
   };
 
   const handleFittingWebCapture = useCallback(async (payload: string, mimeType: string) => {
+    if (!payload || !mimeType || typeof mimeType !== 'string') return;
     if (mimeType.startsWith('video/')) return;
     if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked()) return;
     if (isMountedRef.current) setFittingGuideVisible(true);
@@ -1171,7 +1180,7 @@ function CameraScreenInner() {
     if (stereoOverlayRef.current || autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
     stereoOverlayRef.current = true;
     const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
-    const validShots = sorted.filter((s) => s.base64);
+    const validShots = sorted.filter((s) => s.base64 && typeof s.base64 === 'string' && s.base64.length > 0);
     setFittingGuideVisible(false);
     captureActiveRef.current = false;
     captureBtnLockRef.current = false;
