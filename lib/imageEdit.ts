@@ -16,8 +16,11 @@ import { logError } from '@/lib/errorLogger';
 let __globalUploadAttemptCount = 0;
 
 async function getStorageHeaders(contentType?: string, upsert?: boolean): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token || supabaseAnonKey;
+  const { data, error } = await supabase.auth.getSession();
+  const session = data.session;
+  const token = session?.access_token || supabaseAnonKey;
+  const expiresIn = session?.expires_at ? session.expires_at - Math.floor(Date.now() / 1000) : null;
+  console.info(`[STORAGE AUTH] mode=${session?.access_token ? 'session' : 'anon'} expiresIn=${expiresIn ?? 'none'}${error ? ' sessionError=true' : ''}`);
   return {
     Authorization: `Bearer ${token}`,
     apikey: supabaseAnonKey,
