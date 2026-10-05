@@ -117,6 +117,7 @@ interface PostCaptureWorkflowProps {
   visible: boolean;
   videoUri: string | null;
   imageUri?: string | null;
+  captureUri?: string | null;
   onProceedToAnalysis: (customPrompt: string, platform: string, editPlan: ShortFormEditPlan) => void;
   onClose: () => void;
 }
@@ -133,6 +134,7 @@ export function PostCaptureWorkflow({
   visible,
   videoUri,
   imageUri,
+  captureUri,
   onProceedToAnalysis,
   onClose,
 }: PostCaptureWorkflowProps) {
@@ -615,6 +617,12 @@ export function PostCaptureWorkflow({
       let cloudSuccess = false;
 
       let uploadUri = videoUri || (imageUri || null);
+      // On native, prefer the original file:// URI for image uploads so we
+      // can stream via FileSystem.uploadAsync instead of base64-decoding a
+      // data: URI into JS memory.
+      if (!videoUri && captureUri && Platform.OS !== 'web' && (captureUri.startsWith('file://') || captureUri.startsWith('content://'))) {
+        uploadUri = captureUri;
+      }
       if (uploadUri && videoUri && Platform.OS === 'web') {
         try {
           if (mountedRef.current) setUploadStatusMsg('BGM 믹싱 중...');
@@ -752,7 +760,7 @@ export function PostCaptureWorkflow({
       if (mountedRef.current) setIsUploading(false);
       proceedLockRef.current = false;
     }
-  }, [isUploading, uploadDone, videoUri, imageUri, selectedPlatformKey, customPrompt, editPlan.bgmTemplate.id, editPlan.pacingBpm, editPlan, onProceedToAnalysis, uriToBlob, uploadWithRetry, uploadFileUriNative, bgmRecommendation, getUploadSignal]);
+  }, [isUploading, uploadDone, videoUri, imageUri, captureUri, selectedPlatformKey, customPrompt, editPlan.bgmTemplate.id, editPlan.pacingBpm, editPlan, onProceedToAnalysis, uriToBlob, uploadWithRetry, uploadFileUriNative, bgmRecommendation, getUploadSignal]);
 
   if (!visible) return null;
 

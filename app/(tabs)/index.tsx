@@ -285,6 +285,7 @@ function CameraScreenInner() {
   const postCaptureMimeRef = useRef<string>('video/webm');
   const postCaptureVideoUriRef = useRef<string | null>(null);
   const postCaptureUriRef = useRef<string | null>(null);
+  const [postCaptureUri, setPostCaptureUri] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -634,6 +635,7 @@ function CameraScreenInner() {
     setPostCaptureBase64(null);
     postCaptureBase64Ref.current = null;
     postCaptureUriRef.current = null;
+    setPostCaptureUri(null);
   }, []);
 
   const prepareCameraForProcessing = useCallback(async () => {
@@ -697,6 +699,8 @@ function CameraScreenInner() {
       postCaptureMimeRef.current = mimeType;
       setPostCaptureVideoUri(asset.uri);
       postCaptureVideoUriRef.current = asset.uri;
+      postCaptureUriRef.current = null;
+      setPostCaptureUri(null);
       setWorkflowMountKey((key) => key + 1);
       setPostCaptureVisible(true);
     } catch (err) {
@@ -736,6 +740,8 @@ function CameraScreenInner() {
           postCaptureMimeRef.current = getMimeTypeFromDataUrl(compressed);
           setPostCaptureVideoUri(null);
           postCaptureVideoUriRef.current = null;
+          postCaptureUriRef.current = null;
+          setPostCaptureUri(null);
           setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
         } catch (err) {
           if (!isMountedRef.current) return;
@@ -780,6 +786,7 @@ function CameraScreenInner() {
       setPostCaptureVideoUri(null);
       postCaptureVideoUriRef.current = null;
       postCaptureUriRef.current = asset.uri;
+      setPostCaptureUri(asset.uri);
       setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
     } catch (err) {
       if (!isMountedRef.current) return;
@@ -1151,6 +1158,8 @@ function CameraScreenInner() {
       }
       setPostCaptureVideoUri(null);
       postCaptureVideoUriRef.current = null;
+      postCaptureUriRef.current = null;
+      setPostCaptureUri(null);
     }
     if (!isMountedRef.current) return;
     setWorkflowMountKey((k) => k + 1); setPostCaptureVisible(true);
@@ -1732,6 +1741,7 @@ function CameraScreenInner() {
           visible={postCaptureVisible}
           videoUri={postCaptureVideoUri}
           imageUri={postCaptureBase64 ? buildDataUrl(postCaptureBase64, postCaptureMime) : null}
+          captureUri={postCaptureUri}
           onProceedToAnalysis={handlePostCaptureProceed}
           onClose={handlePostCaptureClose}
         />
@@ -1899,6 +1909,7 @@ function CameraScreenInner() {
         visible={postCaptureVisible}
         videoUri={postCaptureVideoUri}
         imageUri={postCaptureBase64 ? buildDataUrl(postCaptureBase64, postCaptureMime) : null}
+        captureUri={postCaptureUri}
         onProceedToAnalysis={handlePostCaptureProceed}
         onClose={handlePostCaptureClose}
       />

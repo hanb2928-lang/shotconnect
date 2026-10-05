@@ -13,6 +13,28 @@ import { analyzeAndDownscaleImage, withFileSettle, waitForFileChannelFlush } fro
 import { runProactiveFlush, getHeapUsageRatio } from '@/lib/proactiveMemoryFlush';
 import { logError } from '@/lib/errorLogger';
 
+let __globalUploadAttemptCount = 0;
+
+async function forceTrackedNativeUpload<T>(
+  uploadFn: () => Promise<T>,
+  contextName: string,
+): Promise<T> {
+  __globalUploadAttemptCount += 1;
+  const currentCount = __globalUploadAttemptCount;
+  console.error(`[NATIVE UPLOAD] ${contextName} - attempt #${currentCount}`);
+  try {
+    const result = await uploadFn();
+    console.log(`[NATIVE UPLOAD OK] ${contextName} (succeeded on attempt #${currentCount})`);
+    return result;
+  } catch (err: unknown) {
+    const errAny = err as Record<string, unknown> | undefined;
+    const errorCode = (errAny?.code as string) || (errAny?.status as string) || 'UNKNOWN_NATIVE_ERR';
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error(`[NATIVE UPLOAD FAIL] ${contextName} | attempt #${currentCount} | code: ${errorCode} | reason: ${errorMessage}`);
+    throw new Error(`[업로드 ${currentCount}회 실패] 코드: ${errorCode} / 사유: ${errorMessage}`);
+  }
+}
+
 /**
  * Supabase Storage REST 경로에 사용할 수 없는 유니코드/공백/특수문자를
  * 영문 알파벳·숫자·언더바·하이픈·슬래시 조합으로 강제 정규화한다.
@@ -1191,7 +1213,20 @@ export async function uploadUriToBucket(
   if (Platform.OS === 'web') {
     throw new Error('uploadUriToBucket is not supported on web');
   }
+  return forceTrackedNativeUpload(
+    () => uploadUriToBucketImpl(fileUri, mimeType, bucket, fileName, upsert, signal),
+    `uploadUriToBucket(${bucket}/${fileName})`,
+  );
+}
 
+async function uploadUriToBucketImpl(
+  fileUri: string,
+  mimeType: string,
+  bucket: string,
+  fileName: string,
+  upsert = false,
+  signal?: AbortSignal,
+): Promise<string> {
   const readableUri = await normalizeUriForRead(fileUri, 'uploadUriToBucket');
   let compressedCleanupUri: string | null = null;
   try {
@@ -1390,7 +1425,19 @@ export async function uploadFileDirectNative(
   if (Platform.OS === 'web') {
     throw new Error('uploadFileDirectNative is not supported on web');
   }
+  return forceTrackedNativeUpload(
+    () => uploadFileDirectNativeImpl(fileUri, bucket, path, mimeType, signal),
+    `uploadFileDirectNative(${bucket}/${path})`,
+  );
+}
 
+async function uploadFileDirectNativeImpl(
+  fileUri: string,
+  bucket: string,
+  path: string,
+  mimeType: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const readableUri = await normalizeUriForRead(fileUri, 'uploadFileDirectNative');
   let compressedCleanupUri: string | null = null;
   try {
@@ -1486,6 +1533,21 @@ export async function deleteStorageObjects(bucket: string, paths: string[]): Pro
  * method entirely — no Blob conversion, no SDK abstraction layer.
  */
 export async function uploadBytesToStorage(
+  body: Blob | Uint8Array,
+  bucket: string,
+  path: string,
+  mimeType: string,
+  upsert = false,
+  signal?: AbortSignal,
+  timeoutMs = WEB_UPLOAD_TIMEOUT_MS,
+): Promise<string> {
+  return forceTrackedNativeUpload(
+    () => uploadBytesToStorageImpl(body, bucket, path, mimeType, upsert, signal, timeoutMs),
+    `uploadBytesToStorage(${bucket}/${path})`,
+  );
+}
+
+async function uploadBytesToStorageImpl(
   body: Blob | Uint8Array,
   bucket: string,
   path: string,
