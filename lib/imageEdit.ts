@@ -1248,12 +1248,16 @@ export async function uploadUriToBucket(
         },
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'file',
-        mimeType,
+        mimeType: mimeType.toLowerCase().trim(),
         parameters: { upsert: upsert ? 'true' : 'false' },
       });
-      if (result.status >= 400 && result.status !== 409) result = null;
+      if (result.status >= 400 && result.status !== 409) {
+        console.error(`[uploadUriToBucket] MULTIPART rejected: status=${result.status} body=${result.body ?? '(empty)'} mime=${mimeType}`);
+        result = null;
+      }
     } catch (err) {
-      console.warn('[uploadUriToBucket] MULTIPART failed:', err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`[uploadUriToBucket] MULTIPART failed: ${errMsg}`);
       result = null;
     }
 
@@ -1268,13 +1272,13 @@ export async function uploadUriToBucket(
           uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
           headers: {
             Authorization: `Bearer ${supabaseAnonKey}`,
-            'Content-Type': mimeType,
+            'Content-Type': mimeType.toLowerCase().trim(),
             'x-upsert': upsert ? 'true' : 'false',
           },
         });
       } catch (err) {
-        console.error('[uploadUriToBucket] BINARY_CONTENT fallback failed:', err);
         const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[uploadUriToBucket] BINARY_CONTENT fallback failed: ${errMsg}`);
         throw new Error(`네이티브 업로드 실패 (MIME: ${mimeType}): ${errMsg}`);
       }
     }
@@ -1444,7 +1448,7 @@ export async function uploadFileDirectNative(
   }
 
   const detectedMime = await detectMimeFromMagicNumber(uploadUri);
-  const effectiveMime = detectedMime ?? mimeType;
+  const effectiveMime = (detectedMime ?? mimeType).toLowerCase().trim();
   if (detectedMime && detectedMime !== mimeType) {
     console.warn(`[uploadFileDirectNative] MIME mismatch: caller=${mimeType} detected=${detectedMime} — using detected`);
   }
@@ -1497,7 +1501,10 @@ export async function uploadFileDirectNative(
         mimeType: effectiveMime,
         parameters: { upsert: 'true' },
       });
-      if (result.status >= 400 && result.status !== 409) result = null;
+      if (result.status >= 400 && result.status !== 409) {
+        console.error(`[uploadFileDirectNative] MULTIPART rejected: status=${result.status} body=${result.body ?? '(empty)'} mime=${effectiveMime}`);
+        result = null;
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.warn(`[uploadFileDirectNative] MULTIPART failed: ${errMsg}`);
@@ -1615,14 +1622,15 @@ export async function uploadBytesToStorage(
 ): Promise<string> {
   const safePath = encodeStoragePath(path);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
+  const normalizedMime = mimeType.toLowerCase().trim();
   const headers: Record<string, string> = {
     Authorization: `Bearer ${supabaseAnonKey}`,
-    'Content-Type': mimeType,
+    'Content-Type': normalizedMime,
     'x-upsert': upsert ? 'true' : 'false',
     'Cache-Control': '360000',
   };
 
-  const fetchBody: BodyInit = body instanceof Blob ? body : new Blob([body as BlobPart], { type: mimeType });
+  const fetchBody: BodyInit = body instanceof Blob ? body : new Blob([body as BlobPart], { type: normalizedMime });
 
   // Zero-byte guard for web uploads: reject empty payloads before network.
   const bodySize = body instanceof Blob ? body.size : body.byteLength;
