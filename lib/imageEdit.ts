@@ -1197,7 +1197,7 @@ export async function uploadUriToBucket(
     const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
     const effectiveMime = mimeType.toLowerCase().trim();
 
-    const uploadResult = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+    const uploadPromise = FileSystem.uploadAsync(uploadUrl, uploadUri, {
       httpMethod: 'POST',
       headers: {
         Authorization: `Bearer ${supabaseAnonKey}`,
@@ -1208,12 +1208,24 @@ export async function uploadUriToBucket(
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     });
 
-    if (uploadResult.status < 200 || uploadResult.status >= 300) {
-      const bodyText = typeof uploadResult.body === 'string' ? uploadResult.body : '';
-      throw new Error(`Upload failed (${uploadResult.status}): ${bodyText}`);
+    let uploadResult;
+    if (signal) {
+      if (signal.aborted) throw new Error('업로드가 취소되었습니다.');
+      const abortPromise = new Promise<never>((_, reject) => {
+        const onAbort = () => reject(new Error('업로드가 취소되었습니다.'));
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+      uploadResult = await Promise.race([uploadPromise, abortPromise]);
+    } else {
+      uploadResult = await uploadPromise;
     }
 
-    if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+    if (uploadResult.status < 200 || uploadResult.status >= 300) {
+      const bodyText = typeof uploadResult.body === 'string' ? uploadResult.body : '';
+      const err = new Error(`Upload failed (${uploadResult.status}): ${bodyText}`);
+      logError(err, { component: 'imageEdit', action: 'uploadUriToBucket', extra: { fileName, status: uploadResult.status, body: bodyText } });
+      throw err;
+    }
 
     return `${supabaseUrl}/storage/v1/object/public/${bucket}/${safePath}`;
   } catch (err) {
@@ -1368,7 +1380,11 @@ export async function uploadFileDirectNative(
     const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
     const effectiveMime = mimeType.toLowerCase().trim();
 
-    const uploadResult = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
+    // FileSystem.uploadAsync does not accept an AbortSignal, so we race it
+    // against the caller's signal. When the signal fires we throw immediately
+    // — the native upload may still complete in the background, but the JS
+    // caller is unblocked and the result is discarded.
+    const uploadPromise = FileSystem.uploadAsync(uploadUrl, uploadUri, {
       httpMethod: 'POST',
       headers: {
         Authorization: `Bearer ${supabaseAnonKey}`,
@@ -1378,6 +1394,18 @@ export async function uploadFileDirectNative(
       },
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     });
+
+    let uploadResult;
+    if (signal) {
+      if (signal.aborted) throw new Error('업로드가 취소되었습니다.');
+      const abortPromise = new Promise<never>((_, reject) => {
+        const onAbort = () => reject(new Error('업로드가 취소되었습니다.'));
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+      uploadResult = await Promise.race([uploadPromise, abortPromise]);
+    } else {
+      uploadResult = await uploadPromise;
+    }
 
     if (uploadResult.status < 200 || uploadResult.status >= 300) {
       const bodyText = typeof uploadResult.body === 'string' ? uploadResult.body : '';

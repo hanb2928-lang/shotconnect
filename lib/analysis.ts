@@ -829,7 +829,9 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
           await safeDeleteTempFile(tmpPath).catch(() => {});
         }
       }
-    } catch { /* fall back to web upload */ }
+    } catch (err) {
+      logError(err, { component: 'analysis', action: 'generateAndUploadTTS-native' });
+    }
   }
 
   if (!ttsPublicUrl) {
@@ -837,7 +839,8 @@ async function generateAndUploadTTS(scanId: string, text: string): Promise<void>
       const { uploadBytesToStorage } = await import('@/lib/imageEdit');
       const audioBytes = base64ToUint8Array(data.audioBase64);
       ttsPublicUrl = await uploadBytesToStorage(audioBytes, 'scans', fileName, 'audio/mpeg');
-    } catch {
+    } catch (err) {
+      logError(err, { component: 'analysis', action: 'generateAndUploadTTS-web' });
       return;
     }
   }
@@ -950,7 +953,9 @@ export async function updateScanWithAnalysis(
 
   const hookText = td?.hook || analysis.oneLiner || '';
   if (hookText) {
-    generateAndUploadTTS(scanId, hookText).catch(() => {});
+    generateAndUploadTTS(scanId, hookText).catch((err) => {
+      logError(err, { component: 'analysis', action: 'generateAndUploadTTS-trigger' });
+    });
   }
 }
 
