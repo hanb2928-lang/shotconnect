@@ -530,14 +530,21 @@ export function PostCaptureWorkflow({
           const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
           await new Promise((r) => setTimeout(r, delayMs));
         }
+        const controller = new AbortController();
+        const externalSignal = getUploadSignal();
+        const linkedSignal = externalSignal
+          ? AbortSignal.any([externalSignal, controller.signal])
+          : controller.signal;
         const uploadPromise = (async () => {
           const { uploadBytesToStorage } = await import('@/lib/imageEdit');
-          const uploadTimeout = contentType.startsWith('video/') ? 120_000 : 60_000;
-          await uploadBytesToStorage(body, 'videos', fileName, contentType, false, getUploadSignal(), uploadTimeout);
+          await uploadBytesToStorage(body, 'videos', fileName, contentType, false, linkedSignal, UPLOAD_TIMEOUT_MS);
         })();
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('업로드 시간이 초과되었습니다.')), UPLOAD_TIMEOUT_MS);
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error('업로드 시간이 초과되었습니다.'));
+          }, UPLOAD_TIMEOUT_MS);
         });
         await Promise.race([uploadPromise, timeout]).finally(() => clearTimeout(timer!));
         if (mountedRef.current) setUploadRetrying(false);
