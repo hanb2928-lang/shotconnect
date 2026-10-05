@@ -4,7 +4,7 @@ import { supabase, ANALYSIS_FUNCTION_URL, TTS_FUNCTION_URL, supabaseAnonKey, sup
 import { safeFetch } from '@/lib/apiClient';
 import { generateAffiliateLinks } from '@/lib/affiliate';
 import { getUserSettings } from '@/lib/settings';
-import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64 } from '@/lib/base64';
+import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64, uint8ArrayToBase64Async } from '@/lib/base64';
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
 import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage, sanitizeStoragePath, encodeStoragePath, uniqueSuffix } from '@/lib/imageEdit';
@@ -240,7 +240,7 @@ export async function uploadImageBlob(
           const ab = await (uploadBlob as Blob).arrayBuffer();
           bytes = new Uint8Array(ab);
         }
-        const b64 = uint8ArrayToBase64(bytes);
+        const b64 = await uint8ArrayToBase64Async(bytes);
         await FileSystem.writeAsStringAsync(tmpPath, b64, {
           encoding: FileSystem.EncodingType.Base64,
         });
@@ -379,7 +379,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   // Native: FileReader doesn't exist on Hermes/JSC
   const arrayBuffer = await blob.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
-  const base64 = uint8ArrayToBase64(bytes);
+  const base64 = await uint8ArrayToBase64Async(bytes);
   const mimeType = blob.type || 'image/jpeg';
   return `data:${mimeType};base64,${base64}`;
 }
@@ -431,17 +431,47 @@ export async function uploadVideoBlob(
       });
 
       const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodeStoragePath(fileName)}`;
-      const uploadResult = await FileSystem.uploadAsync(uploadUrl, readableUri, {
-        httpMethod: 'POST',
-        headers: {
+
+      const tryUpload = async (uploadType: number): Promise<{ status: number; body?: string }> => {
+        const headers: Record<string, string> = {
           Authorization: `Bearer ${supabaseAnonKey}`,
           'x-upsert': 'true',
           'Cache-Control': '360000',
-        },
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType,
-      });
+        };
+        const opts: Record<string, unknown> = {
+          httpMethod: 'POST',
+          headers,
+          uploadType,
+          fieldName: 'file',
+          mimeType,
+        };
+        if (uploadType === FileSystem.FileSystemUploadType.BINARY_CONTENT) {
+          headers['Content-Type'] = mimeType;
+        }
+        return FileSystem.uploadAsync(uploadUrl, readableUri, opts as Parameters<typeof FileSystem.uploadAsync>[2]);
+      };
+
+      let uploadResult: { status: number; body?: string };
+      try {
+        uploadResult = await tryUpload(FileSystem.FileSystemUploadType.MULTIPART);
+      } catch (firstErr) {
+        logError(firstErr, { component: 'analysis', action: 'uploadVideoBlob', extra: { phase: 'multipart' } });
+        uploadResult = await tryUpload(FileSystem.FileSystemUploadType.BINARY_CONTENT);
+      }
+
+      if (uploadResult.status >= 200 && uploadResult.status < 300) {
+        // Multipart succeeded — but if it returned non-2xx, try binary as fallback
+      } else {
+        const mpBody = typeof uploadResult.body === 'string' ? uploadResult.body : '';
+        // Only attempt binary fallback for format-rejection errors (4xx), not server errors
+        if (uploadResult.status >= 400 && uploadResult.status < 500) {
+          logError(
+            new Error(`MULTIPART failed (${uploadResult.status}), trying BINARY_CONTENT fallback`),
+            { component: 'analysis', action: 'uploadVideoBlob', extra: { status: uploadResult.status, body: mpBody } },
+          );
+          uploadResult = await tryUpload(FileSystem.FileSystemUploadType.BINARY_CONTENT);
+        }
+      }
 
       if (uploadResult.status < 200 || uploadResult.status >= 300) {
         const bodyText = typeof uploadResult.body === 'string' ? uploadResult.body : '';

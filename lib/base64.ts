@@ -32,6 +32,10 @@ export function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+// Chunk size for yielding to the event loop during large base64 operations.
+// 64KB of base64 text per chunk keeps each synchronous burst under ~5ms.
+const YIELD_CHUNK = 0x10000;
+
 function decodeBase64Native(base64: string): Uint8Array {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const lookup = new Uint8Array(256);
@@ -106,6 +110,97 @@ function encodeBase64Native(bytes: Uint8Array): string {
   }
 
   return result;
+}
+
+const nextTick = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
+
+export async function uint8ArrayToBase64Async(bytes: Uint8Array): Promise<string> {
+  if (Platform.OS === 'web' || typeof btoa !== 'undefined') {
+    const chunkSize = 0x2000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      for (let j = 0; j < chunk.length; j++) {
+        binary += String.fromCharCode(chunk[j]);
+      }
+      if (i % YIELD_CHUNK === 0 && i > 0) await nextTick();
+    }
+    return btoa(binary);
+  }
+
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const len = bytes.length;
+  let result = '';
+
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+
+    result += chars[b0 >> 2];
+    result += chars[((b0 & 0x03) << 4) | (b1 >> 4)];
+    if (i + 1 < len) {
+      result += chars[((b1 & 0x0f) << 2) | (b2 >> 6)];
+    } else {
+      result += '=';
+    }
+    if (i + 2 < len) {
+      result += chars[b2 & 0x3f];
+    } else {
+      result += '=';
+    }
+
+    if (i % YIELD_CHUNK === 0 && i > 0) await nextTick();
+  }
+
+  return result;
+}
+
+export async function base64ToUint8ArrayAsync(base64: string): Promise<Uint8Array> {
+  const clean = cleanBase64(base64);
+  if (Platform.OS === 'web' || typeof atob !== 'undefined') {
+    const binary = atob(clean);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+      if (i % YIELD_CHUNK === 0 && i > 0) await nextTick();
+    }
+    return bytes;
+  }
+
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) {
+    lookup[chars.charCodeAt(i)] = i;
+  }
+
+  const len = clean.length;
+  let padding = 0;
+  if (len >= 2 && clean[len - 1] === '=') padding++;
+  if (len >= 2 && clean[len - 2] === '=') padding++;
+
+  const byteLen = Math.max(0, Math.floor((len / 4) * 3 - padding));
+  const bytes = new Uint8Array(byteLen);
+
+  let byteIdx = 0;
+  for (let i = 0; i < len; i += 4) {
+    const c0 = lookup[clean.charCodeAt(i)] || 0;
+    const c1 = lookup[clean.charCodeAt(i + 1)] || 0;
+    const c2 = i + 2 < len ? (lookup[clean.charCodeAt(i + 2)] || 0) : 0;
+    const c3 = i + 3 < len ? (lookup[clean.charCodeAt(i + 3)] || 0) : 0;
+
+    const triple = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
+
+    if (byteIdx < byteLen) bytes[byteIdx++] = (triple >> 16) & 0xff;
+    if (byteIdx < byteLen) bytes[byteIdx++] = (triple >> 8) & 0xff;
+    if (byteIdx < byteLen) bytes[byteIdx++] = triple & 0xff;
+
+    if (i % YIELD_CHUNK === 0 && i > 0) await nextTick();
+  }
+
+  return bytes;
 }
 
 /**

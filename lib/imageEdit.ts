@@ -1447,9 +1447,9 @@ export async function uploadBytesToStorage(
 
   // On React Native native, the Blob constructor is unreliable — it can
   // mangle binary data or produce a text payload that Supabase Storage
-  // rejects with 400. Use ArrayBuffer as the fetch body instead, which
-  // RN's networking stack treats as raw bytes. On web, Blob is the
-  // correct and efficient choice (avoids copying).
+  // rejects with 400. Use a Uint8Array view as the fetch body instead,
+  // which RN's networking stack reliably serializes as raw bytes. On web,
+  // Blob is the correct and efficient choice (avoids copying).
   let fetchBody: BodyInit;
   let bodySize: number;
   if (body instanceof Blob) {
@@ -1459,7 +1459,9 @@ export async function uploadBytesToStorage(
     fetchBody = new Blob([body as BlobPart], { type: normalizedMime });
     bodySize = body.byteLength;
   } else {
-    fetchBody = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+    fetchBody = (body.byteOffset === 0 && body.byteLength === body.buffer.byteLength
+      ? body
+      : body.slice()) as BodyInit;
     bodySize = body.byteLength;
   }
   if (!bodySize || bodySize <= 0) {
