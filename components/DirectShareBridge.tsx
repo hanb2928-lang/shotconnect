@@ -83,7 +83,7 @@ export function DirectShareBridge({
         }
         const dir = FileSystem.cacheDirectory;
         if (!dir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
-        const fileUri = `${dir}${fileName}-${Date.now()}.mp4`;
+        const fileUri = `${dir}${fileName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
         const downloadResult = await FileSystem.downloadAsync(videoUrl, fileUri);
         if (downloadResult.status !== 200) {
           throw new Error(`영상 다운로드 실패 (${downloadResult.status})`);

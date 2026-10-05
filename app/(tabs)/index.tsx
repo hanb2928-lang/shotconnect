@@ -489,8 +489,16 @@ function CameraScreenInner() {
     if (Platform.OS === 'web') return;
     if (!multiAngleVisible && !fittingGuideVisible) {
       scheduleCameraReactivation();
+    } else {
+      // Deactivate the camera while a modal is open so isActive is false.
+      // Without this, the onClose handler setting multiAngleVisible=false
+      // would cause an instant CameraView remount (isActive was still true)
+      // before scheduleCameraReactivation's 300ms HAL FD release runs,
+      // producing a rapid mount→unmount→remount cycle that deadlocks the
+      // Android camera HAL and makes takePictureAsync hang permanently.
+      deactivateCamera();
     }
-  }, [multiAngleVisible, fittingGuideVisible, scheduleCameraReactivation]);
+  }, [multiAngleVisible, fittingGuideVisible, scheduleCameraReactivation, deactivateCamera]);
 
   const runAutoAnalysis = useCallback(async (base64: string, mimeType: string, additionalB64s: string[] = []) => {
     if (autoSavingRef.current || isPipelineLocked() || captureActiveRef.current) return;
@@ -1209,7 +1217,6 @@ function CameraScreenInner() {
     if (captureBtnLockRef.current || processingRef.current || autoSavingRef.current || stereoOverlayRef.current) return;
     setCameraMode('picture');
     captureBtnLockRef.current = true;
-    setCameraSessionKey(Date.now());
     if (target === 'multiAngle') {
       setMultiAngleVisible(true);
     } else {
@@ -1458,7 +1465,7 @@ function CameraScreenInner() {
 
           <MultiAngleCaptureGuide
             visible={fittingGuideVisible}
-            onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
+            onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; }}
             onComplete={handleFittingGuideComplete}
             onPickImage={handleMultiAnglePick}
             onCaptureImage={handleMultiAngleCapture}
@@ -1576,7 +1583,7 @@ function CameraScreenInner() {
 
         <MultiAngleCaptureGuide
           visible={fittingGuideVisible}
-          onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
+          onClose={() => { setFittingGuideVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; }}
           onComplete={handleFittingGuideComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1668,7 +1675,7 @@ function CameraScreenInner() {
 
         <MultiAngleCaptureGuide
           visible={multiAngleVisible}
-          onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
+          onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; }}
           onComplete={handleMultiAngleComplete}
           onPickImage={handleMultiAnglePick}
           onCaptureImage={handleMultiAngleCapture}
@@ -1801,7 +1808,7 @@ function CameraScreenInner() {
       {/* Multi-Angle Capture Guide */}
       <MultiAngleCaptureGuide
         visible={multiAngleVisible}
-        onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; setCameraSessionKey(Date.now()); }}
+        onClose={() => { setMultiAngleVisible(false); captureActiveRef.current = false; captureBtnLockRef.current = false; cameraRef.current = null; }}
         onComplete={handleMultiAngleComplete}
         onPickImage={handleMultiAnglePick}
         onCaptureImage={handleMultiAngleCapture}

@@ -983,7 +983,7 @@ export function MultiPlatformExport({
     let saved = 0;
     try {
       for (const r of results) {
-        const cloudName = `${fileName.replace(/\.\w+$/, '')}-${r.format.key}-${Date.now()}.png`;
+        const cloudName = `${fileName.replace(/\.\w+$/, '')}-${r.format.key}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
         let fileUrl: string | null = null;
 
         if (Platform.OS === 'web' && r.blob) {

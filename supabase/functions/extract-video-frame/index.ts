@@ -42,8 +42,9 @@ Deno.serve(async (req: Request) => {
       clearTimeout(timeoutId);
     }
 
-    const tempVideoPath = `/tmp/input-video-${Date.now()}.mp4`;
-    const tempFramePath = `/tmp/frame-${Date.now()}.jpg`;
+    const randSuffix = Math.random().toString(36).slice(2, 8);
+    const tempVideoPath = `/tmp/input-video-${Date.now()}-${randSuffix}.mp4`;
+    const tempFramePath = `/tmp/frame-${Date.now()}-${randSuffix}.jpg`;
     await Deno.writeFile(tempVideoPath, videoBytes);
     videoBytes = new Uint8Array(0);
 

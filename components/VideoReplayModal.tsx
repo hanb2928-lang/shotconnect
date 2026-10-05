@@ -105,7 +105,7 @@ export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalPro
         Alert.alert('권한 필요', '기기 갤러리 저장을 위해 권한을 허용해주세요.');
         return;
       }
-      const localUri = `${FileSystem.cacheDirectory}shortform-${item.id.slice(0, 8)}-${Date.now()}.mp4`;
+      const localUri = `${FileSystem.cacheDirectory}shortform-${item.id.slice(0, 8)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
       const downloadRes = await FileSystem.downloadAsync(videoUrl, localUri);
       if (downloadRes.status !== 200) {
         throw new Error(`다운로드 실패 (${downloadRes.status})`);
@@ -145,7 +145,7 @@ export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalPro
         showToast('이 기기에서는 공유를 지원하지 않습니다.');
         return;
       }
-      const localUri = `${FileSystem.cacheDirectory}share-${item.id.slice(0, 8)}-${Date.now()}.mp4`;
+      const localUri = `${FileSystem.cacheDirectory}share-${item.id.slice(0, 8)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
       const downloadRes = await FileSystem.downloadAsync(videoUrl, localUri);
       if (downloadRes.status !== 200) {
         throw new Error(`파일 준비 실패 (${downloadRes.status})`);

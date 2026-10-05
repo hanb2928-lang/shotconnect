@@ -1531,7 +1531,7 @@ export default function ResultScreen() {
     const autoSaveVideoToAssets = async (videoUrl: string) => {
       if (autoSavedVideoRef.current === videoUrl) return;
       try {
-        const fileName = `shotconnect-video-${scan.id}-${Date.now()}.mp4`;
+        const fileName = `shotconnect-video-${scan.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
         let cloudUrl: string | null = null;
         if (Platform.OS === 'web') {
           const res = await fetch(videoUrl);
@@ -2197,7 +2197,7 @@ export default function ResultScreen() {
 
     let fallbackObjectUrl: string | null = null;
     try {
-      const fileName = `shotconnect-video-${scan?.id ?? 'card'}-${Date.now()}.mp4`;
+      const fileName = `shotconnect-video-${scan?.id ?? 'card'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
 
       if (Platform.OS === 'web') {
         let fetchRes: Response;
@@ -2262,7 +2262,7 @@ export default function ResultScreen() {
     let fallbackObjectUrl: string | null = null;
     try {
       let uri: string;
-      const fileName = `shotconnect-${scan?.id ?? 'card'}-${Date.now()}.png`;
+      const fileName = `shotconnect-${scan?.id ?? 'card'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
 
       if (Platform.OS === 'web') {
         // Web: skip DOM canvas capture (CORS/tainted-canvas issues) — fetch source image directly
@@ -4417,7 +4417,7 @@ export default function ResultScreen() {
                     const uri = generatedImages[imageViewerIndex];
                     if (!uri) return;
                     try {
-                      const fileUri = `${FileSystem.documentDirectory}ai_image_${Date.now()}.png`;
+                      const fileUri = `${FileSystem.documentDirectory}ai_image_${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
                       const base64 = uri.split(',')[1] ?? '';
                       await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
                       await MediaLibrary.saveToLibraryAsync(fileUri);

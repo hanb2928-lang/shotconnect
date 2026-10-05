@@ -68,6 +68,7 @@ import { buildMultiPlatformPublishPlans, type PublishTarget } from '@/lib/publis
 import { compressImage, uploadUriToBucket } from '@/lib/imageEdit';
 import { base64ToUint8Array, cleanBase64 } from '@/lib/base64';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
+import { useCancellableUpload } from '@/hooks/useCancellableUpload';
 
 type PlatformOption = {
   key: string;
@@ -162,6 +163,7 @@ export function PostCaptureWorkflow({
 
   const mountedRef = useRef(true);
   const prevVisibleRef = useRef(false);
+  const { getSignal: getUploadSignal, cancel: cancelUpload } = useCancellableUpload();
 
   useBeforeUnloadGuard(isUploading || savingToGallery || uploadRetrying || bgmLoading || addingPlatform);
 
@@ -169,6 +171,9 @@ export function PostCaptureWorkflow({
     return () => { mountedRef.current = false; };
   }, []);
   useEffect(() => {
+    if (!visible && prevVisibleRef.current) {
+      cancelUpload();
+    }
     if (visible && !prevVisibleRef.current) {
       setUploadDone(false);
       setFallbackUsed(false);
@@ -523,7 +528,7 @@ export function PostCaptureWorkflow({
         }
         const uploadPromise = (async () => {
           const { uploadBytesToStorage } = await import('@/lib/imageEdit');
-          await uploadBytesToStorage(body, 'videos', fileName, contentType);
+          await uploadBytesToStorage(body, 'videos', fileName, contentType, false, getUploadSignal());
         })();
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {
@@ -533,13 +538,14 @@ export function PostCaptureWorkflow({
         if (mountedRef.current) setUploadRetrying(false);
         return true;
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') break;
         lastError = err instanceof Error ? err.message : String(err);
         if (mountedRef.current) setUploadErrorMsg(lastError);
       }
     }
     if (mountedRef.current) setUploadRetrying(false);
     return false;
-  }, []);
+  }, [getUploadSignal]);
 
   const uploadFileUriNative = useCallback(async (
     fileUri: string,
@@ -557,7 +563,7 @@ export function PostCaptureWorkflow({
           const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
           await new Promise((r) => setTimeout(r, delayMs));
         }
-        const uploadPromise = uploadUriToBucket(fileUri, contentType, 'videos', fileName);
+        const uploadPromise = uploadUriToBucket(fileUri, contentType, 'videos', fileName, false, getUploadSignal());
         let timer: ReturnType<typeof setTimeout>;
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error('업로드 시간이 초과되었습니다.')), UPLOAD_TIMEOUT_MS);
@@ -566,13 +572,14 @@ export function PostCaptureWorkflow({
         if (mountedRef.current) setUploadRetrying(false);
         return true;
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') break;
         lastError = err instanceof Error ? err.message : String(err);
         if (mountedRef.current) setUploadErrorMsg(lastError);
       }
     }
     if (mountedRef.current) setUploadRetrying(false);
     return false;
-  }, []);
+  }, [getUploadSignal]);
 
   const proceedLockRef = useRef(false);
   const handleProceed = useCallback(async () => {
@@ -689,7 +696,7 @@ export function PostCaptureWorkflow({
       if (mountedRef.current) setIsUploading(false);
       proceedLockRef.current = false;
     }
-  }, [isUploading, uploadDone, videoUri, imageUri, selectedPlatformKey, customPrompt, editPlan.bgmTemplate.id, editPlan.pacingBpm, editPlan, onProceedToAnalysis, uriToBlob, uploadWithRetry, uploadFileUriNative, bgmRecommendation]);
+  }, [isUploading, uploadDone, videoUri, imageUri, selectedPlatformKey, customPrompt, editPlan.bgmTemplate.id, editPlan.pacingBpm, editPlan, onProceedToAnalysis, uriToBlob, uploadWithRetry, uploadFileUriNative, bgmRecommendation, getUploadSignal]);
 
   if (!visible) return null;
 

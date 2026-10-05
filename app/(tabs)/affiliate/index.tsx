@@ -889,7 +889,7 @@ export default function AffiliateScreen() {
           try {
             const a = document.createElement('a');
             a.href = allImages[i];
-            a.download = `shotconnect-cut-${i + 1}-${Date.now()}.png`;
+            a.download = `shotconnect-cut-${i + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
             a.click();
             await new Promise((resolve) => setTimeout(resolve, 300));
           } catch { /* skip failed download */ }
@@ -1014,7 +1014,7 @@ export default function AffiliateScreen() {
             setImportedMedia({
               uri: result.assets[0].uri,
               type: 'image',
-              name: result.assets[0].fileName ?? `imported_${Date.now()}.jpg`,
+              name: result.assets[0].fileName ?? `imported_${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`,
             });
           }
         } else {
@@ -1050,7 +1050,7 @@ export default function AffiliateScreen() {
             setImportedMedia({
               uri: asset.uri,
               type: 'video',
-              name: asset.fileName ?? `imported_${Date.now()}.mp4`,
+              name: asset.fileName ?? `imported_${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`,
             });
           }
         }

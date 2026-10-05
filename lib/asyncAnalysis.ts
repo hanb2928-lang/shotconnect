@@ -65,7 +65,7 @@ export async function startAsyncAnalysis(
   captureUri?: string,
 ): Promise<AsyncAnalysisResult> {
   const aborted = (): boolean => signal?.aborted === true;
-  const fileName = `scan-${Date.now()}`;
+  const fileName = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const imageHash = additionalBase64Images.length > 0
     ? hashMultiAngle([base64, ...additionalBase64Images], preferredStyle)
     : hashImage(base64);

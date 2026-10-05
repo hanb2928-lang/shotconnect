@@ -901,7 +901,7 @@ export async function extractVideoFrameBase64(
       const result = await extractVideoFrameFromServer(videoUrl, maxDimension, quality);
       if (result.frameUrl) {
         const FileSystem2 = await import('expo-file-system/legacy');
-        const localPath = `${FileSystem2.cacheDirectory}server-frame-${Date.now()}.jpg`;
+        const localPath = `${FileSystem2.cacheDirectory}server-frame-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
         try {
           await FileSystem2.downloadAsync(result.frameUrl, localPath);
           registerTempFile(localPath, 'extractVideoFrameBase64', { pin: true });
@@ -1141,6 +1141,7 @@ export async function uploadUriToBucket(
   bucket: string,
   fileName: string,
   upsert = false,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (Platform.OS === 'web') {
     throw new Error('uploadUriToBucket is not supported on web');
@@ -1187,6 +1188,7 @@ export async function uploadUriToBucket(
     // Hermes GC tick: yield so the engine can reclaim buffers from prior
     // compression/copy steps before the native upload socket opens.
     await new Promise<void>((r) => setTimeout(r, 10));
+    if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
     let result: { status: number; body?: string } | null = null;
     try {
       result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
@@ -1201,16 +1203,19 @@ export async function uploadUriToBucket(
     }
 
     if (!result) {
+      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
       // Fallback isolation: deep-copy headers so the native module cannot
       // mutate the shared reference from the first attempt. Yield to let the
       // previous file handle fully release before re-opening.
       await new Promise<void>((r) => setTimeout(r, 10));
+      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
       try {
         const info = await FileSystem.getInfoAsync(uploadUri);
         if (!info.exists || (info.size !== undefined && info.size <= 0)) {
           throw new Error('폴백 진입 시 파일이 손상되었습니다.');
         }
       } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') throw e;
         const errMsg = e instanceof Error ? e.message : String(e);
         throw new Error(`업로드 실패 (파일 검증 오류): ${errMsg}`);
       }
@@ -1237,6 +1242,9 @@ export async function uploadUriToBucket(
   let result: { status: number; body?: string };
   try {
     result = await Promise.race([doUpload(), timeout]).finally(() => clearTimeout(timer!));
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw err;
   } finally {
     if (copiedPath) {
       await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
@@ -1351,6 +1359,7 @@ export async function uploadFileDirectNative(
   bucket: string,
   path: string,
   mimeType: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (Platform.OS === 'web') {
     throw new Error('uploadFileDirectNative is not supported on web');
@@ -1403,51 +1412,62 @@ export async function uploadFileDirectNative(
     // any intermediate ArrayBuffer/base64 from compression before the
     // native socket opens. Prevents memory spikes and socket deadlocks.
     await new Promise<void>((r) => setTimeout(r, 10));
+    if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
     let result: { status: number; body?: string } | null = null;
+
+    // MULTIPART is the primary path: Expo's native upload module correctly
+    // sets the Content-Type from the `mimeType` parameter, and the multipart
+    // boundary framing prevents OkHttp from second-guessing the stream's
+    // content type against the file's magic number. BINARY_CONTENT mode can
+    // cause the declared Content-Type header to diverge from what OkHttp
+    // actually writes on the wire, leading to 400 Bad Request from Supabase
+    // Storage's gateway when the header doesn't match the byte signature.
+    try {
+      const info = await FileSystem.getInfoAsync(uploadUri);
+      if (!info.exists || (info.size !== undefined && info.size <= 0)) {
+        throw new Error('업로드 직전 파일이 손상되었습니다.');
+      }
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      throw new Error(`네이티브 업로드 실패 (파일 검증 오류): ${errMsg}`);
+    }
     try {
       result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
         httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
         headers: {
           Authorization: `Bearer ${supabaseAnonKey}`,
-          'Content-Type': effectiveMime,
           'x-upsert': 'true',
         },
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType: effectiveMime,
+        parameters: { upsert: 'true' },
       });
       if (result.status >= 400 && result.status !== 409) result = null;
     } catch (err) {
-      console.warn('[uploadFileDirectNative] BINARY_CONTENT failed:', err);
+      console.warn('[uploadFileDirectNative] MULTIPART failed:', err);
       result = null;
     }
 
     if (!result) {
-      // Fallback isolation: rebuild headers from scratch so no state from
-      // the failed BINARY_CONTENT attempt leaks into the MULTIPART request.
-      // Yield to let the native file handle fully release before re-opening.
+      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
+      // BINARY_CONTENT fallback: raw byte stream without multipart framing.
+      // Some Android/OkHttp versions handle this correctly when the file
+      // channel is freshly opened, so it's worth trying as a last resort.
       await new Promise<void>((r) => setTimeout(r, 10));
-      try {
-        const info = await FileSystem.getInfoAsync(uploadUri);
-        if (!info.exists || (info.size !== undefined && info.size <= 0)) {
-          throw new Error('폴백 진입 시 파일이 손상되었습니다.');
-        }
-      } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        throw new Error(`네이티브 업로드 실패 (파일 검증 오류): ${errMsg}`);
-      }
+      if (signal?.aborted) throw new DOMException('Upload cancelled', 'AbortError');
       try {
         result = await FileSystem.uploadAsync(uploadUrl, uploadUri, {
           httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
           headers: {
             Authorization: `Bearer ${supabaseAnonKey}`,
+            'Content-Type': effectiveMime,
             'x-upsert': 'true',
           },
-          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-          fieldName: 'file',
-          mimeType: effectiveMime,
-          parameters: { upsert: 'true' },
         });
       } catch (err) {
-        console.error('[uploadFileDirectNative] MULTIPART fallback failed:', err);
+        console.error('[uploadFileDirectNative] BINARY_CONTENT fallback failed:', err);
         const errMsg = err instanceof Error ? err.message : String(err);
         throw new Error(`네이티브 업로드 실패 (경로: ${safePath}, MIME: ${effectiveMime}): ${errMsg}`);
       }
@@ -1466,6 +1486,9 @@ export async function uploadFileDirectNative(
   let result: { status: number; body?: string };
   try {
     result = await Promise.race([doUpload(), timeout]).finally(() => clearTimeout(timer!));
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw err;
   } finally {
     if (copiedPath) {
       await FileSystem.deleteAsync(copiedPath, { idempotent: true }).catch(() => {});
@@ -1521,6 +1544,7 @@ export async function uploadBytesToStorage(
   path: string,
   mimeType: string,
   upsert = false,
+  signal?: AbortSignal,
 ): Promise<string> {
   const safePath = encodeStoragePath(path);
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
@@ -1555,10 +1579,11 @@ export async function uploadBytesToStorage(
   let resp: Response;
   try {
     resp = await Promise.race([
-      fetch(uploadUrl, { method: 'POST', headers, body: fetchBody }),
+      fetch(uploadUrl, { method: 'POST', headers, body: fetchBody, signal }),
       timeout,
     ]).finally(() => clearTimeout(timer!));
   } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
     logError(err, { component: 'imageEdit', action: 'uploadBytesToStorage' });
     throw err;
   }

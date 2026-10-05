@@ -415,7 +415,7 @@ export default function SettingsScreen() {
       }
       setLogoUploading(true);
       try {
-        const fileName = `logo-${Date.now()}.png`;
+        const fileName = `logo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
         const fileUrl = await uploadAssetBlob(file, fileName, file.type || 'image/png');
         if (!fileUrl) {
           Alert.alert('업로드 실패', '이미지 업로드에 실패했어요. 다시 시도해주세요');

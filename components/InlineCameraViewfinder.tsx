@@ -322,7 +322,22 @@ export const InlineCameraViewfinder = forwardRef<
         unregisterTempFile(uriToDelete);
         await waitForFileChannelFlush();
         capturedUri = null;
-        return { base64: compressed.base64, mimeType: compressed.mimeType, uri: compressed.compressedUri ?? undefined };
+        // Verify the compressed URI is still readable before handing it to
+        // the caller. compressImageToBase64WithUri flushes internally, but
+        // the intervening delete + channel flush can momentarily close file
+        // handles on slow Android I/O, causing ENOENT in the upload step.
+        let verifiedUri = compressed.compressedUri ?? undefined;
+        if (verifiedUri) {
+          const flushed = await waitForUriFlush(verifiedUri);
+          if (!flushed) {
+            unregisterTempFile(verifiedUri);
+            await withFileSettle('deleteUnflushedCompressed', () =>
+              FileSystem.deleteAsync(verifiedUri!, { idempotent: true }),
+            ).catch(() => {});
+            verifiedUri = undefined;
+          }
+        }
+        return { base64: compressed.base64, mimeType: compressed.mimeType, uri: verifiedUri };
       } catch (err) {
         console.error('[InlineCameraViewfinder] native capture failed:', err);
         if (capturedUri) {

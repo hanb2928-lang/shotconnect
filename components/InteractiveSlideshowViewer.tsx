@@ -106,7 +106,7 @@ export function InteractiveSlideshowViewer({
           try {
             const a = document.createElement('a');
             a.href = imageUrls[i];
-            a.download = `shotconnect-cut-${i + 1}-${Date.now()}.png`;
+            a.download = `shotconnect-cut-${i + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
             a.click();
             await new Promise((resolve) => setTimeout(resolve, 300));
           } catch { /* skip failed download */ }
