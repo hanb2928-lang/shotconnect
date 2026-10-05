@@ -149,6 +149,7 @@ export function PostCaptureWorkflow({
   const [uploadRetryCount, setUploadRetryCount] = useState(0);
   const [fallbackUsed, setFallbackUsed] = useState(false);
   const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
+  const [uploadStatusMsg, setUploadStatusMsg] = useState<string | null>(null);
   const [customPlatforms, setCustomPlatforms] = useState<PlatformOption[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newPlatformName, setNewPlatformName] = useState('');
@@ -179,6 +180,7 @@ export function PostCaptureWorkflow({
       setFallbackUsed(false);
       setIsUploading(false);
       setUploadErrorMsg(null);
+      setUploadStatusMsg(null);
       setGallerySaved(false);
       setMediaError(null);
     }
@@ -561,6 +563,7 @@ export function PostCaptureWorkflow({
         if (attempt > 0) {
           setUploadRetrying(true);
           setUploadRetryCount(attempt);
+          if (mountedRef.current) setUploadStatusMsg(`업로드 재시도 중... (${attempt + 1}회차)`);
           const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
           await new Promise((r) => setTimeout(r, delayMs));
         }
@@ -588,6 +591,7 @@ export function PostCaptureWorkflow({
     proceedLockRef.current = true;
     setIsUploading(true);
     setUploadErrorMsg(null);
+    setUploadStatusMsg(null);
     setUploadRetryCount(0);
 
     try {
@@ -596,6 +600,7 @@ export function PostCaptureWorkflow({
       let uploadUri = videoUri || (imageUri || null);
       if (uploadUri && videoUri && Platform.OS === 'web') {
         try {
+          if (mountedRef.current) setUploadStatusMsg('BGM 믹싱 중...');
           uploadUri = await mixBgmIntoVideo(
             videoUri,
             editPlan.bgmTemplate.id,
@@ -642,9 +647,12 @@ export function PostCaptureWorkflow({
           // for 10+ seconds on large files, so we always prefer the native
           // streaming path on mobile.
           if (Platform.OS !== 'web' && (finalUri.startsWith('file://') || finalUri.startsWith('content://'))) {
+            if (mountedRef.current) setUploadStatusMsg('파일 업로드 중...');
             cloudSuccess = await uploadFileUriNative(finalUri, fileName, contentType);
           } else {
+            if (mountedRef.current) setUploadStatusMsg('파일 준비 중...');
             const { data: uploadBody, mimeType: detectedMimeType } = await uriToBlob(finalUri);
+            if (mountedRef.current) setUploadStatusMsg('업로드 중...');
             const actualContentType = detectedMimeType || contentType;
             cloudSuccess = await uploadWithRetry(uploadBody, fileName, 3, actualContentType);
           }
@@ -660,9 +668,11 @@ export function PostCaptureWorkflow({
 
       if (cloudSuccess) {
         if (!mountedRef.current) return;
+        setUploadStatusMsg(null);
         setUploadDone(true);
       } else {
         if (!mountedRef.current) return;
+        setUploadStatusMsg(null);
         setFallbackUsed(true);
       }
 
@@ -1161,6 +1171,11 @@ export function PostCaptureWorkflow({
               </View>
             )}
 
+            {uploadStatusMsg && !uploadDone && (
+              <Text style={[styles.fallbackHint, { color: theme.colors.dark.textDim }]}>
+                {uploadStatusMsg}
+              </Text>
+            )}
             {fallbackUsed && !uploadDone && (
               <Text style={styles.fallbackHint}>
                 클라우드 업로드 실패 — 로컬 다운로드 및 {platformLabel} 공유로 자동 전환되었습니다. 발행을 계속 진행하세요.
