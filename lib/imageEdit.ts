@@ -1434,7 +1434,7 @@ export async function uploadFileDirectNative(
   let copiedPath: string | null = null;
   if (docDir && !fileUri.startsWith(docDir)) {
     const rawFilename = fileUri.split('/').pop() || `upload-${uniqueSuffix()}`;
-    const filename = encodeStoragePath(rawFilename);
+    const filename = sanitizeStoragePath(rawFilename);
     copiedPath = `${docDir}native-up-${uniqueSuffix()}-${filename}`;
     try {
       await withFileSettle('uploadFileDirectNative-copy', () =>
