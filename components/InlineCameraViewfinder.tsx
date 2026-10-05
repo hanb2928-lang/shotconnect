@@ -53,6 +53,7 @@ export const InlineCameraViewfinder = forwardRef<
   const [error, setError] = useState<string | null>(null);
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
   const [cameraKey, setCameraKey] = useState(0);
+  const [nativeCameraActive, setNativeCameraActive] = useState(false);
 
   useEffect(() => {
     onReadyChange?.(cameraReady);
@@ -151,23 +152,44 @@ export const InlineCameraViewfinder = forwardRef<
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'background' || nextState === 'inactive') {
         setCameraReady(false);
+        setNativeCameraActive(false);
         setCameraKey((k) => k + 1);
       } else if (nextState === 'active') {
         setCameraKey((k) => k + 1);
+        const reDelayId = setTimeout(() => {
+          if (mountedRef.current && isActive && permission?.granted) {
+            setNativeCameraActive(true);
+          }
+        }, 350);
+        return () => clearTimeout(reDelayId);
       }
     };
     const sub = AppState.addEventListener('change', handleAppState);
     return () => sub.remove();
-  }, [isActive]);
+  }, [isActive, permission?.granted]);
 
   useEffect(() => {
     mountedRef.current = true;
     if (Platform.OS !== 'web') {
       setCameraReady(false);
       if (!permission?.granted || !isActive) {
+        setNativeCameraActive(false);
         return () => setCameraReady(false);
       }
-      return () => setCameraReady(false);
+      // Delay mounting CameraView to allow the previous camera session's
+      // HAL file descriptor to fully release. When the main screen's CameraView
+      // unmounts and this one mounts in the same render cycle, Android's Camera
+      // HAL hasn't released the FD yet, causing silent initialization failure.
+      const delayId = setTimeout(() => {
+        if (mountedRef.current && isActive && permission?.granted) {
+          setNativeCameraActive(true);
+        }
+      }, 350);
+      return () => {
+        clearTimeout(delayId);
+        setNativeCameraActive(false);
+        setCameraReady(false);
+      };
     }
     if (isActive) {
       const id = setTimeout(() => startWebStream(), 200);
@@ -223,7 +245,7 @@ export const InlineCameraViewfinder = forwardRef<
   }, [cameraReady, facing]);
 
   const captureNative = useCallback(async (): Promise<{ base64: string; mimeType: string; uri?: string } | null> => {
-    if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady) return null;
+    if (Platform.OS === 'web' || !nativeCameraRef.current || !cameraReady || !nativeCameraActive) return null;
 
     const runCapture = async (): Promise<{ base64: string; mimeType: string; uri?: string } | null> => {
       if (captureInProgressRef.current) {
@@ -234,7 +256,7 @@ export const InlineCameraViewfinder = forwardRef<
       let capturedUri: string | null = null;
       try {
         await new Promise((resolve) => setTimeout(resolve, 400));
-        if (!mountedRef.current || !nativeCameraRef.current || !cameraReady) return null;
+        if (!mountedRef.current || !nativeCameraRef.current || !cameraReady || !nativeCameraActive) return null;
         const result = await nativeCameraRef.current.takePictureAsync({
           quality: 0.6,
         });
@@ -290,7 +312,7 @@ export const InlineCameraViewfinder = forwardRef<
     const next = captureQueueRef.current.then(() => runCapture());
     captureQueueRef.current = next.catch(() => {});
     return next;
-  }, [cameraReady]);
+  }, [cameraReady, nativeCameraActive]);
 
   useImperativeHandle(
     ref,
@@ -298,7 +320,7 @@ export const InlineCameraViewfinder = forwardRef<
       capture: () => (Platform.OS === 'web' ? captureWeb() : captureNative()),
       isReady: () => cameraReady,
     }),
-    [captureWeb, captureNative, cameraReady],
+    [captureWeb, captureNative, cameraReady, nativeCameraActive],
   );
 
   const handleFlip = () => {
@@ -438,7 +460,7 @@ export const InlineCameraViewfinder = forwardRef<
   return (
     <View style={styles.wrapper}>
       <View style={styles.viewfinder}>
-        {isActive && (
+        {nativeCameraActive && (
           <CameraView
             key={cameraKey}
             ref={nativeCameraRef}
