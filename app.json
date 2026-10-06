@@ -19,7 +19,6 @@
     },
     "android": {
       "package": "com.shotconnect.app",
-      "versionCode": 1,
       "jsEngine": "hermes",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
