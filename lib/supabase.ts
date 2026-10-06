@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { getItem, setItem, removeItem } from '@/lib/storage';
 
-const FALLBACK_URL = 'https://covcgemepkdrohktqlhc.supabase.co';
+const FALLBACK_URL = 'https://dxluoqovmxxqgahucmkw.supabase.co';
 const FALLBACK_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvdmNnZW1lcGtkcm9oa3RxbGhjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjU3OTcsImV4cCI6MjEwNjM0MTc5N30.hCme7ue6PcPauYGB1vS8bpVdsx2VRA6pyqUvstixHNU';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4bHVvcW92bXh4cWdhaHVjbWt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyMzkwNjEsImV4cCI6MjEwNjgxNTA2MX0.z_NpuiQmQOIryN64YxQ0RZRMjMNn6au3-EuLTg7fGyc';
 
 export const supabaseUrl: string =
   (process.env.EXPO_PUBLIC_SUPABASE_URL || FALLBACK_URL).trim();
