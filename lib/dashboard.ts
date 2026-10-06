@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getKSTDateKey, getTodayKSTKey, formatRelativeTimeKST } from '@/lib/timeUtils';
 import type { RevenueRecord, SavedAsset, Scan } from '@/types/database';
 
 export interface ContentPerformanceRow {
@@ -189,38 +190,32 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   const topContent = [...contentRows].sort((a, b) => b.clicks - a.clicks).slice(0, 10);
   const recentContent = [...contentRows].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
 
-  // Daily clicks (14 days, Korea timezone)
-  const now = new Date();
-  const koreaNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const baseDay = koreaNow.toISOString().split('T')[0];
-  const [by, bm, bd] = baseDay.split('-').map(Number);
+  // Daily clicks (14 days, Korea timezone via Intl)
+  const todayKey = getTodayKSTKey();
+  const [ty, tm, td] = todayKey.split('-').map(Number);
   const dailyClickMap = new Map<string, number>();
   for (let i = 13; i >= 0; i--) {
-    const dt = new Date(Date.UTC(by, bm - 1, bd - i));
+    const dt = new Date(Date.UTC(ty, tm - 1, td - i));
     dailyClickMap.set(dt.toISOString().split('T')[0], 0);
   }
   for (const e of clickEvents) {
     if (!e.clicked_at) continue;
-    const d = new Date(e.clicked_at);
-    const korea = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-    const key = korea.toISOString().split('T')[0];
+    const key = getKSTDateKey(e.clicked_at);
     if (dailyClickMap.has(key)) {
       dailyClickMap.set(key, (dailyClickMap.get(key) || 0) + 1);
     }
   }
   const dailyClicks = Array.from(dailyClickMap.entries()).map(([date, clicks]) => ({ date, clicks }));
 
-  // Daily revenue (14 days, Korea timezone)
+  // Daily revenue (14 days, Korea timezone via Intl)
   const dailyRevMap = new Map<string, number>();
   for (let i = 13; i >= 0; i--) {
-    const dt = new Date(Date.UTC(by, bm - 1, bd - i));
+    const dt = new Date(Date.UTC(ty, tm - 1, td - i));
     dailyRevMap.set(dt.toISOString().split('T')[0], 0);
   }
   for (const r of revenues) {
     if (!r.created_at) continue;
-    const d = new Date(r.created_at);
-    const korea = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-    const key = korea.toISOString().split('T')[0];
+    const key = getKSTDateKey(r.created_at);
     if (dailyRevMap.has(key)) {
       dailyRevMap.set(key, (dailyRevMap.get(key) || 0) + Number(r.amount));
     }
@@ -350,16 +345,5 @@ export function formatKRW(amount: number): string {
 }
 
 export function formatClickTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffMin < 1) return '방금 전';
-  if (diffMin < 60) return `${diffMin}분 전`;
-  if (diffHr < 24) return `${diffHr}시간 전`;
-  if (diffDay < 7) return `${diffDay}일 전`;
-  return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+  return formatRelativeTimeKST(iso);
 }

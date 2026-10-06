@@ -1,5 +1,6 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import { supabase, ensureFreshSession } from './supabase';
+import { monotonicStart, monotonicElapsedSec } from './timeUtils';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { getMultiAngleCache, setMultiAngleCache, findSimilarMultiAngleCache } from './aiCache';
@@ -232,14 +233,14 @@ export async function generateAiVideo(
   options: GenerateAiVideoOptions,
   onProgress?: (progress: VideoGenProgress) => void,
 ): Promise<VideoGenResult> {
-  const startTime = Date.now();
+  const startTime = monotonicStart();
 
   const report = (phase: VideoGenPhase, progress: number, message: string) => {
     onProgress?.({
       phase,
       progress,
       message,
-      elapsedSec: Math.round((Date.now() - startTime) / 1000),
+      elapsedSec: monotonicElapsedSec(startTime),
     });
   };
 
@@ -450,7 +451,7 @@ export async function generateAiVideo(
 export function createVideoGenProgressTracker(
   onProgress: (progress: VideoGenProgress) => void,
 ): { update: (progress: number, message: string) => void; error: (message: string) => void; done: (message: string) => void } {
-  const startTime = Date.now();
+  const startTime = monotonicStart();
   return {
     update: (progress: number, message: string) => {
       const phase: VideoGenPhase = progress < 0.15 ? 'submitting' : progress < 1.0 ? 'generating' : 'completed';
@@ -458,14 +459,14 @@ export function createVideoGenProgressTracker(
         phase,
         progress,
         message: `${message} (${Math.round(progress * 100)}%)`,
-        elapsedSec: Math.round((Date.now() - startTime) / 1000),
+        elapsedSec: monotonicElapsedSec(startTime),
       });
     },
     error: (message: string) => {
-      onProgress({ phase: 'error', progress: 0, message, elapsedSec: Math.round((Date.now() - startTime) / 1000) });
+      onProgress({ phase: 'error', progress: 0, message, elapsedSec: monotonicElapsedSec(startTime) });
     },
     done: (message: string) => {
-      onProgress({ phase: 'completed', progress: 1.0, message, elapsedSec: Math.round((Date.now() - startTime) / 1000) });
+      onProgress({ phase: 'completed', progress: 1.0, message, elapsedSec: monotonicElapsedSec(startTime) });
     },
   };
 }
@@ -760,7 +761,7 @@ function waitForVideoCompletion(
         elapsedTick++;
         await Promise.all([checkDb(), checkScanVideoUrl()]);
         if (!settled) {
-          const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+          const elapsedSec = monotonicElapsedSec(startTime);
           const timeProgress = Math.min(0.1 + (elapsedSec / 180) * 0.8, 0.95);
           const healthHint = channelHealth === ChannelHealth.HEALTHY
             ? ''
@@ -843,7 +844,7 @@ function waitForVideoCompletion(
     // Soft warning at 120s — don't reject, just inform the user
     let softWarnTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
       if (settled) return;
-      const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+      const elapsedSec = monotonicElapsedSec(startTime);
       report('generating', 0.85, `렌더링이 조금 오래 걸리고 있어요 (${elapsedSec}초). 백그라운드에서 계속 진행 중입니다...`);
     }, REALTIME_SOFT_WARN_MS);
 

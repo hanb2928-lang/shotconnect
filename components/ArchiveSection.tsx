@@ -26,6 +26,7 @@ import { CachedImage } from '@/components/CachedImage';
 import { VideoReplayModal } from '@/components/VideoReplayModal';
 import { friendlyError } from '@/lib/errors';
 import { touchStorageObject } from '@/lib/storageLifecycle';
+import { formatDateKST } from '@/lib/timeUtils';
 
 let _mediaLibrary: typeof import('expo-media-library') | null = null;
 async function getMediaLibrary() {
@@ -221,13 +222,6 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
     }
   }, [showToast]);
 
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}.${month}.${day}`;
-  };
-
   const renderFooter = () => {
     if (!loadingMore) return null;
     return (
@@ -351,7 +345,7 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
                     {item.motionTemplate}
                   </Text>
                 ) : null}
-                <Text style={styles.cardDate}>{formatDate(item.createdAt)}</Text>
+                <Text style={styles.cardDate}>{formatDateKST(item.createdAt)}</Text>
               </View>
             </TouchableOpacity>
             <View style={styles.cardActions}>

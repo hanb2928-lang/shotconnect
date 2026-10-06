@@ -13,6 +13,7 @@ import { theme } from '@/lib/theme';
 import { useRouter } from 'expo-router';
 import { fetchDashboardSummary, formatKRW, type DashboardSummary } from '@/lib/dashboard';
 import { getStaleCached, setCached } from '@/lib/offlineCache';
+import { formatDateKST } from '@/lib/timeUtils';
 import { useMountedRef } from '@/hooks/useMountedRef';
 
 type RangeKey = '7d' | '14d' | '30d';
@@ -251,7 +252,7 @@ export function PerformanceReportCard() {
                 <View style={styles.peakRow}>
                   <TrendingUp size={11} color={theme.colors.primary[400]} strokeWidth={2} />
                   <Text style={styles.peakText}>
-                    최고 클릭일: {new Date(summary.peakDay.date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })} ({summary.peakDay.clicks}클릭)
+                    최고 클릭일: {formatDateKST(summary.peakDay.date)} ({summary.peakDay.clicks}클릭)
                   </Text>
                 </View>
               )}

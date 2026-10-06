@@ -61,7 +61,17 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  */
 export async function ensureFreshSession(): Promise<void> {
   try {
-    await supabase.auth.getSession();
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (session?.expires_at) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      // Refresh proactively when within 120s of expiry — the buffer
+      // absorbs small device-clock drift so we don't reject a still-valid
+      // token or miss the refresh window due to skew.
+      if (session.expires_at - nowSec <= 120) {
+        await supabase.auth.refreshSession().catch(() => {});
+      }
+    }
   } catch {
     // Token refresh failure is non-fatal — the resume fetch will simply
     // use whatever token is available and retry via the normal poll loop.

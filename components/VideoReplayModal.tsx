@@ -16,6 +16,7 @@ import { CachedImage } from '@/components/CachedImage';
 import { NativeVideoPlayer } from '@/components/NativeVideoPlayer';
 import { friendlyError } from '@/lib/errors';
 import { touchStorageObject } from '@/lib/storageLifecycle';
+import { formatDateKST } from '@/lib/timeUtils';
 import type { ArchiveItem } from '@/lib/archive';
 
 interface VideoReplayModalProps {
@@ -40,13 +41,6 @@ let _sharing: typeof import('expo-sharing') | null = null;
 async function getSharing() {
   if (!_sharing) _sharing = await import('expo-sharing');
   return _sharing;
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}.${month}.${day}`;
 }
 
 export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalProps) {
@@ -178,7 +172,7 @@ export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalPro
               <Text style={styles.headerTitle} numberOfLines={1}>
                 {item.productName || item.title || '제품'}
               </Text>
-              <Text style={styles.headerDate}>{formatDate(item.createdAt)}</Text>
+              <Text style={styles.headerDate}>{formatDateKST(item.createdAt)}</Text>
             </View>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7} hitSlop={12}>
               <X size={22} color={theme.colors.dark.text} strokeWidth={2.5} />

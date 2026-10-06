@@ -14,6 +14,7 @@ import {
 import { Bell, BellRing, Clock, Check, X, Copy, Trash2, Calendar, Info, Sparkles } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
+import { formatDateTimeKST } from '@/lib/timeUtils';
 import * as Clipboard from 'expo-clipboard';
 
 export interface UploadSchedule {
@@ -52,18 +53,6 @@ const PLATFORM_LABELS: Record<string, string> = {
   tiktok: 'TikTok',
   shortform: '숏폼 (공통)',
 };
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const ampm = h < 12 ? '오전' : '오후';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  const mm = m < 10 ? `0${m}` : String(m);
-  return `${month}/${day} ${ampm} ${h12}:${mm}`;
-}
 
 function getTimeUntil(iso: string): string {
   const now = Date.now();
@@ -207,12 +196,17 @@ export function SmartScheduler({
     hour = Math.min(Math.max(hour, 0), 23);
     minute = Math.min(Math.max(minute, 0), 59);
 
+    // Schedule in KST: construct a UTC timestamp for the desired KST hour.
+    // Asia/Seoul is UTC+9, so KST HH:MM = UTC (HH-9):MM (wrapping as needed).
     const now = new Date();
-    const scheduled = new Date();
-    scheduled.setHours(hour, minute, 0, 0);
-    if (scheduled.getTime() <= now.getTime()) {
-      scheduled.setDate(scheduled.getDate() + 1);
+    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const kstScheduled = new Date(kstNow);
+    kstScheduled.setUTCHours(kstScheduled.getUTCHours(), kstScheduled.getUTCMinutes(), 0, 0);
+    kstScheduled.setUTCHours(hour - 9, minute, 0, 0);
+    if (kstScheduled.getTime() <= kstNow.getTime()) {
+      kstScheduled.setUTCDate(kstScheduled.getUTCDate() + 1);
     }
+    const scheduled = new Date(kstScheduled.getTime() - 9 * 60 * 60 * 1000);
 
     setSaving(true);
     setError(null);
@@ -353,7 +347,7 @@ export function SmartScheduler({
                   <Clock size={12} color={theme.colors.primary[400]} strokeWidth={2} />
                 </View>
                 <View style={styles.scheduleInfo}>
-                  <Text style={styles.scheduleTime}>{formatTime(sched.scheduled_time)}</Text>
+                  <Text style={styles.scheduleTime}>{formatDateTimeKST(sched.scheduled_time)}</Text>
                   <Text style={styles.scheduleCountdown}>{getTimeUntil(sched.scheduled_time)}</Text>
                   {sched.platform && (
                     <Text style={styles.schedulePlatform}>{PLATFORM_LABELS[sched.platform] || sched.platform}</Text>
@@ -382,7 +376,7 @@ export function SmartScheduler({
                   <Check size={12} color={theme.colors.success[400]} strokeWidth={2} />
                 </View>
                 <View style={styles.scheduleInfo}>
-                  <Text style={styles.scheduleTime}>{formatTime(sched.scheduled_time)}</Text>
+                  <Text style={styles.scheduleTime}>{formatDateTimeKST(sched.scheduled_time)}</Text>
                   <Text style={styles.firedLabel}>알림 전송 완료</Text>
                 </View>
               </View>

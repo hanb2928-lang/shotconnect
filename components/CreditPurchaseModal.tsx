@@ -14,6 +14,7 @@ import {
   type CreditBalance,
   type CreditTransaction,
 } from '@/lib/credits';
+import { formatDateKST } from '@/lib/timeUtils';
 
 interface CreditPurchaseModalProps {
   visible: boolean;
@@ -178,7 +179,7 @@ export function CreditPurchaseModal({ visible, onClose, onPurchased }: CreditPur
                         <View>
                           <Text style={styles.historyDesc}>{tx.description || (tx.amount > 0 ? '충전' : '사용')}</Text>
                           <Text style={styles.historyDate}>
-                            {new Date(tx.created_at).toLocaleDateString('ko-KR')}
+                            {formatDateKST(tx.created_at)}
                           </Text>
                         </View>
                       </View>

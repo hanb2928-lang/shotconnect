@@ -2,6 +2,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform, Image as RNImage, AppState, type AppStateStatus } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
+import { isTokenExpiringSoon } from '@/lib/timeUtils';
 import { base64ToUint8ArrayAsync, cleanBase64, uint8ArrayToBase64Async } from '@/lib/base64';
 import { safeFetch } from '@/lib/apiClient';
 import { isLowEndDevice } from '@/lib/devicePerformance';
@@ -20,7 +21,11 @@ async function getStorageHeaders(contentType?: string, upsert?: boolean): Promis
   const session = data.session;
   const token = session?.access_token || supabaseAnonKey;
   const expiresIn = session?.expires_at ? session.expires_at - Math.floor(Date.now() / 1000) : null;
-  console.info(`[STORAGE AUTH] mode=${session?.access_token ? 'session' : 'anon'} expiresIn=${expiresIn ?? 'none'}${error ? ' sessionError=true' : ''}`);
+  const expiringSoon = isTokenExpiringSoon(session?.expires_at);
+  if (expiringSoon) {
+    await supabase.auth.refreshSession().catch(() => {});
+  }
+  console.info(`[STORAGE AUTH] mode=${session?.access_token ? 'session' : 'anon'} expiresIn=${expiresIn ?? 'none'}${expiringSoon ? ' refreshed=true' : ''}${error ? ' sessionError=true' : ''}`);
   return {
     Authorization: `Bearer ${token}`,
     apikey: supabaseAnonKey,

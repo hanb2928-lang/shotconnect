@@ -4,20 +4,10 @@ import { Clock, Trash2, RefreshCw, ImageIcon } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { CachedImage } from './CachedImage';
 import { listDrafts, deleteDraft, type DraftEntry } from '@/lib/draftStorage';
+import { formatRelativeTimeKST } from '@/lib/timeUtils';
 
 interface DraftHistoryProps {
   onResume: (draft: DraftEntry) => void;
-}
-
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '방금';
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  const days = Math.floor(hours / 24);
-  return `${days}일 전`;
 }
 
 export function DraftHistory({ onResume }: DraftHistoryProps) {
@@ -89,7 +79,7 @@ export function DraftHistory({ onResume }: DraftHistoryProps) {
 
             <View style={styles.draftInfo}>
               <Text style={styles.draftLabel} numberOfLines={1}>{draft.label}</Text>
-              <Text style={styles.draftTime}>{formatRelativeTime(draft.updatedAt)}</Text>
+              <Text style={styles.draftTime}>{formatRelativeTimeKST(new Date(draft.updatedAt).toISOString())}</Text>
             </View>
 
             <View style={styles.draftActions}>
