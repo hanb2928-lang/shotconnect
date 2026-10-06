@@ -7,7 +7,7 @@ import { getUserSettings } from '@/lib/settings';
 import { base64ToUint8Array, buildDataUrl, uint8ArrayToBase64, uint8ArrayToBase64Async } from '@/lib/base64';
 import { enqueueAndWait } from '@/lib/jobQueue';
 import { deductCredits, refundCredits } from '@/lib/credits';
-import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage, sanitizeStoragePath, encodeStoragePath, uniqueSuffix } from '@/lib/imageEdit';
+import { compressBase64ForUpload, prepareImageForApi, base64ToBlob, UPLOAD_MAX_DIMENSION, UPLOAD_QUALITY, UPLOAD_MAX_PAYLOAD_BYTES, compressDataUrlToMaxBytes, uploadBytesToStorage, sanitizeStoragePath, encodeStoragePath, uniqueSuffix, getStorageHeaders } from '@/lib/imageEdit';
 import { compressUriToUri, uploadFileDirectNative } from '@/lib/imageEdit';
 import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { aiCachedCall } from '@/lib/aiCache';
@@ -437,11 +437,8 @@ export async function uploadVideoBlob(
       const uploadUrl = `${supabaseUrl}/storage/v1/object/scans/${encodeStoragePath(fileName)}`;
 
       const tryUpload = async (uploadType: number): Promise<{ status: number; body?: string }> => {
-        const headers: Record<string, string> = {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          'x-upsert': 'true',
-          'Cache-Control': '360000',
-        };
+        const baseHeaders = await getStorageHeaders(mimeType, true);
+        const headers: Record<string, string> = { ...baseHeaders };
         const opts: Record<string, unknown> = {
           httpMethod: 'POST',
           headers,

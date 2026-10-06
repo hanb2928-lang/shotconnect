@@ -16,7 +16,7 @@ import { logError } from '@/lib/errorLogger';
 
 let __globalUploadAttemptCount = 0;
 
-async function getStorageHeaders(contentType?: string, upsert?: boolean): Promise<Record<string, string>> {
+export async function getStorageHeaders(contentType?: string, upsert?: boolean): Promise<Record<string, string>> {
   const { data, error } = await supabase.auth.getSession();
   const session = data.session;
   const token = session?.access_token || supabaseAnonKey;
