@@ -17,10 +17,6 @@ import { theme } from '@/lib/theme';
 interface MotionPreviewOverlayProps {
   visible: boolean;
   images: string[];
-  label?: string;
-  progressMessage?: string;
-  /** 0..1 progress from the actual generation pipeline */
-  progress?: number;
 }
 
 const CROSSFADE_MS = 1800;
@@ -40,9 +36,6 @@ const PAN_DIRECTIONS: PanDirection[] = ['right', 'left', 'up', 'down', 'center']
 export function MotionPreviewOverlay({
   visible,
   images,
-  label = 'AI 영상 생성 중',
-  progressMessage,
-  progress,
 }: MotionPreviewOverlayProps) {
   const currentIndex = useSharedValue(0);
   const opacityA = useSharedValue(1);
@@ -52,9 +45,9 @@ export function MotionPreviewOverlay({
   const translateA = useSharedValue(0);
   const translateB = useSharedValue(0);
   const sparkleRotate = useSharedValue(0);
-  const progressBarSV = useSharedValue(0);
   const appStateRef = useRef<AppStateStatus>('active');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const validImages = images.filter((uri) => uri && uri.length > 0);
   const hasImages = validImages.length >= 2;
@@ -79,7 +72,9 @@ export function MotionPreviewOverlay({
     currentIndex.value = next;
 
     // After the crossfade, swap roles: the now-visible image becomes A
-    setTimeout(() => {
+    if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+    crossfadeTimerRef.current = setTimeout(() => {
+      crossfadeTimerRef.current = null;
       opacityA.value = 1;
       opacityB.value = 0;
       scaleA.value = KEN_BURNS_SCALE;
@@ -134,16 +129,6 @@ export function MotionPreviewOverlay({
     return () => { cancelAnimation(sparkleRotate); };
   }, [visible, sparkleRotate]);
 
-  // Progress bar
-  useEffect(() => {
-    if (typeof progress === 'number' && progress >= 0) {
-      progressBarSV.value = withTiming(Math.min(1, Math.max(0, progress)), {
-        duration: 500,
-        easing: Easing.out(Easing.quad),
-      });
-    }
-  }, [progress, progressBarSV]);
-
   // Pause on background
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
@@ -173,6 +158,10 @@ export function MotionPreviewOverlay({
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
+      if (crossfadeTimerRef.current) {
+        clearTimeout(crossfadeTimerRef.current);
+        crossfadeTimerRef.current = null;
+      }
       cancelAnimation(opacityA);
       cancelAnimation(opacityB);
       cancelAnimation(scaleA);
@@ -199,10 +188,6 @@ export function MotionPreviewOverlay({
 
   const sparkleStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${sparkleRotate.value}deg` }],
-  }));
-
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progressBarSV.value * 100}%`,
   }));
 
   if (!visible) return null;
@@ -242,23 +227,6 @@ export function MotionPreviewOverlay({
             </View>
           </View>
 
-          {/* Status text */}
-          <Text style={styles.label}>{label}</Text>
-          {progressMessage ? (
-            <Text style={styles.sublabel} numberOfLines={2}>{progressMessage}</Text>
-          ) : null}
-
-          {/* Progress bar */}
-          <View style={styles.progressTrack}>
-            <Animated.View style={[styles.progressFill, progressStyle]} />
-          </View>
-
-          {/* Step hint */}
-          <Text style={styles.hint}>
-            {hasImages
-              ? '촬영하신 이미지로 모션 프리뷰를 재생하는 동안 AI가 영상을 생성하고 있어요'
-              : 'AI가 영상을 생성하고 있어요. 완료될 때까지 잠시만 기다려주세요'}
-          </Text>
         </View>
       </View>
     </Modal>
@@ -340,37 +308,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.semiBold,
     color: theme.colors.dark.text,
-  },
-  label: {
-    fontSize: theme.typography.body,
-    fontFamily: theme.typography.fontFamily.semiBold,
-    color: theme.colors.dark.text,
-    marginTop: theme.spacing.xs,
-  },
-  sublabel: {
-    fontSize: theme.typography.caption,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
-    textAlign: 'center',
-  },
-  progressTrack: {
-    width: '100%',
-    height: 3,
-    backgroundColor: theme.colors.dark.border,
-    borderRadius: 1.5,
-    marginTop: theme.spacing.xs,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: theme.colors.primary[400],
-    borderRadius: 1.5,
-  },
-  hint: {
-    fontSize: 11,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textFaint,
-    textAlign: 'center',
-    marginTop: 2,
   },
 });

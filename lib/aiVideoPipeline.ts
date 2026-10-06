@@ -956,8 +956,14 @@ export interface SubmitOnlyResult {
 export async function submitVideoJobAsync(
   prompt: string,
   options: GenerateAiVideoOptions,
+  onProgress?: (progress: VideoGenProgress) => void,
 ): Promise<SubmitOnlyResult> {
   const SUBMIT_TIMEOUT_MS = 90_000;
+  const SUBMIT_SOFT_TIMEOUT_MS = 10_000;
+
+  const report = (phase: VideoGenPhase, progress: number, message: string) => {
+    onProgress?.({ phase, progress, message, elapsedSec: 0 });
+  };
 
   const bodyJson = JSON.stringify(compactBody({
     mode: 'submit',
@@ -998,6 +1004,8 @@ export async function submitVideoJobAsync(
 
   await yieldToUI();
 
+  report('submitting', 0.08, 'AI 렌더링 요청 전송 중...');
+
   const submitController = new AbortController();
   const submitTimeoutId = setTimeout(() => submitController.abort(), SUBMIT_TIMEOUT_MS);
   const invokePromise = supabase.functions.invoke('generate-video', {
@@ -1012,7 +1020,20 @@ export async function submitVideoJobAsync(
     ),
   );
 
-  const { data, error } = await Promise.race([invokePromise, timeoutPromise]).finally(() => clearTimeout(submitTimeoutId));
+  // Soft timeout: after 10s, nudge progress forward so the UI doesn't
+  // appear frozen at 8% while the server is still processing the submit.
+  const softTimeoutPromise = new Promise<{ data: null; error: null }>((resolve) => {
+    setTimeout(() => {
+      report('submitting', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
+      resolve({ data: null, error: null });
+    }, SUBMIT_SOFT_TIMEOUT_MS);
+  });
+
+  const { data, error } = await Promise.race([
+    invokePromise,
+    timeoutPromise,
+    softTimeoutPromise.then(() => invokePromise),
+  ]).finally(() => clearTimeout(submitTimeoutId));
 
   if (error) throw await buildVideoFunctionError(error);
   if (!data || typeof data.taskId !== 'string') {

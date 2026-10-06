@@ -606,6 +606,7 @@ export default function SynthesisScreen() {
     if (!jobId) return;
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState !== 'active') return;
+      if (!mountedRef.current) return;
       (async () => {
         try {
           const { data, error } = await supabase
@@ -738,6 +739,8 @@ export default function SynthesisScreen() {
         enableVirtualFitting: genMode === 'universal_synthesis' ? enableVirtualFitting : undefined,
         enableFabricPhysics,
         draft: true,
+      }, (p) => {
+        if (mountedRef.current) setVideoProgress(p);
       });
       if (!mountedRef.current) return;
       jobIdRef.current = submitResult.taskId;
@@ -1002,9 +1005,6 @@ export default function SynthesisScreen() {
         <MotionPreviewOverlay
           visible={isGenerating}
           images={productImages.map((img) => img.uri)}
-          label="AI 영상 생성 중"
-          progressMessage={videoProgress?.message ?? '촬영하신 이미지로 모션을 만들고 있어요'}
-          progress={videoProgress?.progress ?? 0}
         />
       ) : (
         <ProcessingBarrier
