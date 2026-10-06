@@ -64,6 +64,7 @@ interface GenerateAiVideoOptions {
   enableCaustics?: boolean;
   enableVirtualFitting?: boolean;
   enableFabricPhysics?: boolean;
+  mainImageUrl?: string;
   signal?: AbortSignal;
 }
 
@@ -73,8 +74,8 @@ const SUBMIT_RETRY_DELAY_MS = 2000;
 const REALTIME_TIMEOUT_MS = 300_000;
 const REALTIME_SOFT_WARN_MS = 120_000;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
-const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 15000;
-const RUNWAY_POLL_FALLBACK_START_MS = 30_000;
+const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 10000;
+const RUNWAY_POLL_FALLBACK_START_MS = 20_000;
 const POLL_MIN_INTERVAL_MS = 2000;
 const POLL_MAX_INTERVAL_MS = 12000;
 const POLL_BACKOFF_FACTOR = 1.5;
@@ -376,6 +377,7 @@ export async function generateAiVideo(
           enableCaustics: options.enableCaustics,
           enableVirtualFitting: options.enableVirtualFitting,
           enableFabricPhysics: options.enableFabricPhysics,
+          mainImageUrl: options.mainImageUrl,
         }),
         0,
         (retryAttempt) => report('submitting', 0.05 + retryAttempt * 0.02, `네트워크 복구 후 재시도 중 (${retryAttempt}/${SUBMIT_MAX_RETRIES})...`),
@@ -1000,6 +1002,7 @@ export async function submitVideoJobAsync(
     enableCaustics: options.enableCaustics,
     enableVirtualFitting: options.enableVirtualFitting,
     enableFabricPhysics: options.enableFabricPhysics,
+    mainImageUrl: options.mainImageUrl,
   }));
 
   await yieldToUI();
@@ -1288,6 +1291,7 @@ export async function upgradeVideoToHd(
     enableCaustics: options.enableCaustics,
     enableVirtualFitting: options.enableVirtualFitting,
     enableFabricPhysics: options.enableFabricPhysics,
+    mainImageUrl: options.mainImageUrl,
   }));
 
   await yieldToUI();

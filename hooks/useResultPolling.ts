@@ -15,7 +15,7 @@ export interface ResultPollingOptions {
   onSoftWarn?: () => void;
 }
 
-const POLL_INITIAL_MS = 3000;
+const POLL_INITIAL_MS = 1500;
 const POLL_MAX_MS = 15000;
 const POLL_BACKOFF_FACTOR = 1.5;
 const SOFT_WARN_MS = 120_000;

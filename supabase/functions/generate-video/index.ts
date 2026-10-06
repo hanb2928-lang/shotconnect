@@ -62,6 +62,7 @@ interface GenerateVideoRequest {
   enableVirtualFitting?: boolean;
   enableFabricPhysics?: boolean;
   orbitSpeed?: number;
+  mainImageUrl?: string;
   // webhook fields (sent by Runway callback)
   status?: string;
   output?: string[] | { url?: string } | string;
@@ -76,7 +77,7 @@ const RUNWAY_POLL_TIMEOUT_MS = 10000;
 const EDGE_WALL_CLOCK_BUDGET_MS = 120000;
 const ZOMBIE_JOB_TIMEOUT_MS = 600000; // 10 minutes — jobs exceeding this in PENDING/PROCESSING are auto-failed
 const SERVER_POLL_MAX_ATTEMPTS = 60; // ~10 min of polling with jitter, covers 2-4 min Runway renders + HD upscale + retries
-const SERVER_POLL_INITIAL_DELAY_MS = 4000;
+const SERVER_POLL_INITIAL_DELAY_MS = 2000;
 const SERVER_POLL_MAX_DELAY_MS = 15000;
 const SERVER_POLL_SELF_INVOKE_TIMEOUT_MS = 15000; // AbortController timeout for self-reinvocation fetch
 const JITTER_MAX_MS = 2000; // Random jitter added to each backoff delay to desynchronize concurrent polls
@@ -265,21 +266,12 @@ Deno.serve(async (req: Request) => {
 
 async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   const modeTokens = buildModeRenderingTokens(body.selectedMode, body.enableOrbit360, body.enableCaustics, body.enableVirtualFitting, body.enableFabricPhysics, typeof body.orbitSpeed === 'number' ? body.orbitSpeed : undefined);
-  console.log("[generate-video] Submit payload:", JSON.stringify({
-    promptLength: body.prompt?.length ?? 0,
-    durationSec: body.durationSec,
-    aspectRatio: body.aspectRatio,
-    productName: body.productName,
+  console.log("[generate-video] Submit:", JSON.stringify({
     scanId: body.scanId,
-    variationSeed: body.variationSeed,
-    hasProductVision: !!body.productVision,
     selectedMode: body.selectedMode ?? 'none',
-    enableOrbit360: body.enableOrbit360 === true,
-    orbitSpeed: typeof body.orbitSpeed === 'number' && body.orbitSpeed > 0 ? body.orbitSpeed : undefined,
-    enableCaustics: body.enableCaustics === true,
-    enableVirtualFitting: body.enableVirtualFitting === true,
-    enableFabricPhysics: body.enableFabricPhysics === true,
-    injectedModeTokens: modeTokens,
+    durationSec: body.durationSec,
+    hasMainImageUrl: !!body.mainImageUrl,
+    tokens: modeTokens.length,
   }));
 
   const isDraft = body.draft === true;
@@ -334,7 +326,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
     enableFabricPhysics: body.enableFabricPhysics,
     isDraft,
   });
-  console.log("[generate-video] Final runway prompt length:", runwayPrompt.length, "| mode tokens injected:", modeTokens.length, "| prompt preview:", runwayPrompt.slice(0, 200));
+  console.log("[generate-video] Prompt length:", runwayPrompt.length, "| tokens:", modeTokens.length);
 
   // Generate internal job ID immediately — no waiting for Runway API
   const internalJobId = crypto.randomUUID();
@@ -365,6 +357,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
         hdUpscale,
         resolution,
         fps,
+        mainImageUrl: body.mainImageUrl,
       }),
     }).catch((err) => {
       console.error("[generate-video] Failed to self-invoke runway-submit:", err);
@@ -431,9 +424,10 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
       ? `${supabaseUrl}/functions/v1/generate-video?mode=webhook&secret=${encodeURIComponent(webhookSecret)}`
       : `${supabaseUrl}/functions/v1/generate-video?mode=webhook`;
 
-    let promptImage: string | null = null;
-    promptImage = await fetchScanImageUrl(scanId);
-    console.log("[generate-video] runway-submit: Fetched scan image:", promptImage ? "found" : "not found");
+    let promptImage: string | null = body.mainImageUrl ?? null;
+    if (!promptImage) {
+      promptImage = await fetchScanImageUrl(scanId);
+    }
 
     const runwayTaskId = await submitWithRetry(
       () => submitRunwayTask(runwayPrompt, runwayKey, aspectRatio, durationSec, isDraft, webhookUrl, scanId, promptImage, isDraft ? false : hdUpscale, resolution, fps),
@@ -1193,17 +1187,7 @@ async function submitRunwayTask(
       payload.promptImage = promptImage;
     }
 
-    console.log("[generate-video] Runway request:", JSON.stringify({
-      endpoint: `https://api.dev.runwayml.com/v1/${endpoint}`,
-      method: "POST",
-      model: payload.model,
-      duration: payload.duration,
-      ratio: payload.ratio,
-      hasPromptImage: hasImage,
-      promptLength: prompt.length,
-      promptPreview: prompt.slice(0, 120),
-      fullBody: JSON.stringify(payload),
-    }));
+    console.log("[generate-video] Runway request:", endpoint, "model:", payload.model, "hasImage:", hasImage, "promptLen:", prompt.length);
 
     const resp = await fetch(`https://api.dev.runwayml.com/v1/${endpoint}`, {
       method: "POST",
@@ -1221,10 +1205,7 @@ async function submitRunwayTask(
     const respStatus = resp.status;
     const respText = await resp.text();
 
-    console.log("[generate-video] Runway response:", JSON.stringify({
-      status: respStatus,
-      bodyPreview: respText.slice(0, 500),
-    }));
+  
 
     if (!resp.ok) {
       console.error("[generate-video] Runway error:", respStatus, respText.slice(0, 800));

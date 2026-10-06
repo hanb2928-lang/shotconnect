@@ -676,6 +676,8 @@ export default function SynthesisScreen() {
       ? manualPrompt.trim()
       : `Cinematic ${modeLabel} product showcase. ${captionText || '시선 집중! 지금 바로 확인하세요'}`;
 
+    let nudgeTimer: ReturnType<typeof setInterval> | null = null;
+
     try {
       const totalImages = productImages.length + (modelImage ? 1 : 0);
       setVideoProgress({ phase: 'submitting', progress: 0.06, message: `이미지 업로드 중... (1/${totalImages})`, elapsedSec: 0 });
@@ -685,26 +687,53 @@ export default function SynthesisScreen() {
         return uploadImageToStorage(img.uri);
       };
 
-      // Sequential upload to prevent memory spikes (OOM) and respect server
-      // payload limits — each image is compressed, read, and uploaded one at
-      // a time so peak memory stays bounded to a single image's data.
-      const uploadedUrls: string[] = [];
-      for (let i = 0; i < productImages.length; i++) {
-        if (!mountedRef.current) return;
-        setVideoProgress((prev) => prev ? { ...prev, message: `이미지 업로드 중... (${i + 1}/${totalImages})` } : prev);
-        const url = await uploadSingle(productImages[i]);
-        uploadedUrls.push(url);
+      // Parallel upload with limited concurrency to reduce total upload time.
+      // Upload up to 3 images simultaneously instead of one-at-a-time.
+      const MAX_PARALLEL_UPLOADS = 3;
+      const uploadedUrls: string[] = new Array(productImages.length);
+      let uploadDone = 0;
+      const uploadQueue = productImages.map((img, idx) => ({ img, idx }));
+
+      const uploadWorker = async () => {
+        while (uploadQueue.length > 0) {
+          const item = uploadQueue.shift();
+          if (!item) break;
+          if (!mountedRef.current) return;
+          const url = await uploadSingle(item.img);
+          uploadedUrls[item.idx] = url;
+          uploadDone++;
+          setVideoProgress((prev) => prev ? { ...prev, message: `이미지 업로드 중... (${uploadDone}/${totalImages})` } : prev);
+        }
+      };
+
+      const workers: Promise<void>[] = [];
+      for (let w = 0; w < Math.min(MAX_PARALLEL_UPLOADS, productImages.length); w++) {
+        workers.push(uploadWorker());
       }
+      await Promise.all(workers);
+      if (!mountedRef.current) return;
+
       const mainUrl = uploadedUrls[0];
       const restUrls = uploadedUrls.slice(1);
+      let modelUrl: string | null = null;
       if (modelImage) {
         if (!mountedRef.current) return;
         setVideoProgress((prev) => prev ? { ...prev, message: `이미지 업로드 중... (${productImages.length + 1}/${totalImages})` } : prev);
+        modelUrl = await uploadSingle(modelImage);
       }
-      const modelUrl = modelImage ? await uploadSingle(modelImage) : null;
 
       if (!mountedRef.current) return;
       setVideoProgress({ phase: 'submitting', progress: 0.08, message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 });
+
+      // Progress nudge: advance progress while waiting for the scan insert + submit
+      nudgeTimer = setInterval(() => {
+        if (!mountedRef.current) return;
+        setVideoProgress((prev) => {
+          if (!prev || prev.phase !== 'submitting') return prev;
+          const next = Math.min(prev.progress + 0.01, 0.12);
+          return { ...prev, progress: next, message: 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...' };
+        });
+      }, 3000);
 
       const { data: scanData, error: scanError } = await supabase
         .from('scans')
@@ -739,15 +768,19 @@ export default function SynthesisScreen() {
         enableVirtualFitting: genMode === 'universal_synthesis' ? enableVirtualFitting : undefined,
         enableFabricPhysics,
         draft: true,
+        mainImageUrl: mainUrl,
       }, (p) => {
         if (mountedRef.current) setVideoProgress(p);
       });
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) { clearInterval(nudgeTimer); return; }
+      clearInterval(nudgeTimer);
+      nudgeTimer = null;
       jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
       await saveActiveVideoJob(submitResult.taskId, 'submitting');
       setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
+      if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; }
       if (!mountedRef.current) return;
       // B-002: If a scan record was created but the video job was never
       // submitted, delete the orphaned scan so retry doesn't conflict
@@ -778,6 +811,7 @@ export default function SynthesisScreen() {
       });
       setError(userMsg);
     } finally {
+      if (nudgeTimer) clearInterval(nudgeTimer);
       generateLockRef.current = false;
     }
   }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating]);
