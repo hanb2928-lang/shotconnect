@@ -39,9 +39,7 @@
     "extra": {
       "eas": {
         "projectId": "4dfcf36f-1af0-409a-8c1d-25e107415ba1"
-      },
-      "supabaseUrl": "https://covcgemepkdrohktqlhc.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvdmNnZW1lcGtkcm9oa3RxbGhjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjU3OTcsImV4cCI6MjEwNjM0MTc5N30.hCme7ue6PcPauYGB1vS8bpVdsx2VRA6pyqUvstixHNU"
+      }
     },
     "web": {
       "bundler": "metro",
