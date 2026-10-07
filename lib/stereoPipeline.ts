@@ -20,7 +20,7 @@ import { buildKeyframeProxyPayload, type KeyframeProxyPayload } from './keyframe
 
 const UPLOAD_MAX_RETRIES = 3;
 const UPLOAD_RETRY_DELAY_MS = 1500;
-const UPLOAD_CONCURRENCY = Platform.OS === 'web' ? 2 : 1;
+const UPLOAD_CONCURRENCY = Platform.OS === 'web' ? 3 : 1;
 
 interface ShotDiagnostic {
   label: string;

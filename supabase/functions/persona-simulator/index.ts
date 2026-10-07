@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { buildCacheKey, checkLlmCache, storeLlmCache } from "../_shared/llm-cache.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,19 +66,32 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const cacheKey = buildCacheKey("persona-simulator", { n: body.productName, c: body.productCategory, p: body.priceEstimate, o: body.oneLiner, a: body.productAdvantages, h: body.hook });
+    const cached = await checkLlmCache(supabaseUrl, serviceRoleKey, cacheKey);
+    if (cached) {
+      return new Response(
+        JSON.stringify({ ...cached as object, cached: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const openaiKey = await resolveOpenAIKey();
 
     let result: SimulationResult;
+    let modelUsed = 'local';
 
     if (openaiKey) {
       try {
         result = await simulateWithOpenAI(body, openaiKey);
+        modelUsed = 'gpt-4o-mini';
       } catch {
         result = simulateLocal(body);
       }
     } else {
       result = simulateLocal(body);
     }
+
+    storeLlmCache(supabaseUrl, serviceRoleKey, cacheKey, "persona-simulator", result, modelUsed).catch(() => {});
 
     return new Response(
       JSON.stringify(result),
@@ -166,8 +180,8 @@ async function simulateWithOpenAI(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 2000,
-      temperature: 0.85,
+      max_tokens: 800,
+      temperature: 0.5,
       response_format: { type: "json_object" },
     }),
     signal: controller.signal,

@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { buildCacheKey, checkLlmCache, storeLlmCache } from "../_shared/llm-cache.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,19 +61,32 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const cacheKey = buildCacheKey("trend-match", { c: body.productCategory, n: body.productName, pl: body.platform });
+    const cached = await checkLlmCache(supabaseUrl, serviceRoleKey, cacheKey);
+    if (cached) {
+      return new Response(
+        JSON.stringify({ ...cached as object, cached: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const openaiKey = await resolveOpenAIKey();
 
     let result: TrendMatchResponse;
+    let modelUsed = 'local';
 
     if (openaiKey) {
       try {
         result = await generateWithOpenAI(body, openaiKey);
+        modelUsed = 'gpt-4o-mini';
       } catch {
         result = generateLocalTrendMatch(body);
       }
     } else {
       result = generateLocalTrendMatch(body);
     }
+
+    storeLlmCache(supabaseUrl, serviceRoleKey, cacheKey, "trend-match", result, modelUsed).catch(() => {});
 
     return new Response(
       JSON.stringify(result),
@@ -149,8 +163,8 @@ async function generateWithOpenAI(
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        max_tokens: 1500,
-        temperature: 0.85,
+        max_tokens: 800,
+        temperature: 0.5,
         response_format: { type: "json_object" },
       }),
     });

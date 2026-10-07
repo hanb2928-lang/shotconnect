@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { buildCacheKey, checkLlmCache, storeLlmCache } from "../_shared/llm-cache.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,8 +54,20 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const sUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const cacheKey = buildCacheKey("recommend-style", { n: productName, c: productCategory, ac: accentColor, h: hook, o: oneLiner, pl: platform });
+    const cached = await checkLlmCache(sUrl, sKey, cacheKey);
+    if (cached) {
+      return new Response(
+        JSON.stringify({ ...cached as object, cached: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const openaiKey = await resolveOpenAIKey();
     let recommendation: StyleRecommendation;
+    let modelUsed = 'local';
 
     if (openaiKey) {
       try {
@@ -67,12 +80,15 @@ Deno.serve(async (req: Request) => {
           String(platform || "shortform"),
           openaiKey,
         );
+        modelUsed = 'gpt-4o-mini';
       } catch {
         recommendation = fallbackRecommendation(String(productCategory || "product"), String(platform || "shortform"));
       }
     } else {
       recommendation = fallbackRecommendation(String(productCategory || "product"), String(platform || "shortform"));
     }
+
+    storeLlmCache(sUrl, sKey, cacheKey, "recommend-style", recommendation, modelUsed).catch(() => {});
 
     return new Response(
       JSON.stringify(recommendation),
@@ -176,8 +192,8 @@ async function recommendWithOpenAI(
           { role: "system", content: systemPrompt },
           { role: "user", content: userText },
         ],
-        max_tokens: 800,
-        temperature: 0.6,
+        max_tokens: 500,
+        temperature: 0.4,
         response_format: { type: "json_object" },
       }),
     });

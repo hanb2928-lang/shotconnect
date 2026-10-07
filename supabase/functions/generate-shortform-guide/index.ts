@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { buildPsychoSystemPrompt } from "../_shared/psycho-engine.ts";
 import { buildConversionPrompt } from "../_shared/conversion-engine.ts";
+import { buildCacheKey, checkLlmCache, storeLlmCache } from "../_shared/llm-cache.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,19 +66,32 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const cacheKey = buildCacheKey("generate-shortform-guide", { n: body.productName, c: body.productCategory, p: body.priceEstimate, o: body.oneLiner, a: body.productAdvantages, pl: body.platform });
+    const cached = await checkLlmCache(supabaseUrl, serviceRoleKey, cacheKey);
+    if (cached) {
+      return new Response(
+        JSON.stringify({ ...cached as object, cached: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const openaiKey = await resolveOpenAIKey();
 
     let guide: ShortFormGuide;
+    let modelUsed = 'local';
 
     if (openaiKey) {
       try {
         guide = await generateWithOpenAI(body, openaiKey);
+        modelUsed = 'gpt-4o-mini';
       } catch {
         guide = generateLocalGuide(body);
       }
     } else {
       guide = generateLocalGuide(body);
     }
+
+    storeLlmCache(supabaseUrl, serviceRoleKey, cacheKey, "generate-shortform-guide", guide, modelUsed).catch(() => {});
 
     return new Response(
       JSON.stringify(guide),
@@ -150,6 +164,8 @@ async function generateWithOpenAI(
     `한 줄 소개: ${data.oneLiner || ""}\n` +
     `장점: ${(data.productAdvantages || []).join(", ")}`;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -162,11 +178,13 @@ async function generateWithOpenAI(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 1200,
-      temperature: 0.8,
+      max_tokens: 600,
+      temperature: 0.5,
       response_format: { type: "json_object" },
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errText = await response.text();

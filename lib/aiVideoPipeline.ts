@@ -6,6 +6,7 @@ import { isOnline } from '@/hooks/useNetworkStatus';
 import { getMultiAngleCache, setMultiAngleCache, findSimilarMultiAngleCache } from './aiCache';
 import { hashMotionTemplate } from './contentHash';
 import { stepToProgress } from './videoGenSteps';
+import { autoSelectHook } from './autoHookEngine';
 import { logError, addBreadcrumb } from './errorLogger';
 
 export type VideoGenPhase = 'submitting' | 'generating' | 'completed' | 'error' | 'hd_upgrading' | 'hd_completed';
@@ -76,7 +77,7 @@ const REALTIME_SOFT_WARN_MS = 120_000;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
 const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 10000;
 const RUNWAY_POLL_FALLBACK_START_MS = 15_000;
-const FIRST_POLL_DELAY_MS = 1000;
+const FIRST_POLL_DELAY_MS = 500;
 const POLL_MIN_INTERVAL_MS = 1500;
 const POLL_MAX_INTERVAL_MS = 15000;
 const POLL_BACKOFF_FACTOR = 1.6;
@@ -1080,11 +1081,17 @@ export async function submitVideoJobAsync(
       () => {
         submitController.abort();
         const fallbackId = `soft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const fallbackHook = autoSelectHook({
+          productName: options.productName,
+          productCategory: options.productVision?.productCategory,
+          customPrompt: prompt,
+        });
+        const fallbackMotionPrompt = fallbackHook.selected.text;
         report('generating', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
         resolve({
           data: {
             taskId: fallbackId,
-            motionPrompt: '',
+            motionPrompt: fallbackMotionPrompt,
             durationSec: options.durationSec ?? 5,
             aspectRatio: options.aspectRatio ?? '9:16',
             variationSeed: options.variationSeed ?? 0,

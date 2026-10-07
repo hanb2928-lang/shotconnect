@@ -16,6 +16,7 @@ export interface ResultPollingOptions {
   onSoftWarn?: () => void;
 }
 
+const POLL_FIRST_DELAY_MS = 500;
 const POLL_INITIAL_MS = 1500;
 const POLL_MAX_MS = 15000;
 const POLL_BACKOFF_FACTOR = 1.5;
@@ -304,8 +305,9 @@ export function useResultPolling(
       }
     }, HARD_TIMEOUT_MS);
 
-    // Start polling.
-    pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
+    // Start polling — first poll fires at 500ms for instant status check,
+    // subsequent polls use the adaptive backoff starting at 1500ms.
+    pollTimer = setTimeout(pollOnce, POLL_FIRST_DELAY_MS);
 
     // Resume pump: on foreground return, immediately poll + run a short
     // burst of fast polls so the UI catches up without waiting for the

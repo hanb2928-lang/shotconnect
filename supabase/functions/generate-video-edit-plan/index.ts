@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { buildConversionPrompt } from "../_shared/conversion-engine.ts";
+import { buildCacheKey, checkLlmCache, storeLlmCache } from "../_shared/llm-cache.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -202,11 +203,24 @@ Deno.serve(async (req: Request) => {
     const pOneLiner = String(oneLiner || "");
     const psychPreset = String(psychologyPreset || "auto");
 
+    const sUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const cacheKey = buildCacheKey("generate-video-edit-plan", { n: pName, c: pCat, d: duration, pl: pPlatform, h: pHook, o: pOneLiner, ps: psychPreset });
+    const cached = await checkLlmCache(sUrl, sKey, cacheKey);
+    if (cached) {
+      return new Response(
+        JSON.stringify({ plan: cached, cached: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const openaiKey = await resolveOpenAIKey();
 
     if (!openaiKey) {
+      const fallback = fallbackPlan(duration, pName, pPlatform, psychPreset);
+      storeLlmCache(sUrl, sKey, cacheKey, "generate-video-edit-plan", fallback, 'local').catch(() => {});
       return new Response(
-        JSON.stringify({ plan: fallbackPlan(duration, pName, pPlatform, psychPreset) }),
+        JSON.stringify({ plan: fallback }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -279,8 +293,8 @@ Deno.serve(async (req: Request) => {
             { role: "system", content: systemPrompt },
             { role: "user", content: userText },
           ],
-          max_tokens: 1200,
-          temperature: 0.7,
+          max_tokens: 800,
+          temperature: 0.4,
           response_format: { type: "json_object" },
         }),
       });
@@ -307,6 +321,7 @@ Deno.serve(async (req: Request) => {
       }
 
       const plan = normalizePlan(parsed, duration, pName, pPlatform, psychPreset);
+      storeLlmCache(sUrl, sKey, cacheKey, "generate-video-edit-plan", plan, 'gpt-4o-mini').catch(() => {});
       return new Response(
         JSON.stringify({ plan }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
