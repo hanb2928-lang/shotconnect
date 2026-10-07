@@ -1464,11 +1464,70 @@ const MOOD_GRADE: Record<string, string> = {
 };
 
 const HOOK_TEXTS: Record<string, string[]> = {
-  curiosity: ["이거 진짜였음?", "나만 빼고 다 알더라", "왜 이제야 알았지 진짜"],
-  problem: ["이거 모르면 호구 되는 거", "이거 때문에 돈 날릴 뻔", "다들 이걸로 고생함"],
-  transformation: ["이랬는데 → 이렇게 됨", "사용 전후 비교 충격", "이거 쓰고 다른 거 다 버렸음"],
-  social_proof: ["실시간 품절 캡처 봄", "다들 이거 사느라 난리", "리뷰 수 폭발 중"],
-  fomo: ["품절 전에 확인하셈", "선착순 마감 임박", "이거 모르면 손해인데"],
+  curiosity: [
+    "이거 진짜였음? 장난아닌데",
+    "나만 빼고 다 알더라 충격",
+    "왜 이제야 알았지 진짜 어이없음",
+    "아직도 이거 모르는 사람 있음?",
+    "이거 알면 삶이 바뀜 각",
+    "나만 몰랐던 거 실화냐?",
+  ],
+  problem: [
+    "이거 모르면 호구 되는 거 맞음",
+    "이거 때문에 돈 날릴 뻔 진짜",
+    "다들 이걸로 고생함 나만 손해봄",
+    "이거 안 사면 후회하는 거 맞다",
+    "이걸 몰라서 그동안 낭비한 거",
+    "솔직히 광고 아님 이거 진심임",
+  ],
+  transformation: [
+    "이랬는데 → 이렇게 됨 충격",
+    "사용 전후 비교 진짜 소름",
+    "이거 쓰고 다른 거 다 버렸음 각",
+    "before after 차이 실화냐?",
+    "이거 하나로 종결된 거 맞음",
+    "이거 쓰면 뭐 다 필요없음 진짜",
+  ],
+  social_proof: [
+    "실시간 품절 캡처 봐 진짜임",
+    "다들 이거 사느라 난리 났더라",
+    "리뷰 수 폭발 중 확인해봐",
+    "이거 사고 난 후기 다 똑같음",
+    "옆에서 본 애가 사서 나도 샀음",
+    "이거 사신 분들 진짜 다 만족함",
+  ],
+  fomo: [
+    "품절 전에 확인하셈 진짜 급함",
+    "선착순 마감 임박인데 놓치면 손해",
+    "이거 모르면 손해인데 진짜임",
+    "이거 곧 품절될 거 같아서 급하게 올림",
+    "나중에 사려다가 못 사는 거 각",
+    "이거 지금 아니면 없다 진짜로",
+  ],
+  loss_aversion: [
+    "이거 안 사면 손해인 거 맞음",
+    "안 사면 후회하는 거 진짜 각",
+    "이거 놓치면 진짜 큰일남",
+    "이거 모르면 돈 계속 날림",
+    "이거 없으면 손해 보는 거 맞다",
+    "안 사면 손해 보는 거 실화임",
+  ],
+  raw_honesty: [
+    "솔직히 광고 아님 이거 진심",
+    "이거 진짜 좋아서 올리는 거임",
+    "협찬 아님 내 돈으로 샀음 진짜",
+    "이거 쓰고 진심으로 감동함",
+    "이거 리뷰 진짜 솔직하게 함",
+    "광고 아니라 진짜 추천하는 거",
+  ],
+  trend_exclusion: [
+    "나만 몰랐던 거 실화인가",
+    "다들 아는데 나만 뒤처진 거 같음",
+    "이거 모르면 트렌드 뒤처진 거",
+    "요즘 다 이거 쓰던데 나만 몰랐음",
+    "이거 안 하면 혼자만 뒤처지는 거",
+    "친구들이 다 아는데 나만 몰랐음",
+  ],
 };
 
 const BG_STYLE_MAP: Record<string, string> = {
@@ -1631,9 +1690,9 @@ function buildOpeningHookSequenceTag(isCleanMode: boolean, vision: ProductVision
     : "product surface micro-detail and texture";
 
   if (isCleanMode) {
-    return `opening_hook_sequence=0-3s extreme close-up macro lock-on on ${detailSubject}, ultra-tight framing revealing micro-texture and craftsmanship detail, shallow DOF with razor-thin focal plane on surface grain, slow rack-focus pull across material texture, 3s mark triggers instant dynamic whip-pan transition to virtual model full-shot wearing product, full-body framing with product contextually integrated, camera continues smooth orbit after transition, scroll-stopping visual contrast between macro intimacy and full-shot grandeur, no lag no fade cut on the beat`;
+    return `opening_hook_sequence=0-1s jarring extreme close-up macro lock-on on ${detailSubject}, scroll-stopping ultra-tight framing that demands attention in under 1 second, 0-3s reveals micro-texture and craftsmanship detail with razor-thin focal plane and slow rack-focus pull across material texture, 3s mark triggers instant dynamic whip-pan transition to virtual model full-shot wearing product, full-body framing with product contextually integrated, camera continues smooth orbit after transition, aggressive visual contrast between macro intimacy and full-shot grandeur designed to halt scroll within first second, no lag no fade cut on the beat`;
   }
-  return `opening_hook_sequence=0-3s extreme close-up on ${detailSubject}, handheld phone macro framing showing real texture and product detail, slight camera shake for authenticity, 3s mark hard cut to model full-shot wearing or holding product, dynamic jump-cut transition with momentum, raw energy contrast between intimate detail and wide context, scroll-stopping before-after visual shift`;
+  return `opening_hook_sequence=0-1s jarring extreme close-up on ${detailSubject}, scroll-stopping handheld phone macro framing showing real texture that arrests attention in under 1 second, slight camera shake for authenticity and urgency, 0-3s reveals product detail with raw energy, 3s mark hard cut to model full-shot wearing or holding product, dynamic jump-cut transition with momentum, raw energy contrast between intimate detail and wide context, scroll-stopping before-after visual shift designed to stop thumb in first second`;
 }
 
 function buildJewelryMacroTag(materialGuess: string, category: string): string {
@@ -1661,52 +1720,68 @@ function buildBeautySmoothTag(materialGuess: string, category: string): string {
 
 const SENSORY_HOOK_TABLE: Array<{ match: RegExp; hooks: string[] }> = [
   { match: /diamond|다이아|gem|보석|crystal|크리스탈|jewel|주얼/i, hooks: [
-    "영롱한 0.5캐럿의 빛, 당신의 목선을 완성하다",
-    "손끝 만져보는 순간, 보석과의 마지막 대화",
-    "각도마다 수박게 빛나는 페이싱, 그 순간의 마법",
-    "유별된 반사, 보석이 말하는 순간",
+    "이거 안 보면 손해다 0.5캐럿 빛의 차이",
+    "이거 진짜임 목선에 닿는 순간 소름",
+    "각도 바꿀 때마다 빛이 폭발함 진짜",
+    "이거 보고 다른 건 다 안 보임 각",
+    "이거 하나로 분위기 종결임",
+    "이거 모르면 손해 보석 진짜 이렇게 빛남",
   ]},
-  { match: /necklace|목걸이|chain|체인|pendant|펜더트/i, hooks: [
-    "목덜미에 닿는 가느다란 체인, 걸을 때마다 옅게 울리는 소리",
-    "목선을 따라 흐르는 빛, 이걸 보는 순간 멈춰선다",
-    "목덜미에 닿는 체인의 무게, 피부 위를 걷는 감각",
-    "체인이 부드럽게 흘러내리는 순간, 그 미세한 움직임",
+  { match: /necklace|목걸이|chain|체인|pendant|펜던트/i, hooks: [
+    "목선에 닿는 순간 스크롤 멈춤 진짜",
+    "이거 쓰면 분위기 자체가 달라짐",
+    "체인이 흘러내리는 거 보면 빠져들음",
+    "이거 하나로 오늘 룩 종결임",
+    "목걸이 하나 바꿨을 뿐인데 충격",
+    "이거 안 사면 후회 각 진짜 예쁨",
   ]},
   { match: /ring|반지|bracelet|팔찌|earring|귀걸이|watch|시계/i, hooks: [
-    "손가락에 감기는 빛, 반지 하나가 만드는 무게감",
-    "손목 위에 닿는 순간, 이 반지가 말하는 시간",
-    "손목을 감싸는 안정감, 명품의 존재감이 느껴진다",
-    "손등 위로 빛이 흐르는 순간, 반지가 만드는 마법",
+    "손가락에 감기는 빛 보면 멈출 수 없음",
+    "이거 쓰는 순간 손이 달라 보임 진짜",
+    "손목 위 반지 하나로 존재감 종결",
+    "이거 보고 다른 반지 다 안 예뻐 보임",
+    "이거 안 끼면 손해인 거 맞음",
+    "이거 진짜 예뻐서 진심 추천임",
   ]},
   { match: /silk|실크|새틴|satin|chiffon|드레스|dress|치마|skirt|스카프/i, hooks: [
-    "바람에 출렁이는 실크, 빛이 통과하는 순간의 감각",
-    "만지면 물처럼 흐르는 새틴, 그 자체의 무게감",
-    "피부에 닿는 실크, 하나의 동작이 만드는 드라마",
-    "입을 때 허락하는 우아함, 그 바탕의 유혹이 실리다",
+    "바람에 흔들리는 실크 보면 스크롤 멈춤",
+    "이거 입는 순간 다른 옷 다 필요없음",
+    "피부에 닿는 감각이 진짜 다름",
+    "이거 입고 SNS 올렸더니 난리남",
+    "이거 안 사면 후임 진짜 예쁨",
+    "이거 입으면 분위기 자체가 바뀜 각",
   ]},
   { match: /leather|가죽|스웨이드|jacket|재킷|boots|부츠|bag|가방|shoe|신발/i, hooks: [
-    "가죽 결이 말하는 순간, 손끝에 닿는 날개의 무게",
-    "이 가죽의 질감, 손금이 대신 말해줄 것이다",
-    "가방의 무게가 어깨에 닿는 순간, 그 안에 담긴 이야기",
-    "부츠가 바닥을 걷는 소리, 그 무게와 논을 들어라",
+    "가죽 결 보면 손끝이 먼저 반응함",
+    "이거 하나로 룩이 확 바뀜 진짜",
+    "이거 신는 순간 다른 거 다 안 보임",
+    "가죽 질감 진짜 미쳤음 이거 실화냐",
+    "이거 안 사면 손해인 거 맞다",
+    "이거 사고 다른 가방 다 버렸음",
   ]},
   { match: /gold|골드|silver|실버|brass|황동|copper|구리|metal|금속/i, hooks: [
-    "만지면 수박게 빛나는 골드, 그 자체가 말하는 빛",
-    "메탈 박막의 반사, 눈이 보고 만드는 완벽함",
-    "날개마다 빛이 겹는 메탈, 저가운 마법의 순간",
-    "만져보면 더 빛나는 메탈, 그 무게와 묵직의 대화",
+    "이거 빛나는 거 보면 멈출 수 없음",
+    "메탈 빛 하나로 분위기 종결임",
+    "이거 진짜 예뻐서 진심 올림",
+    "이거 쓰면 다른 거 다 안 보임 각",
+    "이거 모르면 손해 빛이 진짜 다름",
+    "이거 보고 빠져들면 막을 수 없음",
   ]},
   { match: /cotton|코튼|면|linen|린넨|셔츠|shirt|wool|울|니트|knit|코트|coat|denim|데님/i, hooks: [
-    "입었다 닿지 않는 경첩, 면 소리가 말하는 순간",
-    "울 속에 쏟아지는 담요, 명품의 무게가 느껴진다",
-    "니트의 결이 만드는 무늬, 그 온기의 정체",
-    "데님의 무게, 입은 순간 만든 논이 흘러나온다",
+    "이거 입는 순간 편안함이 다름 진짜",
+    "이거 하나로 데일리 룩 종결임",
+    "니트 결이 진짜 예쁨 소름",
+    "이거 안 사면 후회 각 진짜",
+    "이거 입고 다른 거 다 안 입어도 됨",
+    "이거 입어본 사람만 안다 진짜",
   ]},
   { match: /fabric|패브릭|textile|텍스타일|의류|clothing|옷/i, hooks: [
-    "이 옷이 만드는 시간, 텍스처 대신 말해줄 것이다",
-    "입었다 닿지 않는 경첩, 그 이음이 말하는 순간",
-    "경첩이 만드는 성박, 이 명품의 자기주장",
-    "옷과 강을 걷히는 순간, 모도 내인 눈추드를 보라",
+    "이거 입으면 분위기 자체가 바뀜",
+    "이거 하나로 룩 종결 진짜 예쁨",
+    "이거 안 사면 손해 보는 거 맞음",
+    "이거 입어본 사람만 아는 거",
+    "이거 입고 SNS 올렸더니 난리남",
+    "이거 진짜 예뻐서 진심 추천임",
   ]},
 ];
 
@@ -1917,7 +1992,7 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   for (const mt of modeTokens) tokens.push(mt);
   if (negTag) tokens.push(negTag);
 
-  tokens.push("3phase:hook→contrast→cta, raw unboxing vibe, smartphone aesthetic, no polished production");
+  tokens.push("3phase:hook(loss_aversion+raw_honesty)→contrast(before_after)→cta(urgency), scroll-stopping first 1 second, raw unboxing vibe, smartphone aesthetic, no polished production");
   tokens.push(`tier=${p.qualityTier}, res=${p.resolution}, fps=${p.fps}`);
 
   return safeSlice(tokens.join(" "), 1000);

@@ -75,7 +75,8 @@ const REALTIME_TIMEOUT_MS = 300_000;
 const REALTIME_SOFT_WARN_MS = 120_000;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
 const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 10000;
-const RUNWAY_POLL_FALLBACK_START_MS = 20_000;
+const RUNWAY_POLL_FALLBACK_START_MS = 15_000;
+const FIRST_POLL_DELAY_MS = 500;
 const POLL_MIN_INTERVAL_MS = 1500;
 const POLL_MAX_INTERVAL_MS = 15000;
 const POLL_BACKOFF_FACTOR = 1.6;
@@ -791,9 +792,15 @@ function waitForVideoCompletion(
         }
       }, interval);
     };
-    scheduleNextPoll();
+    // First poll fires at 500ms — near-immediate check after job ID receipt,
+    // then scheduleNextPoll takes over with adaptive backoff.
+    pollTimer = setTimeout(async () => {
+      if (settled) return;
+      await Promise.all([checkDb(), checkScanVideoUrl()]);
+      if (!settled) scheduleNextPoll();
+    }, FIRST_POLL_DELAY_MS);
 
-    // Runway API direct-poll fallback: after 30s, if DB still shows no result,
+    // Runway API direct-poll fallback: after 15s, if DB still shows no result,
     // poll the Runway API directly every 15s as a second safety net.
     // This catches cases where the webhook fails but Runway has the video ready.
     let runwayPollTimer: ReturnType<typeof setTimeout> | null = null;

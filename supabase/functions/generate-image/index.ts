@@ -26,6 +26,7 @@ interface GenerateImageRequest {
   referenceImage?: string;
   platform?: string;
   customLinks?: string[];
+  comicMode?: boolean;
 }
 
 type IndustryKey =
@@ -194,10 +195,13 @@ Deno.serve(async (req: Request) => {
     const expandedPrompt = await expandPromptWithLLM(body.prompt, body.customPrompt, body.productName, body.productCategory, preset, openaiKey, body.platform, body.customLinks);
 
     // Step 2: Build structured prompt with industry preset injection
-    const structuredPrompt = buildStructuredPrompt(expandedPrompt, preset, size, body.seed);
+    const structuredPrompt = buildStructuredPrompt(expandedPrompt, preset, size, body.seed, body.comicMode);
 
     // Step 3: Combine with negative prompt for final generation
-    const finalPrompt = `${structuredPrompt}\n\nNegative constraints — ${NEGATIVE_PROMPT_BASE} ${preset.negativeHints}`;
+    const comicNegative = body.comicMode || isComicArtInPrompt(expandedPrompt)
+      ? " ABSOLUTELY NO color, no RGB, no gradient fills, no colored webtoon style, no 3D rendering, no photorealistic shading, no oil painting, no watercolor. Pure black ink on white paper ONLY."
+      : "";
+    const finalPrompt = `${structuredPrompt}\n\nNegative constraints — ${NEGATIVE_PROMPT_BASE} ${preset.negativeHints}${comicNegative}`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 90000);
@@ -382,6 +386,7 @@ function buildStructuredPrompt(
   preset: IndustryPreset,
   size: string,
   seed?: number,
+  comicMode?: boolean,
 ): string {
   const isVertical = size === "1024x1536";
   const formatNote = isVertical
@@ -392,7 +397,7 @@ function buildStructuredPrompt(
 
   const seedNote = seed !== undefined ? ` Maintain visual consistency with seed reference ${seed}.` : "";
 
-  const isComicArt = /comic|webtoon|illustration|cartoon|manga|panel|toon|sketch|art/i.test(expandedPrompt);
+  const isComicArt = comicMode || /comic|webtoon|illustration|cartoon|manga|panel|toon|sketch|art/i.test(expandedPrompt);
 
   if (isComicArt) {
     return (
@@ -400,8 +405,16 @@ function buildStructuredPrompt(
       `[Environment] ${preset.environment}\n` +
       `[Lighting & Mood] ${preset.lighting}, ${preset.mood}\n` +
       `[Camera Angle] ${preset.cameraAngle}\n` +
-      `[Format] ${formatNote}. High quality digital illustration, clean linework, vibrant colors, ` +
-      `expressive characters, detailed comic panel art style. Maintain consistent character design across panels.${seedNote}`
+      `[Format] ${formatNote}. ` +
+      `STRICT PEN-ONLY MANGA STYLE: pure black and white ink line art, clean manga inking, ` +
+      `traditional screentone shading, no color, no gradient fills, no 3D rendering, no photorealism, ` +
+      `no colored webtoon style. Black ink lines on white background only. ` +
+      `Expressive characters with detailed pen cross-hatching and screen-tone shading. ` +
+      `Each panel has clear bordered frames with gutters separating panels. ` +
+      `Speech bubbles are cleanly enclosed with solid ink outlines, positioned in negative space ` +
+      `areas that do NOT overlap character art or panel borders. ` +
+      `Text inside speech bubbles must be legible and contained within bubble boundaries. ` +
+      `Maintain consistent character design across all panels.${seedNote}`
     );
   }
 
@@ -455,6 +468,10 @@ async function resolveOpenAIKey(): Promise<string | null> {
     }
   }
   return null;
+}
+
+function isComicArtInPrompt(prompt: string): boolean {
+  return /comic|webtoon|illustration|cartoon|manga|panel|toon|sketch|art|pen.?만화|잉크|흑백/i.test(prompt);
 }
 
 function base64ToBlob(base64: string): Blob {

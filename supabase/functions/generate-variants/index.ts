@@ -162,7 +162,8 @@ async function generateVariantsWithOpenAI(data: VariantRequest, apiKey: string):
     "- recommendedPlatform: 이 톤에 가장 적합한 플랫폼\n" +
     "결과는 JSON만 반환: { \"variants\": [{ \"tone\": \"informative\", \"toneLabel\": \"정보 전달형\", \"hook\": \"...\", \"caption\": \"...\", \"hashtags\": [\"...\", ...], \"panels\": [{\"speech\":\"...\",\"sfx\":\"...\",\"emotion\":\"...\"},...], \"narrationText\": \"...\", \"recommendedPlatform\": \"YouTube\" }, ...] }\n" +
     "sfx는 만화식 의성어(KWAANG!, 촤악!, 샤방~, 따봉!)를 사용해.\n" +
-    "emotion은 한 단어로 (예: 고민, 놀람, 행복, 확신, 설렘, 도전, 수다, 감동).";
+    "emotion은 한 단어로 (예: 고민, 놀람, 행복, 확신, 설렘, 도전, 수다, 감동).\n" +
+    "PANEL LAYOUT RULE: 각 패널은 고유한 텍스트 영역을 가지며, 말풍선(speech bubble)은 패널 내 이미지 영역과 전혀 겹치지 않음. 말풍선 텍스트는 풍선 내부에 완전히 포함되어야 함. 패널 간 거터(gutter)는 명확히 분리됨.";
 
   const toneGuidance = tones.map(t => {
     const cfg = TONE_CONFIG[t];
@@ -180,6 +181,8 @@ async function generateVariantsWithOpenAI(data: VariantRequest, apiKey: string):
     `\n${toneGuidance}\n` +
     `\n3가지 변형 스크립트를 만들어줘.`;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -195,7 +198,9 @@ async function generateVariantsWithOpenAI(data: VariantRequest, apiKey: string):
       max_tokens: 2500,
       response_format: { type: "json_object" },
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errText = await response.text();
