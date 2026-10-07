@@ -20,6 +20,8 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { BootFallback } from '@/components/BootFallback';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { AffiliateToastProvider } from '@/components/AffiliateToast';
+import { VideoGenProvider } from '@/hooks/useVideoGen';
+import { VideoGenGlobalToast } from '@/components/VideoGenGlobalToast';
 const NetworkBanner = lazy(() =>
   import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
 );
@@ -333,7 +335,8 @@ export default function RootLayout() {
       <I18nProvider>
         <AppThemeProvider>
           <AffiliateToastProvider>
-            <SafeAreaProvider>
+            <VideoGenProvider>
+              <SafeAreaProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
                 <View key={bootKey} style={{ flex: 1 }}>
                   {!shellReady && <LoadingScreen fullScreen />}
@@ -342,6 +345,7 @@ export default function RootLayout() {
                       <AppShell />
                       <Suspense fallback={<BootFallback />}><NetworkBanner /></Suspense>
                       <Suspense fallback={<BootFallback />}><VideoJobRecoveryToast /></Suspense>
+                      <VideoGenGlobalToast />
                       {__DEV__ && (
                         <Suspense fallback={null}>
                           <UploadDebugOverlay visible={uploadDebugVisible} onClose={() => setUploadDebugVisible(false)} />
@@ -353,6 +357,7 @@ export default function RootLayout() {
                 </View>
               </GestureHandlerRootView>
             </SafeAreaProvider>
+            </VideoGenProvider>
           </AffiliateToastProvider>
         </AppThemeProvider>
       </I18nProvider>

@@ -41,23 +41,15 @@ import {
   type GenMode,
 } from '@/components/GenerationModePanel';
 import { PreviewExportTray } from '@/components/PreviewExportTray';
-import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
-import { isOnline, useNetworkStatus } from '@/hooks/useNetworkStatus';
-import { useResultPolling } from '@/hooks/useResultPolling';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
-import { notifyVideoCompleted } from '@/lib/pushNotify';
-import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { ProcessingBarrier } from '@/components/ProcessingBarrier';
-import { MotionPreviewOverlay } from '@/components/MotionPreviewOverlay';
+import { isOnline, useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { DraftHistory } from '@/components/DraftHistory';
 import { useDraftAutoSave } from '@/hooks/useDraftAutoSave';
 import type { DraftEntry } from '@/lib/draftStorage';
-import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/lib/videoJobPersistence';
-import { AppState, type AppStateStatus } from 'react-native';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
+import { useVideoGen } from '@/hooks/useVideoGen';
 
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
 const UPLOAD_MAX_RETRIES = 3;
@@ -344,27 +336,41 @@ export default function SynthesisScreen() {
   const [enableCaustics, setEnableCaustics] = useState(true);
   const [enableVirtualFitting, setEnableVirtualFitting] = useState(true);
   const [enableFabricPhysics, setEnableFabricPhysics] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
-  const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
   const [manualPrompt, setManualPrompt] = useState('');
   const [cameraSpeed, setCameraSpeed] = useState(1.0);
   const [ttsSyncOffset, setTtsSyncOffset] = useState(0);
   const [captionText, setCaptionText] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [videoProgress, setVideoProgress] = useState<VideoGenProgress | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const scanIdRef = useRef<string | null>(null);
-  const genStartRef = useRef<number>(0);
-  const progressMsgRef = useRef<string>('');
   const mountedRef = useRef(true);
   const preUploadCacheRef = useRef<Map<string, string>>(new Map());
   const preUploadInFlightRef = useRef<Set<string>>(new Set());
   const { saveDraftState, loadDraft, clearDraftId } = useDraftAutoSave('synthesis');
   const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
   const params = useLocalSearchParams<{ draftId?: string }>();
-  const [jobId, setJobId] = useState<string | null>(null);
   const handleResumeDraftRef = useRef<((draft: DraftEntry) => Promise<void>) | null>(null);
+
+  const videoGen = useVideoGen();
+  const {
+    isGenerating,
+    jobId,
+    videoProgress,
+    resultVideoUrl,
+    resultImageUrl,
+    error: genError,
+    startGeneration,
+    clearResult,
+  } = videoGen;
+
+  const error = localError ?? genError;
+  const setError = (msg: string | null) => setLocalError(msg);
+  const setResultImageUrl = (url: string | null) => {
+    if (url === null) clearResult();
+  };
+  const setResultVideoUrl = (_url: string | null) => {
+    // Result state is now managed by the global context
+  };
 
   // Auto-load draft from query param (navigated from home screen DraftHistory)
   useEffect(() => {
@@ -378,18 +384,6 @@ export default function SynthesisScreen() {
       }
     })();
   }, [params.draftId, resumeDraftId, loadDraft]);
-
-  useBeforeUnloadGuard(isGenerating || isExporting);
-
-  useEffect(() => {
-    const tag = 'synthesis-generating';
-    if (isGenerating || isExporting) {
-      activateKeepAwakeAsync(tag).catch(() => {});
-    } else {
-      deactivateKeepAwake(tag).catch(() => {});
-    }
-    return () => { deactivateKeepAwake(tag).catch(() => {}); };
-  }, [isGenerating, isExporting]);
 
   useEffect(() => {
     return () => { mountedRef.current = false; };
@@ -603,85 +597,10 @@ export default function SynthesisScreen() {
   // Keep ref in sync so the boot effect can call handleResumeDraft
   handleResumeDraftRef.current = handleResumeDraft;
 
-  // Restore jobId from persistent storage after OS cold-start kill
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const active = await getActiveVideoJob();
-      if (cancelled || !active || !active.jobId) return;
-      // Verify the job still exists in the DB before resuming polling
-      try {
-        const { data, error } = await supabase
-          .from('video_jobs')
-          .select('status')
-          .eq('id', active.jobId)
-          .maybeSingle();
-        if (cancelled) return;
-        if (error || !data) {
-          clearActiveVideoJob();
-          return;
-        }
-        const status = (data as { status: string }).status;
-        if (status === 'SUCCESS' || status === 'FAILED') {
-          clearActiveVideoJob();
-          return;
-        }
-        // Job is still in-progress — restore it so polling resumes
-        setJobId(active.jobId);
-        setIsGenerating(true);
-        setVideoProgress({ phase: 'generating', progress: 0.5, message: '이전 생성 작업을 복구하는 중...', elapsedSec: 0 });
-      } catch {
-        // DB unreachable — don't resume, user can retry manually
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  // Force-sync job status from DB when app returns to foreground after OS kill
-  useEffect(() => {
-    if (!jobId) return;
-    const handleAppState = (nextState: AppStateStatus) => {
-      if (nextState !== 'active') return;
-      if (!mountedRef.current) return;
-      (async () => {
-        try {
-          const { data, error } = await supabase
-            .from('video_jobs')
-            .select('status, video_url, error_message')
-            .eq('id', jobId)
-            .maybeSingle();
-          if (error || !data) return;
-          const row = data as { status: string; video_url: string | null; error_message: string | null };
-          if (row.status === 'SUCCESS' && row.video_url) {
-            clearActiveVideoJob();
-            jobIdRef.current = null;
-            setJobId(null);
-            setIsGenerating(false);
-            setResultVideoUrl(row.video_url);
-            setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-          } else if (row.status === 'FAILED') {
-            clearActiveVideoJob();
-            jobIdRef.current = null;
-            setJobId(null);
-            setIsGenerating(false);
-            setVideoProgress(null);
-            setError(row.error_message ?? '영상 생성에 실패했습니다.');
-          }
-        } catch {
-          // ignore — polling will catch up
-        }
-      })();
-    };
-    const sub = AppState.addEventListener('change', handleAppState);
-    return () => sub.remove();
-  }, [jobId]);
-
   const generateLockRef = useRef(false);
-  const jobIdRef = useRef<string | null>(null);
   const handleGenerate = useCallback(async () => {
-    if (generateLockRef.current) return;
+    if (generateLockRef.current || isGenerating) return;
     generateLockRef.current = true;
-    if (isGenerating || jobIdRef.current) { generateLockRef.current = false; return; }
     if (productImages.length < 3) {
       setError('제품 사진을 최소 3컷 등록해주세요.');
       generateLockRef.current = false;
@@ -698,43 +617,16 @@ export default function SynthesisScreen() {
       return;
     }
     setError(null);
-    setIsGenerating(true);
-    setResultImageUrl(null);
-    setResultVideoUrl(null);
-    genStartRef.current = Date.now();
 
     const modeLabel = genMode === 'auto_3d' ? '입체컷 오토' : genMode === 'universal_synthesis' ? 'AI 범용 합성' : '수동';
-
     const productName = '프리미엄 추천 상품';
     const aspectRatio = (outputMode === 'video' ? '9:16' : '1:1') as '9:16' | '16:9' | '1:1' | '4:5';
     const promptText = genMode === 'manual' && manualPrompt.trim()
       ? manualPrompt.trim()
       : `Cinematic ${modeLabel} product showcase. ${captionText || '시선 집중! 지금 바로 확인하세요'}`;
 
-    // Simulated progress: starts immediately so the bar never sits at 0%.
-    // Climbs to ~8% in the first second, then continues slowly toward 12%
-    // while uploads and scan insertion happen in the background.
-    let simProgress = 0;
-    setVideoProgress({ phase: 'submitting', progress: 0.02, message: '촬영 에셋 준비 중...', elapsedSec: 0 });
-    const simTimer = setInterval(() => {
-      if (!mountedRef.current) return;
-      simProgress = Math.min(simProgress + 0.015, 0.12);
-      const stepMsg = simProgress < 0.06
-        ? '촬영 에셋 준비 중...'
-        : simProgress < 0.10
-        ? 'AI 분석 및 훅 추출 중...'
-        : '렌더링 준비 중...';
-      setVideoProgress((prev) => {
-        if (!prev || prev.phase !== 'submitting') return prev;
-        return { ...prev, progress: Math.max(prev.progress, simProgress), message: stepMsg };
-      });
-    }, 200);
-
-    let nudgeTimer: ReturnType<typeof setInterval> | null = null;
-
     try {
       const totalImages = productImages.length + (modelImage ? 1 : 0);
-      setVideoProgress({ phase: 'submitting', progress: 0.03, message: `이미지 업로드 중... (1/${totalImages})`, elapsedSec: 0 });
 
       const uploadSingle = async (img: SourceImage): Promise<string> => {
         if (img.uri.startsWith('http://') || img.uri.startsWith('https://')) return img.uri;
@@ -743,8 +635,7 @@ export default function SynthesisScreen() {
         return uploadImageToStorage(img.uri);
       };
 
-      // Parallel upload with limited concurrency to reduce total upload time.
-      // Upload up to 3 images simultaneously instead of one-at-a-time.
+      // Parallel upload with limited concurrency
       const MAX_PARALLEL_UPLOADS = 3;
       const uploadedUrls: string[] = new Array(productImages.length);
       let uploadDone = 0;
@@ -754,13 +645,9 @@ export default function SynthesisScreen() {
         while (uploadQueue.length > 0) {
           const item = uploadQueue.shift();
           if (!item) break;
-          if (!mountedRef.current) return;
           const url = await uploadSingle(item.img);
           uploadedUrls[item.idx] = url;
           uploadDone++;
-          // Each completed upload advances the progress bar, not just the message
-          const uploadPct = 0.03 + (uploadDone / totalImages) * 0.07;
-          setVideoProgress((prev) => prev ? { ...prev, progress: Math.max(prev.progress, uploadPct), message: `이미지 업로드 중... (${uploadDone}/${totalImages})` } : prev);
         }
       };
 
@@ -769,101 +656,44 @@ export default function SynthesisScreen() {
         workers.push(uploadWorker());
       }
       await Promise.all(workers);
-      if (!mountedRef.current) return;
 
       const mainUrl = uploadedUrls[0];
       const restUrls = uploadedUrls.slice(1);
       let modelUrl: string | null = null;
       if (modelImage) {
-        if (!mountedRef.current) return;
-        setVideoProgress((prev) => prev ? { ...prev, message: `이미지 업로드 중... (${productImages.length + 1}/${totalImages})` } : prev);
         modelUrl = await uploadSingle(modelImage);
       }
 
-      if (!mountedRef.current) return;
-      setVideoProgress((prev) => prev ? { ...prev, progress: Math.max(prev.progress, 0.10), message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 } : prev);
-      clearInterval(simTimer);
-
-      // Progress nudge: advance progress while waiting for the scan insert + submit
-      nudgeTimer = setInterval(() => {
-        if (!mountedRef.current) return;
-        setVideoProgress((prev) => {
-          if (!prev || prev.phase !== 'submitting') return prev;
-          const next = Math.min(prev.progress + 0.008, 0.15);
-          return { ...prev, progress: next, message: 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...' };
-        });
-      }, 1500);
-
-      const { data: scanData, error: scanError } = await supabase
-        .from('scans')
-        .insert({
-          image_url: mainUrl,
-          scan_source: 'multi',
-          product_name: productName,
-          additional_image_urls: restUrls,
-        })
-        .select('id')
-        .single();
-
-      if (scanError || !scanData) {
-        throw new Error('스캔 레코드 생성에 실패했습니다.');
-      }
-      scanIdRef.current = scanData.id;
-
-      if (!mountedRef.current) return;
-
-      const submitResult = await submitVideoJobAsync(promptText, {
-        durationSec: 5,
+      await startGeneration({
+        promptText,
         aspectRatio,
         productName,
-        scanId: scanData.id,
         captionText: captionText || '시선 집중! 지금 바로 확인하세요',
         platform: platform === 'shortform' ? 'shorts' : platform,
-        isCleanVideoMode: genMode === 'auto_3d',
-        selectedMode: genMode,
+        genMode,
         enableOrbit360,
         enableCaustics: genMode === 'auto_3d' ? enableCaustics : undefined,
         orbitSpeed: enableOrbit360 ? cameraSpeed : undefined,
         enableVirtualFitting: genMode === 'universal_synthesis' ? enableVirtualFitting : undefined,
         enableFabricPhysics,
-        draft: true,
-        mainImageUrl: mainUrl,
-      }, (p) => {
-        if (mountedRef.current) setVideoProgress(p);
+        cameraSpeed,
+        mainUrl,
+        restUrls,
+        modelUrl,
+        outputMode,
       });
-      if (!mountedRef.current) { clearInterval(nudgeTimer); clearInterval(simTimer); return; }
-      clearInterval(nudgeTimer);
-      clearInterval(simTimer);
-      nudgeTimer = null;
-      jobIdRef.current = submitResult.taskId;
-      setJobId(submitResult.taskId);
-      await saveActiveVideoJob(submitResult.taskId, 'submitting');
-      setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
-      if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; }
-      clearInterval(simTimer);
-      if (!mountedRef.current) return;
-      // B-002: If a scan record was created but the video job was never
-      // submitted, delete the orphaned scan so retry doesn't conflict
-      // with stale DB state. If the job WAS submitted, keep the scan —
-      // the server is still processing it.
-      if (scanIdRef.current && !jobIdRef.current) {
+      if (scanIdRef.current) {
         const orphanedScanId = scanIdRef.current;
         scanIdRef.current = null;
         try { await supabase.from('scans').delete().eq('id', orphanedScanId); } catch {}
       }
-      const phase = jobIdRef.current ? 'ai-generation' : 'image-upload';
-      jobIdRef.current = null;
-      setIsGenerating(false);
-      setVideoProgress(null);
-      const userMsg = friendlyError(err, phase === 'image-upload'
-        ? '이미지 업로드에 실패했습니다. 네트워크 연결을 확인하고 잠시 후 다시 시도해주세요.'
-        : 'AI 영상 생성 요청에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      const userMsg = friendlyError(err, '이미지 업로드에 실패했습니다. 네트워크 연결을 확인하고 잠시 후 다시 시도해주세요.');
       logError(err, {
         component: 'synthesis',
         action: 'handleGenerate',
         extra: {
-          phase,
+          phase: 'image-upload',
           productImageCount: productImages.length,
           hasModelImage: !!modelImage,
           genMode,
@@ -872,70 +702,9 @@ export default function SynthesisScreen() {
       });
       setError(userMsg);
     } finally {
-      if (nudgeTimer) clearInterval(nudgeTimer);
-      clearInterval(simTimer);
       generateLockRef.current = false;
     }
-  }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating]);
-
-  const polling = useResultPolling(jobId, {
-    scanId: scanIdRef.current,
-    onCompleted: (videoUrl) => {
-      if (!mountedRef.current) return;
-      jobIdRef.current = null;
-      setIsGenerating(false);
-      clearActiveVideoJob();
-      setVideoProgress((prev) => prev ? { ...prev, phase: 'completed', progress: 1.0, message: '영상 생성 완료' } : null);
-      if (outputMode === 'image') {
-        setResultImageUrl(videoUrl);
-      } else {
-        setResultVideoUrl(videoUrl);
-      }
-      notifyVideoCompleted();
-    },
-    onError: (errMsg) => {
-      if (!mountedRef.current) return;
-      jobIdRef.current = null;
-      setIsGenerating(false);
-      clearActiveVideoJob();
-      setVideoProgress((prev) => prev ? { ...prev, phase: 'error', progress: 0, message: errMsg } : null);
-      logError(new Error(errMsg), { component: 'synthesis', action: 'polling.onError' });
-      setError(friendlyError(new Error(errMsg), errMsg));
-    },
-  });
-
-  progressMsgRef.current = polling.progressMessage;
-
-  useEffect(() => {
-    if (!isGenerating) return;
-    const GEN_TIMEOUT_MS = 300_000;
-    const timer = setInterval(() => {
-      if (!mountedRef.current) return;
-      const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
-      setVideoProgress((prev) => {
-        if (!prev) return prev;
-        const msg = progressMsgRef.current;
-        const pctMatch = msg?.match(/\((\d+)%\)/);
-        const parsed = pctMatch ? parseInt(pctMatch[1], 10) : NaN;
-        const polledProgress = !isNaN(parsed) ? parsed / 100 : null;
-        const baseProgress = prev.progress;
-        const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
-        const nextProgress = polledProgress ?? Math.max(baseProgress, timeBasedProgress);
-        return { ...prev, message: msg || prev.message, elapsedSec: elapsed, progress: nextProgress };
-      });
-    }, 1000);
-    const timeout = setTimeout(() => {
-      if (!mountedRef.current) return;
-      jobIdRef.current = null;
-      setIsGenerating(false);
-      setVideoProgress(null);
-      setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
-    }, GEN_TIMEOUT_MS);
-    return () => {
-      clearInterval(timer);
-      clearTimeout(timeout);
-    };
-  }, [isGenerating]);
+  }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating, startGeneration]);
 
   const handleDownload = useCallback(() => {
     setIsExporting(true);
@@ -1090,6 +859,14 @@ export default function SynthesisScreen() {
           <VideoGenStepTracker progress={videoProgress} variant="inline" />
         )}
 
+        {isGenerating && (
+          <View style={styles.navHint}>
+            <Text style={styles.navHintText}>
+              생성 중에 다른 화면으로 이동할 수 있어요. 완료되면 알림으로 알려드릴게요.
+            </Text>
+          </View>
+        )}
+
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
@@ -1097,18 +874,6 @@ export default function SynthesisScreen() {
         )}
       </ScrollView>
 
-      {isGenerating && videoProgress?.phase === 'generating' && productImages.length >= 2 ? (
-        <MotionPreviewOverlay
-          visible={isGenerating}
-          images={productImages.map((img) => img.uri)}
-        />
-      ) : (
-        <ProcessingBarrier
-          visible={isGenerating || isExporting}
-          label={isExporting ? '내보내는 중...' : videoProgress?.phase === 'submitting' ? '이미지 업로드 중...' : 'AI 생성 중...'}
-          sublabel={videoProgress?.message ?? '완료될 때까지 화면이 잠겨 있어요'}
-        />
-      )}
     </View>
   );
 }
@@ -1165,5 +930,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.error[400],
+  },
+  navHint: {
+    backgroundColor: theme.colors.primary[400] + '15',
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: theme.colors.primary[400],
+  },
+  navHintText: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.primary[300],
+    lineHeight: 17,
   },
 });
