@@ -612,7 +612,7 @@ export async function compressImageToBase64(
 export async function uploadEditedImage(base64: string, mimeType: string): Promise<string> {
   const isPng = mimeType === 'image/png';
   const dataUrl = isPng ? `data:image/png;base64,${base64}` : `data:image/jpeg;base64,${base64}`;
-  const compressedDataUrl = isPng ? await prepareImageForEdit(dataUrl, 1080) : await prepareImageForApi(dataUrl, 1080, 0.85);
+  const compressedDataUrl = isPng ? await prepareImageForEdit(dataUrl, 720) : await prepareImageForApi(dataUrl, 720, 0.85);
   const compressedBase64 = cleanBase64(compressedDataUrl);
   const uploadMime = isPng ? 'image/png' : 'image/jpeg';
   const ext = isPng ? 'png' : 'jpg';
@@ -1379,8 +1379,8 @@ function detectMimeFromBytes(bytes: Uint8Array): string | null {
 }
 
 const IMAGE_COMPRESS_THRESHOLD_BYTES = 2_000_000;
-const IMAGE_COMPRESS_MAX_DIMENSION = 1280;
-const IMAGE_COMPRESS_QUALITY = 0.75;
+const IMAGE_COMPRESS_MAX_DIMENSION = 720;
+const IMAGE_COMPRESS_QUALITY = 0.8;
 
 async function compressImageUriIfNeeded(uri: string, mimeType: string): Promise<{ uri: string; compressed: boolean; cleanedUp?: string }> {
   if (!mimeType.startsWith('image/')) return { uri, compressed: false };

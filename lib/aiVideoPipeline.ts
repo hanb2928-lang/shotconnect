@@ -1,6 +1,6 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import { supabase, ensureFreshSession } from './supabase';
-import { monotonicStart, monotonicElapsedSec } from './timeUtils';
+import { monotonicStart, monotonicElapsedSec, monotonicElapsedMs } from './timeUtils';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
 import { getMultiAngleCache, setMultiAngleCache, findSimilarMultiAngleCache } from './aiCache';
@@ -76,9 +76,11 @@ const REALTIME_SOFT_WARN_MS = 120_000;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
 const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 10000;
 const RUNWAY_POLL_FALLBACK_START_MS = 20_000;
-const POLL_MIN_INTERVAL_MS = 2000;
-const POLL_MAX_INTERVAL_MS = 12000;
-const POLL_BACKOFF_FACTOR = 1.5;
+const POLL_MIN_INTERVAL_MS = 1500;
+const POLL_MAX_INTERVAL_MS = 15000;
+const POLL_BACKOFF_FACTOR = 1.6;
+const POLL_FAST_PHASE_MS = 10_000;
+const POLL_NORMAL_PHASE_MS = 20_000;
 const CHANNEL_RECONNECT_DELAY_MS = 3000;
 const JITTER = () => 0.8 + Math.random() * 0.4;
 const CHANNEL_MAX_RECONNECT_ATTEMPTS = 5;
@@ -132,9 +134,13 @@ enum ChannelHealth {
   DISCONNECTED = 'disconnected',
 }
 
-function computeBackoffDelay(attempt: number): number {
+function computeBackoffDelay(attempt: number, elapsedMs?: number): number {
   const base = POLL_MIN_INTERVAL_MS * Math.pow(POLL_BACKOFF_FACTOR, attempt);
-  return Math.min(Math.round(base), POLL_MAX_INTERVAL_MS);
+  const attemptBased = Math.min(Math.round(base), POLL_MAX_INTERVAL_MS);
+  if (elapsedMs == null) return attemptBased;
+  if (elapsedMs < POLL_FAST_PHASE_MS) return POLL_MIN_INTERVAL_MS;
+  if (elapsedMs < POLL_NORMAL_PHASE_MS) return Math.min(3000, attemptBased);
+  return attemptBased;
 }
 
 const OFFLINE_POLL_MS = 1000;
@@ -763,9 +769,10 @@ function waitForVideoCompletion(
     // DB queries. When the channel degrades, reset to fast polling.
     const scheduleNextPoll = () => {
       if (settled) return;
+      const elapsed = monotonicElapsedMs(startTime);
       const interval = channelHealth === ChannelHealth.HEALTHY
-        ? computeBackoffDelay(pollBackoffAttempt)
-        : POLL_MIN_INTERVAL_MS; // Fast poll when channel is degraded
+        ? computeBackoffDelay(pollBackoffAttempt, elapsed)
+        : POLL_MIN_INTERVAL_MS;
       pollTimer = setTimeout(async () => {
         if (settled) return;
         elapsedTick++;
@@ -1194,10 +1201,13 @@ export function subscribeVideoJob(
       });
   };
 
+  const pollStartTime = Date.now();
+
   const scheduleNextPoll = () => {
     if (settled) return;
+    const elapsed = Date.now() - pollStartTime;
     const interval = channelHealth === ChannelHealth.HEALTHY
-      ? computeBackoffDelay(pollBackoffAttempt)
+      ? computeBackoffDelay(pollBackoffAttempt, elapsed)
       : POLL_MIN_INTERVAL_MS;
     pollTimer = setTimeout(async () => {
       if (settled) return;
@@ -1473,10 +1483,12 @@ export function subscribeHdUpgrade(
   };
 
   // Adaptive DB poll with exponential backoff — same strategy as waitForVideoCompletion
+  const hdPollStartTime = Date.now();
   const scheduleNextPoll = () => {
     if (settled) return;
+    const elapsed = Date.now() - hdPollStartTime;
     const interval = channelHealth === ChannelHealth.HEALTHY
-      ? computeBackoffDelay(pollBackoffAttempt)
+      ? computeBackoffDelay(pollBackoffAttempt, elapsed)
       : POLL_MIN_INTERVAL_MS;
     pollTimer = setTimeout(async () => {
       if (settled) return;

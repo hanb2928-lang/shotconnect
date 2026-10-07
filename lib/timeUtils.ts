@@ -141,3 +141,10 @@ export function monotonicElapsedSec(startMonotonicMs: number): number {
   }
   return Math.max(0, Math.round((Date.now() - startMonotonicMs) / 1000));
 }
+
+export function monotonicElapsedMs(startMonotonicMs: number): number {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return Math.max(0, Math.round(performance.now() - startMonotonicMs));
+  }
+  return Math.max(0, Math.round(Date.now() - startMonotonicMs));
+}
