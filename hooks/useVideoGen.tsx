@@ -183,7 +183,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
                 const timeProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
                 const merged = Math.max(prev.progress, timeProgress, stepProg ?? 0);
-                return { ...prev, elapsedSec: elapsed, progress: Math.min(merged, 0.95) };
+                return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(0.95, merged || 0)) };
               });
             }
           } catch {
@@ -217,11 +217,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           if (!prev) return prev;
           const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
           const serverProg = serverProgRef.current;
+          const safeServer = (serverProg !== null && !isNaN(serverProg) && isFinite(serverProg)) ? serverProg : null;
           const baseProgress = Math.max(prev.progress, timeBasedProgress);
-          const nextProgress = serverProg !== null
-            ? Math.max(baseProgress, Math.min(serverProg, 0.95))
+          const nextProgress = safeServer !== null
+            ? Math.max(baseProgress, Math.min(safeServer, 0.95))
             : baseProgress;
-          return { ...prev, elapsedSec: elapsed, progress: nextProgress };
+          return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(0.95, nextProgress)) };
         });
       }, 1000);
       creepTimer = setInterval(() => {
@@ -234,6 +235,19 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           return { ...prev, progress: Math.min(nudge, ceiling) };
         });
       }, 2000);
+      // Hard progression guard: every 10 seconds, force progress forward by
+      // 10% (up to 90%) so the bar can never freeze at a fixed value even
+      // when the server is completely silent.
+      hardGuardTimer = setInterval(() => {
+        setVideoProgress((prev) => {
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+          if (prev.progress >= 0.9) return prev;
+          const forced = Math.min(prev.progress + 0.10, 0.9);
+          const serverProg = serverProgRef.current;
+          if (serverProg !== null && serverProg > forced) return prev;
+          return { ...prev, progress: forced };
+        });
+      }, 10_000);
     };
     const stopTimers = () => {
       if (timer) { clearInterval(timer); timer = null; }
@@ -242,22 +256,6 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     };
 
     startTimers();
-
-    // Hard progression guard: every 10 seconds, force progress forward by
-    // 10% (up to 90%) so the bar can never freeze at a fixed value even
-    // when the server is completely silent. This runs independently of the
-    // soft-creep timer and does not pause — it only nudges, never overrides
-    // a higher server-reported value.
-    hardGuardTimer = setInterval(() => {
-      setVideoProgress((prev) => {
-        if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-        if (prev.progress >= 0.9) return prev;
-        const forced = Math.min(prev.progress + 0.10, 0.9);
-        const serverProg = serverProgRef.current;
-        if (serverProg !== null && serverProg > forced) return prev;
-        return { ...prev, progress: forced };
-      });
-    }, 10_000);
 
     const timeout = setTimeout(() => {
       jobIdRef.current = null;
@@ -268,10 +266,17 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }, GEN_TIMEOUT_MS);
 
     // Pause timers when app goes to background to avoid wasted renders and
-    // prevent a large progress jump when returning to foreground.
+    // prevent a large progress jump when returning to foreground. Also abort
+    // the submit AbortController so no orphaned fetch callbacks fire on a
+    // backgrounded native view (OS memory reclaim crash defense).
     const appSub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'background' || state === 'inactive') {
         stopTimers();
+        // Abort in-flight submit request — the job continues server-side
+        // and will be recovered on foreground return via DB resync.
+        if (abortRef.current) {
+          abortRef.current.abort();
+        }
       } else if (state === 'active') {
         startTimers();
       }
@@ -292,8 +297,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       setJobId(null);
       setIsGenerating(false);
       clearActiveVideoJob();
-      setVideoProgress((prev) => prev ? { ...prev, phase: 'completed', progress: 1.0, message: '영상 생성 완료' } : null);
       serverProgRef.current = 1.0;
+      setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
       if (outputModeRef.current === 'image') {
         setResultImageUrl(videoUrl);
       } else {

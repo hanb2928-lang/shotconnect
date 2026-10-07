@@ -1149,6 +1149,7 @@ export async function compressUriToUri(
   uri: string,
   maxDimension = UPLOAD_MAX_DIMENSION,
   quality = UPLOAD_QUALITY,
+  format: 'webp' | 'jpeg' = 'webp',
 ): Promise<string> {
   if (Platform.OS === 'web') {
     throw new Error('compressUriToUri is not supported on web');
@@ -1163,19 +1164,23 @@ export async function compressUriToUri(
           ? [{ resize: { width: maxDimension } }]
           : [{ resize: { height: maxDimension } }]
         : [];
+    const saveFormat = format === 'webp'
+      ? ImageManipulator.SaveFormat.WEBP
+      : ImageManipulator.SaveFormat.JPEG;
     const manipulated = await withFileSettle('compressUriToUri', () =>
       ImageManipulator.manipulateAsync(
         source.uri,
         actions,
-        { compress: quality, format: ImageManipulator.SaveFormat.JPEG },
+        { compress: quality, format: saveFormat },
       ),
     );
     await waitForUriFlush(manipulated.uri);
     await waitForFileChannelFlush();
     registerTempFile(manipulated.uri, 'compressUriToUri', { pin: true });
+    const ext = format === 'webp' ? 'webp' : 'jpg';
     const docDir = FileSystem.documentDirectory;
     if (docDir && !manipulated.uri.startsWith(docDir)) {
-      const dest = `${docDir}compressed-${uniqueSuffix()}.jpg`;
+      const dest = `${docDir}compressed-${uniqueSuffix()}.${ext}`;
       await withFileSettle('compressUriToUri-copy', () =>
         FileSystem.copyAsync({ from: manipulated.uri, to: dest }),
       );
@@ -1208,14 +1213,17 @@ export async function compressAndUploadUri(
   uri: string,
   maxDimension = UPLOAD_MAX_DIMENSION,
   quality = UPLOAD_QUALITY,
+  format: 'webp' | 'jpeg' = 'webp',
 ): Promise<string> {
   if (Platform.OS === 'web') {
     throw new Error('compressAndUploadUri is not supported on web');
   }
-  const compressedUri = await compressUriToUri(uri, maxDimension, quality);
+  const compressedUri = await compressUriToUri(uri, maxDimension, quality, format);
   try {
-    const fileName = `scan-${uniqueSuffix()}.jpg`;
-    return await uploadFileDirectNative(compressedUri, 'scans', fileName, 'image/jpeg');
+    const ext = format === 'webp' ? 'webp' : 'jpg';
+    const mimeType = format === 'webp' ? 'image/webp' : 'image/jpeg';
+    const fileName = `scan-${uniqueSuffix()}.${ext}`;
+    return await uploadFileDirectNative(compressedUri, 'scans', fileName, mimeType);
   } finally {
     await safeDeleteTempFile(compressedUri).catch(() => {});
     await waitForFileChannelFlush();

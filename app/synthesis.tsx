@@ -11,11 +11,8 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-import { compressDataUrlToMaxBytes, uploadUriToBucket, waitForUriFlush } from '@/lib/imageEdit';
-import { waitForFileChannelFlush } from '@/lib/smartResize';
-import { analyzeAndDownscaleImage, cleanupSmartResizeTemp } from '@/lib/smartResize';
+import { compressAndUploadUri } from '@/lib/imageEdit';
 import { cleanBase64 } from '@/lib/base64';
 import { registerTempFile, unpinTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
@@ -120,90 +117,65 @@ async function uploadImageToStorage(uri: string): Promise<string> {
     }
   }
 
-  // Pin the source URI so the TTL sweep cannot delete it mid-upload.
-  // On native, file:// URIs from the camera are in the temp cache and can
-  // be collected by sweepTempFiles if the upload takes longer than the TTL.
-  if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
-    registerTempFile(uri, 'synthesis-upload', { pin: true });
-  }
-
-  let compressedUri = uri;
-  let preScaled: ReturnType<typeof analyzeAndDownscaleImage> extends Promise<infer R> ? R | null : null = null;
-  try {
-    if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
-      preScaled = await analyzeAndDownscaleImage(uri);
-      if (preScaled.downscaled && preScaled.uri !== uri) {
-        compressedUri = preScaled.uri;
-        registerTempFile(compressedUri, 'synthesis-presize', { pin: true });
-      }
-    }
-
-    // 720px normalization + 2MB hard cap via iterative compression.
-    // On web, compression runs in a Web Worker so the UI thread stays free.
+  // Web path: compress via worker and upload bytes. Base64 is acceptable
+  // here because the web JS engine has a much larger heap than Hermes.
+  if (Platform.OS === 'web' && uri.startsWith('data:')) {
     const dimSteps = [UPLOAD_INITIAL_DIM, 600, 480, 360];
     const qualitySteps = [UPLOAD_INITIAL_QUALITY, 0.55, 0.42, 0.3];
-
-    let prevCompressedUri: string | null = null;
     for (let pass = 0; pass < dimSteps.length; pass++) {
-      if (Platform.OS === 'web' && uri.startsWith('data:')) {
-        // Web data URL: compress via worker (or main-thread fallback)
-        const compressed = await compressForUpload(uri, dimSteps[pass], qualitySteps[pass]);
-        const byteLen = Math.floor((cleanBase64(compressed).length * 3) / 4);
-        if (byteLen <= MAX_NATIVE_IMAGE_BYTES) {
-          const finalBase64 = cleanBase64(compressed);
-          return await performUpload(finalBase64);
-        }
-        continue;
+      const compressed = await compressForUpload(uri, dimSteps[pass], qualitySteps[pass]);
+      const byteLen = Math.floor((cleanBase64(compressed).length * 3) / 4);
+      if (byteLen <= MAX_NATIVE_IMAGE_BYTES) {
+        const finalBase64 = cleanBase64(compressed);
+        return await performUpload(finalBase64);
       }
-      const manipulated = await ImageManipulator.manipulateAsync(
-        compressedUri,
-        [{ resize: { width: dimSteps[pass] } }],
-        { compress: qualitySteps[pass], format: ImageManipulator.SaveFormat.JPEG },
-      );
-      if (Platform.OS !== 'web') {
-        await waitForUriFlush(manipulated.uri);
-        await waitForFileChannelFlush();
-      }
-      if (prevCompressedUri && prevCompressedUri !== uri && Platform.OS !== 'web' && !prevCompressedUri.startsWith('data:')) {
-        unpinTempFile(prevCompressedUri);
-        await safeDeleteTempFile(prevCompressedUri).catch(() => {});
-      }
-      compressedUri = manipulated.uri;
-      registerTempFile(compressedUri, 'synthesis-compress', { pin: true });
-      prevCompressedUri = compressedUri;
-      const fileInfo = await FileSystem.getInfoAsync(compressedUri);
-      if (fileInfo.exists && fileInfo.size <= MAX_NATIVE_IMAGE_BYTES) break;
     }
+    // If all passes exceeded the cap, use the last compressed result.
+    const fallback = await compressForUpload(uri, 360, 0.3);
+    return await performUpload(cleanBase64(fallback));
+  }
 
-    const fileInfo = await FileSystem.getInfoAsync(compressedUri);
-    if (!fileInfo.exists) throw new Error('이미지 파일을 찾을 수 없습니다.');
-
-    const base64 = await FileSystem.readAsStringAsync(compressedUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-
-    // Enforce 2MB payload via iterative data-URL compression
-    let finalBase64 = base64;
-    const payloadBytes = Math.floor((base64.length * 3) / 4);
-    if (payloadBytes > MAX_NATIVE_IMAGE_BYTES) {
-      const dataUrl = `data:image/jpeg;base64,${base64}`;
-      const compressed = await compressDataUrlToMaxBytes(dataUrl, MAX_NATIVE_IMAGE_BYTES, 540, 0.3);
-      finalBase64 = cleanBase64(compressed);
-    }
-
-    return await performUpload(finalBase64);
-  } finally {
-    // Release the pin so the temp file can be cleaned up after upload
-    if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
+  // Native path: file URI streaming — disk → ImageManipulator (720px WebP
+  // quality 0.8) → disk → FileSystem.uploadAsync → server. The image data
+  // never enters the JS heap as base64, eliminating the OOM crash that
+  // occurs when large base64 strings are held in Hermes memory during the
+  // upload + video submit serialization phase.
+  if (Platform.OS !== 'web' && !uri.startsWith('data:')) {
+    registerTempFile(uri, 'synthesis-upload', { pin: true });
+    try {
+      // compressAndUploadUri handles 720px resize, WebP 0.8 encoding, and
+      // native binary upload in one shot. The compressed temp file is
+      // deleted in its finally block. We just need to clean up the source.
+      return await compressAndUploadUri(uri, UPLOAD_INITIAL_DIM, 0.8, 'webp');
+    } finally {
       unpinTempFile(uri);
       await safeDeleteTempFile(uri).catch(() => {});
     }
-    if (compressedUri !== uri && Platform.OS !== 'web' && !compressedUri.startsWith('data:')) {
-      unpinTempFile(compressedUri);
-      await safeDeleteTempFile(compressedUri).catch(() => {});
-    }
-    if (preScaled) await cleanupSmartResizeTemp(preScaled).catch(() => {});
   }
+
+  // Native data: URI (rare, from camera base64 fallback) — convert to file
+  // first, then use the streaming path.
+  if (Platform.OS !== 'web' && uri.startsWith('data:')) {
+    const tmpPath = `${FileSystem.cacheDirectory}synth-src-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    try {
+      const base64Data = cleanBase64(uri);
+      await FileSystem.writeAsStringAsync(tmpPath, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      registerTempFile(tmpPath, 'synthesis-data-src', { pin: true });
+      return await compressAndUploadUri(tmpPath, UPLOAD_INITIAL_DIM, 0.8, 'webp');
+    } finally {
+      unpinTempFile(tmpPath);
+      await safeDeleteTempFile(tmpPath).catch(() => {});
+    }
+  }
+
+  // Web non-data URI (e.g. http) — return as-is, already remote.
+  if (uri.startsWith('http://') || uri.startsWith('https://')) {
+    return uri;
+  }
+
+  throw new Error('지원하지 않는 이미지 형식입니다.');
 }
 
 async function performUpload(finalBase64: string): Promise<string> {
@@ -211,59 +183,6 @@ async function performUpload(finalBase64: string): Promise<string> {
   let currentDim = 540;
   let currentQuality = 0.3;
   const fileName = `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-
-  // Native: write base64 to temp file and upload via FileSystem.uploadAsync,
-  // bypassing the JS bridge entirely — no Uint8Array or Blob in JS memory.
-  if (Platform.OS !== 'web') {
-    for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
-      let tmpPath: string | null = null;
-      try {
-        tmpPath = `${FileSystem.cacheDirectory}synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-        await FileSystem.writeAsStringAsync(tmpPath, currentBase64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        registerTempFile(tmpPath, 'performUpload', { pin: true });
-        const publicUrl = await withUploadTimeout(
-          uploadUriToBucket(tmpPath, 'image/jpeg', 'scans', fileName),
-          UPLOAD_TIMEOUT_MS,
-        );
-        return publicUrl;
-      } catch (err) {
-        const uploadError = err instanceof Error ? err : new Error(String(err));
-        if (attempt < UPLOAD_MAX_RETRIES && isPayloadTooLargeError(uploadError)) {
-          const emergencyDims = [480, 360, 240];
-          const emergencyQualities = [0.25, 0.18, 0.12];
-          const stepIdx = Math.min(attempt, emergencyDims.length - 1);
-          currentDim = emergencyDims[stepIdx];
-          currentQuality = emergencyQualities[stepIdx];
-          const dataUrl = `data:image/jpeg;base64,${currentBase64}`;
-          try {
-            const recompressed = await compressForUpload(dataUrl, currentDim, currentQuality);
-            currentBase64 = cleanBase64(recompressed);
-          } catch { /* retry with same */ }
-          const backoffDelay = 1000 * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
-          await new Promise((resolve) => setTimeout(resolve, backoffDelay));
-          continue;
-        }
-        if (attempt < UPLOAD_MAX_RETRIES && isUploadNetworkError(uploadError)) {
-          const baseDelay = 1000 * Math.pow(2, attempt);
-          const jitter = 0.5 + Math.random() * 0.5;
-          await new Promise((resolve) => setTimeout(resolve, baseDelay * jitter));
-          continue;
-        }
-        if (isTlsOrProxyError(uploadError)) {
-          throw new Error('보안 연결에 실패했습니다. Wi-Fi 환경을 변경하거나 VPN/프록시 설정을 확인해 주세요.');
-        }
-        throw new Error(`이미지 업로드 실패: ${uploadError.message}`);
-      } finally {
-        if (tmpPath) {
-          unpinTempFile(tmpPath);
-          await safeDeleteTempFile(tmpPath).catch(() => {});
-        }
-      }
-    }
-    throw new Error('이미지 업로드 실패: 최대 재시도 횟수 초과');
-  }
 
   const makeBytes = (b64: string) =>
     new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' });
@@ -281,7 +200,6 @@ async function performUpload(finalBase64: string): Promise<string> {
     } catch (uploadError) {
       lastError = uploadError instanceof Error ? uploadError : new Error(String(uploadError));
 
-    // N-002: On 413 Payload Too Large, attempt emergency recompression
     if (attempt < UPLOAD_MAX_RETRIES && isPayloadTooLargeError(uploadError)) {
       const emergencyDims = [480, 360, 240];
       const emergencyQualities = [0.25, 0.18, 0.12];
@@ -300,7 +218,6 @@ async function performUpload(finalBase64: string): Promise<string> {
       continue;
     }
 
-    // N-001 / N-003: On network/TLS/SSL errors, exponential backoff with jitter
     if (attempt < UPLOAD_MAX_RETRIES && isUploadNetworkError(uploadError)) {
       const baseDelay = 1000 * Math.pow(2, attempt);
       const jitter = 0.5 + Math.random() * 0.5;
@@ -311,7 +228,6 @@ async function performUpload(finalBase64: string): Promise<string> {
     }
   }
 
-  // N-003: Provide a user-friendly hint for TLS/proxy/firewall failures
   if (lastError && isTlsOrProxyError(lastError)) {
     throw new Error('보안 연결에 실패했습니다. Wi-Fi 환경을 변경하거나 VPN/프록시 설정을 확인해 주세요.');
   }
@@ -669,6 +585,23 @@ export default function SynthesisScreen() {
       let modelUrl: string | null = null;
       if (modelImage) {
         modelUrl = await uploadSingle(modelImage);
+      }
+
+      // Android OOM defense: now that all uploads are complete and we hold
+      // only the remote https URLs, replace the local file:// / data: URIs in
+      // React state so the large base64 / file buffers are dereferenced from
+      // the JS heap before the video submit request serializes its payload.
+      if (Platform.OS !== 'web') {
+        setProductImages((prev) =>
+          prev.map((img, i) =>
+            uploadedUrls[i] && uploadedUrls[i].startsWith('http')
+              ? { ...img, uri: uploadedUrls[i] }
+              : img,
+          ),
+        );
+        if (modelImage && modelUrl && modelUrl.startsWith('http')) {
+          setModelImage({ id: modelImage.id, uri: modelUrl, angle: modelImage.angle });
+        }
       }
 
       await startGeneration({

@@ -60,32 +60,34 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   // The bar width is driven by a SharedValue that eases toward the target
   // percentage, eliminating the janky stepwise jumps of the old static View.
   const barWidthSV = useSharedValue(0);
-  const creepSV = useSharedValue(0);
+  const [creepFloor, setCreepFloor] = useState(0);
 
   // Soft creep guard: every 2 seconds, nudge a floor value up by 3 points so
   // the bar never visually freezes even when the server is silent. Caps at 90%.
+  // Uses React state (not a SharedValue) so changes trigger re-renders and
+  // the bar animation effect below re-fires.
   useEffect(() => {
     if (!isRendering) {
-      creepSV.value = 0;
+      setCreepFloor(0);
       return;
     }
     const interval = setInterval(() => {
-      creepSV.value = Math.min(creepSV.value + 3, 90);
+      setCreepFloor((prev) => Math.min(prev + 3, 90));
     }, 2000);
     return () => clearInterval(interval);
-  }, [isRendering, creepSV]);
+  }, [isRendering]);
 
   // Drive the animated bar toward the max of (realProgress, creepFloor).
   // On completion, snap to 100% immediately.
   useEffect(() => {
-    const target = isCompleted ? 100 : Math.max(progressPercent, creepSV.value);
+    const target = isCompleted ? 100 : Math.max(progressPercent, creepFloor);
     const safeTarget = Math.max(0, Math.min(100, isNaN(target) ? 0 : target));
     barWidthSV.value = withTiming(safeTarget, {
       duration: isCompleted ? 300 : 500,
       easing: Easing.out(Easing.quad),
     });
     setDisplayPercent(safeTarget);
-  }, [progressPercent, creepSV, isCompleted, barWidthSV]);
+  }, [progressPercent, creepFloor, isCompleted, barWidthSV]);
 
   const pulseSV = useSharedValue(0);
   const prevActiveRef = useRef(-1);

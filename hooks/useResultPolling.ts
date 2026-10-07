@@ -258,13 +258,14 @@ export function useResultPolling(
           } else {
             const rawProgress = pollData.progress ? parseFloat(pollData.progress) : NaN;
             const stepProg = stepToProgress(pollData.step as string | undefined);
-            const bestProgress = !isNaN(rawProgress) ? rawProgress : stepProg;
-            const pctLabel = bestProgress !== null && !isNaN(bestProgress as number)
-              ? ` (${Math.round((bestProgress as number) * 100)}%)`
+            const candidate = !isNaN(rawProgress) ? rawProgress : stepProg;
+            const bestProgress = Math.max(0, Math.min(1, (candidate ?? 0))) || 0;
+            const pctLabel = !isNaN(bestProgress)
+              ? ` (${Math.round(bestProgress * 100)}%)`
               : '';
             setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
-            if (bestProgress !== null && !isNaN(bestProgress as number)) {
-              setServerProgress((prev) => Math.max(prev ?? 0, bestProgress as number));
+            if (!isNaN(bestProgress) && bestProgress > 0) {
+              setServerProgress((prev) => Math.max(prev ?? 0, bestProgress));
             }
           }
         }
@@ -351,9 +352,54 @@ export function useResultPolling(
     };
 
     // Pause polling when app is backgrounded to avoid zombie requests.
+    // On background: abort in-flight fetches, clear all timers, and
+    // unsubscribe Realtime so the OS can reclaim memory without orphaned
+    // callbacks crashing the app. On foreground: re-subscribe Realtime,
+    // run a resume burst, and restart the normal poll schedule.
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         if (!cancelled && !settledRef.current) {
+          // Re-subscribe Realtime channel (was unsubscribed on background).
+          if (!realtimeChannel) {
+            try {
+              realtimeChannel = supabase
+                .channel(`job-poll-${jobId}`)
+                .on(
+                  'postgres_changes',
+                  {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'video_jobs',
+                    filter: `task_id=eq.${jobId}`,
+                  },
+                  (payload) => {
+                    if (cancelled || settledRef.current) return;
+                    try {
+                      const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null };
+                      if (!row || typeof row.status !== 'string') return;
+                      if (row.status === 'SUCCESS' && row.video_url) {
+                        handleResult(row.status, row.video_url);
+                      } else if (row.status === 'FAILED') {
+                        handleResult(row.status, null, row.error_message ?? undefined);
+                      } else {
+                        const stepProg = stepToProgress(row.step);
+                        if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
+                          const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+                          const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
+                          setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
+                          setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
+                        }
+                      }
+                    } catch {
+                      // Malformed payload — ignore, polling will catch up
+                    }
+                  },
+                )
+                .subscribe();
+            } catch {
+              // Realtime unavailable — polling still works as fallback
+            }
+          }
           pollAttempt = 0;
           if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
           resumeBurstCount = 0;
@@ -361,10 +407,19 @@ export function useResultPolling(
           if (!pollTimer) pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
+        // Graceful pause: abort all in-flight network requests and release
+        // the Realtime websocket so the OS can reclaim memory without
+        // triggering orphaned-callback crashes.
+        pollAbort?.abort();
+        forceSyncAbort?.abort();
         if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
         if (pollTimer) {
           clearTimeout(pollTimer);
           pollTimer = null;
+        }
+        if (realtimeChannel) {
+          try { supabase.removeChannel(realtimeChannel); } catch { /* ignore */ }
+          realtimeChannel = null;
         }
       }
     };
