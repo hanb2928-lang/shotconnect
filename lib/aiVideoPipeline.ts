@@ -677,12 +677,17 @@ function waitForVideoCompletion(
     const checkDb = async () => {
       if (settled || !scanId) return;
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('video_jobs')
           .select('status, step, video_url, error_message')
-          .eq('scan_id', scanId)
-          .eq('task_id', submitData.taskId)
-          .maybeSingle();
+          .eq('scan_id', scanId);
+        // Only filter by task_id when it's a real server-issued ID. Soft
+        // fallback IDs (soft-...) don't exist in the DB, so querying by
+        // scanId alone finds the real job row the server created.
+        if (!submitData.taskId.startsWith('soft-')) {
+          query = query.eq('task_id', submitData.taskId);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
         if (error) throw new Error(error.message);
         if (!data) return;
         consecutivePollFailures = 0;
@@ -801,7 +806,7 @@ function waitForVideoCompletion(
         await Promise.all([checkDb(), checkScanVideoUrl()]);
         if (!settled) {
           const elapsedSec = monotonicElapsedSec(startTime);
-          const timeProgress = Math.min(0.1 + (elapsedSec / 180) * 0.8, 0.95);
+          const timeProgress = Math.min(0.15 + (elapsedSec / 180) * 0.8, 0.95);
           const healthHint = channelHealth === ChannelHealth.HEALTHY
             ? ''
             : ' (실시간 연결 불안정 — 폴링으로 대체 중)';
@@ -827,6 +832,10 @@ function waitForVideoCompletion(
     let runwayPollTimer: ReturnType<typeof setTimeout> | null = null;
     const startRunwayPollFallback = () => {
       if (settled || runwayPollTimer) return;
+      // Skip Runway API direct poll when the task ID is a soft-fallback
+      // placeholder — the real Runway task ID is unknown, so this poll
+      // would always fail. The DB poll by scanId will catch the result.
+      if (submitData.taskId.startsWith('soft-')) return;
       const runwayPoll = async () => {
         if (settled) return;
         try {
@@ -1066,16 +1075,22 @@ export async function submitVideoJobAsync(
     }
   }
 
-  const invokePromise = supabase.functions.invoke('generate-video', {
+  const invokePromise = (supabase.functions.invoke('generate-video', {
     body: bodyJson,
     signal: submitController.signal,
-  });
+  }) as Promise<{ data: { taskId: string; motionPrompt: string; durationSec: number; aspectRatio: string; variationSeed: number } | null; error: unknown }>)
+    .catch((err: unknown) => {
+      if (err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message))) {
+        return { data: null, error: null };
+      }
+      return { data: null, error: err };
+    });
 
-  // 8-second soft timeout: if the server hasn't responded yet, abort the
-  // fetch, generate a local fallback task ID, and proceed to polling. The
-  // server's submit call may still complete in the background — the job row
-  // will be found by scanId during polling. This prevents the UI from
-  // blocking at 8% when the edge function is slow to return its 202 response.
+  // 10-second soft timeout: if the server hasn't responded yet, proceed to
+  // polling using the scanId to find the real job row. The server's submit
+  // call may still complete in the background — the job row will be found by
+  // scanId during polling. This prevents the UI from blocking at 8% when the
+  // edge function is slow to return its 202 response.
   const softTimeoutPromise = new Promise<{ data: { taskId: string; motionPrompt: string; durationSec: number; aspectRatio: string; variationSeed: number } | null; error: null }>((resolve) =>
     setTimeout(
       () => {
@@ -1087,7 +1102,7 @@ export async function submitVideoJobAsync(
           customPrompt: prompt,
         });
         const fallbackMotionPrompt = fallbackHook.selected.text;
-        report('generating', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
+        report('generating', 0.12, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
         resolve({
           data: {
             taskId: fallbackId,
@@ -1117,6 +1132,8 @@ export async function submitVideoJobAsync(
   ]).finally(() => clearTimeout(submitTimeoutId));
 
   if (error) throw await buildVideoFunctionError(error);
+  // If the soft timeout won the race, use the fallback task ID. Polling will
+  // find the real job row by scanId — the task ID is only a placeholder.
   if (!data || typeof data.taskId !== 'string') {
     throw new Error('서버가 작업 ID를 반환하지 않았습니다.');
   }
@@ -1385,10 +1402,16 @@ export async function upgradeVideoToHd(
 
   const hdController = new AbortController();
   const hdTimeoutId = setTimeout(() => hdController.abort(), HD_SUBMIT_TIMEOUT_MS);
-  const invokePromise = supabase.functions.invoke('generate-video', {
+  const invokePromise = (supabase.functions.invoke('generate-video', {
     body: bodyJson,
     signal: hdController.signal,
-  });
+  }) as Promise<{ data: { taskId: string } | null; error: unknown }>)
+    .catch((err: unknown) => {
+      if (err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message))) {
+        return { data: null, error: null };
+      }
+      return { data: null, error: err };
+    });
 
   // 8-second soft timeout: abort the fetch and proceed with a fallback HD
   // task ID so the HD polling can start even if the edge function is slow.

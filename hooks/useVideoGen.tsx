@@ -230,7 +230,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           if (prev.progress >= 0.9) return prev;
           const serverProg = serverProgRef.current;
           const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, 0.9) : 0.9;
-          const nudge = prev.progress + 0.008;
+          const nudge = prev.progress + 0.015;
           return { ...prev, progress: Math.min(nudge, ceiling) };
         });
       }, 2000);
@@ -251,7 +251,6 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     hardGuardTimer = setInterval(() => {
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-        if (prev.phase !== 'generating') return prev;
         if (prev.progress >= 0.9) return prev;
         const forced = Math.min(prev.progress + 0.10, 0.9);
         const serverProg = serverProgRef.current;
@@ -415,7 +414,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
       await saveActiveVideoJob(submitResult.taskId, 'submitting');
-      setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
+      setVideoProgress({ phase: 'generating', progress: 0.15, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; }
       clearInterval(simTimer);

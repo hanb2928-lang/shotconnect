@@ -210,6 +210,29 @@ export function useResultPolling(
       }
 
       const elapsedSec = Math.round(elapsed / 1000);
+      const isSoftTaskId = jobId.startsWith('soft-');
+
+      // When the task ID is a soft-fallback placeholder, skip the edge
+      // function poll (it can't find the job by a fake task ID) and go
+      // straight to DB lookup by scanId — the real job row was created
+      // server-side even though we never got the response.
+      if (isSoftTaskId) {
+        const scanResult = await forceSyncByScan();
+        if (cancelled || settledRef.current) return;
+        if (scanResult) {
+          handleResult(scanResult.status, scanResult.videoUrl);
+          if (settledRef.current) return;
+        }
+        if (!cancelled && !settledRef.current) {
+          const delayMs = Math.min(
+            Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
+            POLL_MAX_MS,
+          );
+          pollAttempt++;
+          pollTimer = setTimeout(pollOnce, delayMs);
+        }
+        return;
+      }
 
       // Primary path: poll via the generate-video edge function.
       try {
