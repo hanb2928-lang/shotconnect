@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, type DimensionValue } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -51,24 +51,41 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   const rawProgress = Number(progress?.progress ?? 0);
   const progressPercent = Math.max(0, Math.min(100, Math.round((isNaN(rawProgress) ? 0 : rawProgress) * 100) || 0));
   const [activityMsg, setActivityMsg] = useState('');
-  const [forceMinPercent, setForceMinPercent] = useState(0);
+  const [displayPercent, setDisplayPercent] = useState(0);
 
-  // Soft progress guard: every 3 seconds, force the displayed percentage up
-  // by at least 2 points so the bar never visually freezes. Only nudges —
-  // never overrides a higher real value. Caps at 90%.
   const isRendering = activeIdx >= 0 && progress?.phase !== 'completed' && progress?.phase !== 'error';
+  const isCompleted = progress?.phase === 'completed';
+
+  // Animated progress bar via Reanimated SharedValue for smooth transitions.
+  // The bar width is driven by a SharedValue that eases toward the target
+  // percentage, eliminating the janky stepwise jumps of the old static View.
+  const barWidthSV = useSharedValue(0);
+  const creepSV = useSharedValue(0);
+
+  // Soft creep guard: every 2 seconds, nudge a floor value up by 3 points so
+  // the bar never visually freezes even when the server is silent. Caps at 90%.
   useEffect(() => {
     if (!isRendering) {
-      setForceMinPercent(0);
+      creepSV.value = 0;
       return;
     }
     const interval = setInterval(() => {
-      setForceMinPercent((prev) => Math.min(prev + 2, 90));
-    }, 3000);
+      creepSV.value = Math.min(creepSV.value + 3, 90);
+    }, 2000);
     return () => clearInterval(interval);
-  }, [isRendering]);
+  }, [isRendering, creepSV]);
 
-  const displayPercent = Math.max(progressPercent, forceMinPercent);
+  // Drive the animated bar toward the max of (realProgress, creepFloor).
+  // On completion, snap to 100% immediately.
+  useEffect(() => {
+    const target = isCompleted ? 100 : Math.max(progressPercent, creepSV.value);
+    const safeTarget = Math.max(0, Math.min(100, isNaN(target) ? 0 : target));
+    barWidthSV.value = withTiming(safeTarget, {
+      duration: isCompleted ? 300 : 500,
+      easing: Easing.out(Easing.quad),
+    });
+    setDisplayPercent(safeTarget);
+  }, [progressPercent, creepSV, isCompleted, barWidthSV]);
 
   const pulseSV = useSharedValue(0);
   const prevActiveRef = useRef(-1);
@@ -124,9 +141,12 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
     transform: [{ scale: interpolate(pulseSV.value, [0, 1], [1, 1.15]) }],
   }));
 
+  const animatedBarStyle = useAnimatedStyle(() => ({
+    width: `${Math.max(0, Math.min(100, barWidthSV.value))}%` as unknown as DimensionValue,
+  }));
+
   const isOverlay = variant === 'overlay';
   const containerStyle = isOverlay ? styles.overlayContainer : styles.inlineContainer;
-  const isCompleted = progress?.phase === 'completed';
   const isError = progress?.phase === 'error';
 
   return (
@@ -139,11 +159,11 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
       </View>
 
       <View style={styles.progressBarTrack}>
-        <View
+        <Animated.View
           style={[
             styles.progressBarFill,
+            animatedBarStyle,
             {
-              width: `${displayPercent}%`,
               backgroundColor: isError
                 ? theme.colors.error[400]
                 : isCompleted
