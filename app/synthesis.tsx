@@ -665,7 +665,6 @@ export default function SynthesisScreen() {
     setIsGenerating(true);
     setResultImageUrl(null);
     setResultVideoUrl(null);
-    setVideoProgress({ phase: 'submitting', progress: 0.05, message: '준비 중...', elapsedSec: 0 });
     genStartRef.current = Date.now();
 
     const modeLabel = genMode === 'auto_3d' ? '입체컷 오토' : genMode === 'universal_synthesis' ? 'AI 범용 합성' : '수동';
@@ -676,11 +675,30 @@ export default function SynthesisScreen() {
       ? manualPrompt.trim()
       : `Cinematic ${modeLabel} product showcase. ${captionText || '시선 집중! 지금 바로 확인하세요'}`;
 
+    // Simulated progress: starts immediately so the bar never sits at 0%.
+    // Climbs to ~8% in the first second, then continues slowly toward 12%
+    // while uploads and scan insertion happen in the background.
+    let simProgress = 0;
+    setVideoProgress({ phase: 'submitting', progress: 0.02, message: '촬영 에셋 준비 중...', elapsedSec: 0 });
+    const simTimer = setInterval(() => {
+      if (!mountedRef.current) return;
+      simProgress = Math.min(simProgress + 0.015, 0.12);
+      const stepMsg = simProgress < 0.06
+        ? '촬영 에셋 준비 중...'
+        : simProgress < 0.10
+        ? 'AI 분석 및 훅 추출 중...'
+        : '렌더링 준비 중...';
+      setVideoProgress((prev) => {
+        if (!prev || prev.phase !== 'submitting') return prev;
+        return { ...prev, progress: Math.max(prev.progress, simProgress), message: stepMsg };
+      });
+    }, 200);
+
     let nudgeTimer: ReturnType<typeof setInterval> | null = null;
 
     try {
       const totalImages = productImages.length + (modelImage ? 1 : 0);
-      setVideoProgress({ phase: 'submitting', progress: 0.06, message: `이미지 업로드 중... (1/${totalImages})`, elapsedSec: 0 });
+      setVideoProgress({ phase: 'submitting', progress: 0.03, message: `이미지 업로드 중... (1/${totalImages})`, elapsedSec: 0 });
 
       const uploadSingle = async (img: SourceImage): Promise<string> => {
         if (img.uri.startsWith('http://') || img.uri.startsWith('https://')) return img.uri;
@@ -702,7 +720,9 @@ export default function SynthesisScreen() {
           const url = await uploadSingle(item.img);
           uploadedUrls[item.idx] = url;
           uploadDone++;
-          setVideoProgress((prev) => prev ? { ...prev, message: `이미지 업로드 중... (${uploadDone}/${totalImages})` } : prev);
+          // Each completed upload advances the progress bar, not just the message
+          const uploadPct = 0.03 + (uploadDone / totalImages) * 0.07;
+          setVideoProgress((prev) => prev ? { ...prev, progress: Math.max(prev.progress, uploadPct), message: `이미지 업로드 중... (${uploadDone}/${totalImages})` } : prev);
         }
       };
 
@@ -723,17 +743,18 @@ export default function SynthesisScreen() {
       }
 
       if (!mountedRef.current) return;
-      setVideoProgress({ phase: 'submitting', progress: 0.08, message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 });
+      setVideoProgress((prev) => prev ? { ...prev, progress: Math.max(prev.progress, 0.10), message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 } : prev);
+      clearInterval(simTimer);
 
       // Progress nudge: advance progress while waiting for the scan insert + submit
       nudgeTimer = setInterval(() => {
         if (!mountedRef.current) return;
         setVideoProgress((prev) => {
           if (!prev || prev.phase !== 'submitting') return prev;
-          const next = Math.min(prev.progress + 0.01, 0.12);
+          const next = Math.min(prev.progress + 0.008, 0.15);
           return { ...prev, progress: next, message: 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...' };
         });
-      }, 3000);
+      }, 1500);
 
       const { data: scanData, error: scanError } = await supabase
         .from('scans')
@@ -772,8 +793,9 @@ export default function SynthesisScreen() {
       }, (p) => {
         if (mountedRef.current) setVideoProgress(p);
       });
-      if (!mountedRef.current) { clearInterval(nudgeTimer); return; }
+      if (!mountedRef.current) { clearInterval(nudgeTimer); clearInterval(simTimer); return; }
       clearInterval(nudgeTimer);
+      clearInterval(simTimer);
       nudgeTimer = null;
       jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
@@ -781,6 +803,7 @@ export default function SynthesisScreen() {
       setVideoProgress({ phase: 'generating', progress: 0.12, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; }
+      clearInterval(simTimer);
       if (!mountedRef.current) return;
       // B-002: If a scan record was created but the video job was never
       // submitted, delete the orphaned scan so retry doesn't conflict
@@ -812,6 +835,7 @@ export default function SynthesisScreen() {
       setError(userMsg);
     } finally {
       if (nudgeTimer) clearInterval(nudgeTimer);
+      clearInterval(simTimer);
       generateLockRef.current = false;
     }
   }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating]);
@@ -857,7 +881,7 @@ export default function SynthesisScreen() {
         const parsed = pctMatch ? parseInt(pctMatch[1], 10) : NaN;
         const polledProgress = !isNaN(parsed) ? parsed / 100 : null;
         const baseProgress = prev.progress;
-        const timeBasedProgress = Math.min(0.9, 0.12 + elapsed * 0.005);
+        const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
         const nextProgress = polledProgress ?? Math.max(baseProgress, timeBasedProgress);
         return { ...prev, message: msg || prev.message, elapsedSec: elapsed, progress: nextProgress };
       });
