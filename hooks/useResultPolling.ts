@@ -42,6 +42,7 @@ export function useResultPolling(
   const [jobState, setJobState] = useState<JobState>('idle');
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [serverProgress, setServerProgress] = useState<number | null>(null);
+  const [serverStep, setServerStep] = useState<string | null>(null);
   const [isTimeout, setIsTimeout] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +80,7 @@ export function useResultPolling(
     setJobState('polling');
     setProgressMessage('영상 생성 상태를 확인하는 중...');
     setServerProgress(null);
+    setServerStep(null);
     setError(null);
     setIsTimeout(false);
 
@@ -124,6 +126,7 @@ export function useResultPolling(
                   setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
                   setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
                 }
+                if (row.step) setServerStep(row.step);
               }
             } catch {
               // Malformed payload — ignore, polling will catch up
@@ -267,6 +270,7 @@ export function useResultPolling(
             if (!isNaN(bestProgress) && bestProgress > 0) {
               setServerProgress((prev) => Math.max(prev ?? 0, bestProgress));
             }
+            if (pollData.step) setServerStep(pollData.step as string);
           }
         }
       } catch {
@@ -389,6 +393,7 @@ export function useResultPolling(
                           setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
                           setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
                         }
+                        if (row.step) setServerStep(row.step);
                       }
                     } catch {
                       // Malformed payload — ignore, polling will catch up
@@ -431,5 +436,5 @@ export function useResultPolling(
     };
   }, [jobId, scanId, settle]);
 
-  return { jobState, progressMessage, serverProgress, isTimeout, error };
+  return { jobState, progressMessage, serverProgress, serverStep, isTimeout, error };
 }

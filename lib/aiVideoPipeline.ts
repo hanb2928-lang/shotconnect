@@ -16,6 +16,8 @@ export interface VideoGenProgress {
   progress: number;
   message: string;
   elapsedSec: number;
+  /** Current server-side step (from video_jobs.step / Realtime push). */
+  serverStep?: string | null;
 }
 
 export interface VideoGenResult {

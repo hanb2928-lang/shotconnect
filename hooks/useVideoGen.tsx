@@ -16,6 +16,7 @@ import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
 import { stepToProgress } from '@/lib/videoGenSteps';
+import { autoSelectHook } from '@/lib/autoHookEngine';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 export type GenPhase = 'idle' | 'submitting' | 'generating' | 'completed' | 'error';
@@ -78,6 +79,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const generateLockRef = useRef(false);
   const outputModeRef = useRef<'image' | 'video'>('video');
   const abortRef = useRef<AbortController | null>(null);
+  const productNameRef = useRef<string>('');
+  const hookTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -334,11 +337,64 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }
   }, [polling.serverProgress, isGenerating]);
 
+  // Sync server-reported step from polling into videoProgress so the step
+  // tracker can bind its icons to authoritative server state instead of
+  // the time-based soft-creep percentage.
+  useEffect(() => {
+    const ss = polling.serverStep;
+    if (ss) {
+      setVideoProgress((prev) => {
+        if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+        if (prev.serverStep === ss) return prev;
+        return { ...prev, serverStep: ss };
+      });
+    }
+  }, [polling.serverStep]);
+
+  // 5-second hook extraction timeout: if the server stays on the "hooking"
+  // step for more than 5 seconds, generate a local fallback hook via
+  // autoSelectHook and force-advance progress to the planning step so the
+  // UI never hangs on the hook icon indefinitely.
+  useEffect(() => {
+    if (polling.serverStep === 'hooking') {
+      if (hookTimeoutRef.current) return;
+      hookTimeoutRef.current = setTimeout(() => {
+        try {
+          autoSelectHook({ productName: productNameRef.current });
+        } catch {
+          // Fallback hook generation failed — still advance to avoid hang
+        }
+        serverProgRef.current = 0.25;
+        setVideoProgress((prev) => {
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+          return {
+            ...prev,
+            serverStep: 'planning',
+            progress: Math.max(prev.progress, 0.25),
+            message: '훅 문구 추출 완료 — 편집 플랜 구성 중...',
+          };
+        });
+      }, 5000);
+    } else if (polling.serverStep && polling.serverStep !== 'hooking') {
+      if (hookTimeoutRef.current) {
+        clearTimeout(hookTimeoutRef.current);
+        hookTimeoutRef.current = null;
+      }
+    }
+    return () => {
+      if (hookTimeoutRef.current) {
+        clearTimeout(hookTimeoutRef.current);
+        hookTimeoutRef.current = null;
+      }
+    };
+  }, [polling.serverStep]);
+
   const startGeneration = useCallback(async (params: StartGenerationParams) => {
     if (generateLockRef.current) return;
     if (isGenerating || jobIdRef.current) return;
     generateLockRef.current = true;
     outputModeRef.current = params.outputMode;
+    productNameRef.current = params.productName;
     abortRef.current = new AbortController();
 
     setError(null);
@@ -459,6 +515,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     setVideoProgress(null);
     setError(null);
     scanIdRef.current = null;
+    if (hookTimeoutRef.current) {
+      clearTimeout(hookTimeoutRef.current);
+      hookTimeoutRef.current = null;
+    }
     clearActiveVideoJob();
   }, []);
 

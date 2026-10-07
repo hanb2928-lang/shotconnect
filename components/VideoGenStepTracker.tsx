@@ -16,6 +16,7 @@ import { theme } from '@/lib/theme';
 import {
   resolveVideoGenSteps,
   getCurrentStepIndex,
+  stepToProgress,
   type VideoGenStep,
 } from '@/lib/videoGenSteps';
 import type { VideoGenProgress } from '@/lib/aiVideoPipeline';
@@ -63,19 +64,26 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   const [creepFloor, setCreepFloor] = useState(0);
 
   // Soft creep guard: every 2 seconds, nudge a floor value up by 3 points so
-  // the bar never visually freezes even when the server is silent. Caps at 90%.
-  // Uses React state (not a SharedValue) so changes trigger re-renders and
-  // the bar animation effect below re-fires.
+  // the bar never visually freezes even when the server is silent. The cap is
+  // bound to the server step progress so the bar cannot race to 90% while the
+  // step icons are still on an earlier stage (the desync bug).
+  const serverStepProg = progress?.serverStep
+    ? stepToProgress(progress.serverStep)
+    : null;
+  const creepCap = serverStepProg !== null && serverStepProg > 0
+    ? Math.min(Math.round(serverStepProg * 100), 90)
+    : 90;
+
   useEffect(() => {
     if (!isRendering) {
       setCreepFloor(0);
       return;
     }
     const interval = setInterval(() => {
-      setCreepFloor((prev) => Math.min(prev + 3, 90));
+      setCreepFloor((prev) => Math.min(prev + 3, creepCap));
     }, 2000);
     return () => clearInterval(interval);
-  }, [isRendering]);
+  }, [isRendering, creepCap]);
 
   // Drive the animated bar toward the max of (realProgress, creepFloor).
   // On completion, snap to 100% immediately.

@@ -111,6 +111,31 @@ export function resolveVideoGenSteps(progress: VideoGenProgress | null): VideoGe
     return VIDEO_GEN_STEPS.map((s) => ({ ...s, status: 'done' as VideoGenStepStatus }));
   }
 
+  // Server step binding: when the server reports a concrete step, use it
+  // as the source of truth for which steps are done/active. This prevents
+  // the desync where the progress bar (driven by time-based creep) shows
+  // 90% while the server is still on "hooking" — the step icons now
+  // force-jump to match the server's actual position.
+  const serverStepProgress = stepToProgress(progress.serverStep);
+  if (serverStepProgress !== null && serverStepProgress > 0) {
+    // Use the higher of (creep percentage, server step progress) so the
+    // bar never goes backward, but the step icons bind to the server.
+    const effectiveProgress = Math.max(p, serverStepProgress);
+    let activeFound = false;
+
+    return VIDEO_GEN_STEPS.map((s) => {
+      if (effectiveProgress >= s.threshold) {
+        return { ...s, status: 'done' as VideoGenStepStatus };
+      }
+      if (!activeFound) {
+        activeFound = true;
+        return { ...s, status: 'active' as VideoGenStepStatus };
+      }
+      return { ...s, status: 'pending' as VideoGenStepStatus };
+    });
+  }
+
+  // Fallback: no server step info, use percentage-only mapping.
   let activeFound = false;
 
   return VIDEO_GEN_STEPS.map((s) => {
