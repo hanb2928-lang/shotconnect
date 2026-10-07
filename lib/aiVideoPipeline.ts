@@ -218,7 +218,15 @@ async function invokeWithNetworkRetry(
       return { data, error: null };
     } catch (err) {
       lastError = err;
+      const errStatus = (err as { status?: number }).status;
+      const isAuthError = errStatus === 401 || errStatus === 403;
       const isTimeout = err instanceof Error && (err.message.includes('초과') || err.message.includes('timeout'));
+      if (isAuthError && attempt < maxRetries) {
+        await ensureFreshSession();
+        onRetry?.(attempt + 1, '인증 세션 갱신 중...');
+        await delay(SUBMIT_RETRY_DELAY_MS * (attempt + 1));
+        continue;
+      }
       if (attempt < maxRetries && (isNetworkError(err) || isTimeout)) {
         if (!isOnline()) {
           onRetry?.(attempt + 1, '네트워크 연결 대기 중...');
@@ -347,7 +355,10 @@ export async function generateAiVideo(
   for (let attempt = 0; attempt <= SUBMIT_MAX_RETRIES; attempt++) {
     let softNudge: ReturnType<typeof setTimeout> | null = null;
     try {
-      if (attempt === 0) await yieldToUI();
+      if (attempt === 0) {
+        await ensureFreshSession();
+        await yieldToUI();
+      }
       // Soft timeout: nudge progress forward after 10s so the UI doesn't
       // appear frozen at 5-8% while the server is still processing.
       softNudge = setTimeout(() => {
@@ -414,6 +425,11 @@ export async function generateAiVideo(
     } catch (err) {
       if (softNudge) clearTimeout(softNudge);
       lastSubmitErr = err instanceof Error ? err : new Error(String(err));
+      const errStatus = (err as { status?: number }).status;
+      if (errStatus === 401 || errStatus === 403) {
+        report('error', 0, '인증 세션이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.');
+        throw new Error('인증 세션이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.');
+      }
       if (attempt < SUBMIT_MAX_RETRIES) {
         if (!isOnline()) {
           report('submitting', 0.05 + attempt * 0.02, '네트워크 연결을 기다리는 중...');
@@ -712,6 +728,10 @@ function waitForVideoCompletion(
 
     const setupChannel = () => {
       if (settled || !scanId) return;
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
       channel = supabase
         .channel(`video-job:${scanId}:${submitData.taskId}`)
         .on(
@@ -1027,6 +1047,7 @@ export async function submitVideoJobAsync(
     mainImageUrl: options.mainImageUrl,
   }));
 
+  await ensureFreshSession();
   await yieldToUI();
 
   report('submitting', 0.08, 'AI 렌더링 요청 전송 중...');
@@ -1185,6 +1206,10 @@ export function subscribeVideoJob(
 
   const setupChannel = () => {
     if (settled) return;
+    if (channel) {
+      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      channel = null;
+    }
     channel = supabase
       .channel(`video-job:${scanId}:${taskId}`)
       .on(
@@ -1337,6 +1362,7 @@ export async function upgradeVideoToHd(
     mainImageUrl: options.mainImageUrl,
   }));
 
+  await ensureFreshSession();
   await yieldToUI();
 
   const hdController = new AbortController();
@@ -1484,6 +1510,10 @@ export function subscribeHdUpgrade(
 
   const setupChannel = () => {
     if (settled) return;
+    if (channel) {
+      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      channel = null;
+    }
     channel = supabase
       .channel(`hd-upgrade:${scanId}:${draftJobId}`)
       .on(
