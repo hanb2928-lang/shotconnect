@@ -544,6 +544,10 @@ export default function SynthesisScreen() {
     try {
       const totalImages = productImages.length + (modelImage ? 1 : 0);
 
+      // Parallel upload: fire all product images + model image simultaneously
+      // via Promise.all. No sequential waiting — every image streams to the
+      // storage bucket concurrently, cutting total upload time in half.
+      const allImages: { img: SourceImage; idx: number }[] = productImages.map((img, idx) => ({ img, idx }));
       const uploadSingle = async (img: SourceImage): Promise<string> => {
         if (img.uri.startsWith('http://') || img.uri.startsWith('https://')) return img.uri;
         const cached = preUploadCacheRef.current.get(img.uri);
@@ -551,41 +555,17 @@ export default function SynthesisScreen() {
         return uploadImageToStorage(img.uri);
       };
 
-      // Parallel upload with limited concurrency
-      const MAX_PARALLEL_UPLOADS = 3;
-      const uploadedUrls: string[] = new Array(productImages.length);
-      let uploadDone = 0;
-      const uploadQueue = productImages.map((img, idx) => ({ img, idx }));
+      const [productResults, modelResult] = await Promise.all([
+        Promise.all(allImages.map(({ img }) => uploadSingle(img))),
+        modelImage ? uploadSingle(modelImage) : Promise.resolve(null),
+      ]);
 
-      const uploadWorker = async () => {
-        while (uploadQueue.length > 0) {
-          const item = uploadQueue.shift();
-          if (!item) break;
-          const url = await uploadSingle(item.img);
-          uploadedUrls[item.idx] = url;
-          uploadDone++;
-        }
-      };
-
-      const workers: Promise<void>[] = [];
-      for (let w = 0; w < Math.min(MAX_PARALLEL_UPLOADS, productImages.length); w++) {
-        workers.push(uploadWorker());
-      }
-      await Promise.all(workers);
-
-      // Release uploaded image data from memory: the original SourceImage
-      // objects may hold large base64/data-URI strings that are no longer
-      // needed once we have the storage URLs. Clearing the pre-upload cache
-      // and replacing the image URIs with their uploaded URLs prevents the
-      // memory spike during the 8% serialization phase.
+      const uploadedUrls = productResults;
       preUploadCacheRef.current.clear();
 
       const mainUrl = uploadedUrls[0];
       const restUrls = uploadedUrls.slice(1);
-      let modelUrl: string | null = null;
-      if (modelImage) {
-        modelUrl = await uploadSingle(modelImage);
-      }
+      const modelUrl = modelResult;
 
       // Android OOM defense: now that all uploads are complete and we hold
       // only the remote https URLs, replace the local file:// / data: URIs in
