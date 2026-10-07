@@ -1003,7 +1003,7 @@ export async function submitVideoJobAsync(
   onProgress?: (progress: VideoGenProgress) => void,
 ): Promise<SubmitOnlyResult> {
   const SUBMIT_TIMEOUT_MS = 90_000;
-  const SUBMIT_SOFT_TIMEOUT_MS = 8_000;
+  const SUBMIT_SOFT_TIMEOUT_MS = 10_000;
 
   const report = (phase: VideoGenPhase, progress: number, message: string) => {
     onProgress?.({ phase, progress, message, elapsedSec: 0 });
@@ -1054,6 +1054,17 @@ export async function submitVideoJobAsync(
 
   const submitController = new AbortController();
   const submitTimeoutId = setTimeout(() => submitController.abort(), SUBMIT_TIMEOUT_MS);
+
+  // Link external abort signal (e.g. component unmount) to the submit
+  // controller so the fetch is cancelled and no orphaned callbacks fire.
+  if (options.signal) {
+    if (options.signal.aborted) {
+      submitController.abort();
+    } else {
+      options.signal.addEventListener('abort', () => submitController.abort(), { once: true });
+    }
+  }
+
   const invokePromise = supabase.functions.invoke('generate-video', {
     body: bodyJson,
     signal: submitController.signal,

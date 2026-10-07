@@ -92,7 +92,7 @@ export function resolveVideoGenSteps(progress: VideoGenProgress | null): VideoGe
     return VIDEO_GEN_STEPS.map((s) => ({ ...s, status: 'pending' as VideoGenStepStatus }));
   }
 
-  const p = progress.progress;
+  const p = Math.max(0, Math.min(1, isNaN(progress.progress) ? 0 : progress.progress));
 
   if (progress.phase === 'error') {
     return VIDEO_GEN_STEPS.map((s) => {

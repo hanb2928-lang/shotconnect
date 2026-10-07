@@ -657,6 +657,13 @@ export default function SynthesisScreen() {
       }
       await Promise.all(workers);
 
+      // Release uploaded image data from memory: the original SourceImage
+      // objects may hold large base64/data-URI strings that are no longer
+      // needed once we have the storage URLs. Clearing the pre-upload cache
+      // and replacing the image URIs with their uploaded URLs prevents the
+      // memory spike during the 8% serialization phase.
+      preUploadCacheRef.current.clear();
+
       const mainUrl = uploadedUrls[0];
       const restUrls = uploadedUrls.slice(1);
       let modelUrl: string | null = null;

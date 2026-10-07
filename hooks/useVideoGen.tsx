@@ -77,6 +77,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const genStartRef = useRef<number>(0);
   const generateLockRef = useRef(false);
   const outputModeRef = useRef<'image' | 'video'>('video');
+  const abortRef = useRef<AbortController | null>(null);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -88,6 +89,17 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }
     return () => { deactivateKeepAwake(tag).catch(() => {}); };
   }, [isGenerating]);
+
+  // Abort any in-flight submit when the provider unmounts to prevent
+  // orphaned fetch callbacks from updating state on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+    };
+  }, []);
 
   // Restore in-progress job from persistent storage on mount
   useEffect(() => {
@@ -308,11 +320,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const sp = polling.serverProgress;
     serverProgRef.current = sp;
     if (sp !== null && !isNaN(sp) && isFinite(sp) && sp > 0 && isGenerating) {
+      const clamped = Math.max(0, Math.min(0.95, sp));
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-        const serverProg = Math.min(sp, 0.95);
-        if (isNaN(serverProg) || serverProg <= prev.progress) return prev;
-        return { ...prev, progress: serverProg };
+        if (isNaN(clamped) || clamped <= prev.progress) return prev;
+        const pctLabel = ` (${Math.round(clamped * 100)}%)`;
+        return { ...prev, progress: clamped, message: `AI가 영상을 렌더링하고 있어요${pctLabel}...` };
       });
     }
   }, [polling.serverProgress, isGenerating]);
@@ -322,6 +335,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     if (isGenerating || jobIdRef.current) return;
     generateLockRef.current = true;
     outputModeRef.current = params.outputMode;
+    abortRef.current = new AbortController();
 
     setError(null);
     setIsGenerating(true);
@@ -390,6 +404,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         enableFabricPhysics: params.enableFabricPhysics,
         draft: true,
         mainImageUrl: params.mainUrl,
+        signal: abortRef.current?.signal,
       }, (p) => {
         setVideoProgress(p);
       });
@@ -430,6 +445,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   }, [isGenerating]);
 
   const clearGeneration = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     jobIdRef.current = null;
     setJobId(null);
     setIsGenerating(false);
