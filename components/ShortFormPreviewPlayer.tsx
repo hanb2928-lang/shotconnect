@@ -31,7 +31,6 @@ import {
 import { sampleLuminanceInWorker } from '@/lib/workerPool';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { getActiveCopyOverlay } from '@/lib/promptBuilder';
-import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { NativeVideoPlayer } from '@/components/NativeVideoPlayer';
 
 interface ShortFormPreviewPlayerProps {
@@ -714,9 +713,6 @@ useEffect(() => {
             </View>
           )}
 
-          {isGeneratingVideo && videoGenProgress && (
-            <VideoGenStepTracker progress={videoGenProgress} variant="overlay" />
-          )}
         </View>
       </View>
 
@@ -1010,24 +1006,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: theme.typography.fontFamily.semiBold,
     color: theme.colors.primary[300],
-    textAlign: 'center',
-  },
-  videoGenProgressBar: {
-    width: '80%',
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    overflow: 'hidden',
-  },
-  videoGenProgressFill: {
-    height: '100%',
-    borderRadius: 2,
-    backgroundColor: theme.colors.primary[400],
-  },
-  videoGenDetailText: {
-    fontSize: 8,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
     textAlign: 'center',
   },
   videoLoadingOverlay: {
