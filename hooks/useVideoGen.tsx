@@ -164,7 +164,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, [jobId]);
 
-  // Progress timer — advances progress while generating
+  // Progress timer — advances progress while generating.
+  // Combines: (a) time-based interpolation up to 90%, (b) server-reported
+  // progress from polling/Realtime, (c) a 2-second soft-creep guard so the
+  // bar never visually stalls even when the server is silent.
+  const serverProgRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isGenerating) return;
     const GEN_TIMEOUT_MS = 300_000;
@@ -173,10 +177,26 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       setVideoProgress((prev) => {
         if (!prev) return prev;
         const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
-        const nextProgress = Math.max(prev.progress, timeBasedProgress);
+        const serverProg = serverProgRef.current;
+        const baseProgress = Math.max(prev.progress, timeBasedProgress);
+        const nextProgress = serverProg !== null
+          ? Math.max(baseProgress, Math.min(serverProg, 0.95))
+          : baseProgress;
         return { ...prev, elapsedSec: elapsed, progress: nextProgress };
       });
     }, 1000);
+    // Soft-creep guard: every 2 seconds, nudge progress forward by a small
+    // amount (up to 90%) so the bar never freezes at a fixed value.
+    const creepTimer = setInterval(() => {
+      setVideoProgress((prev) => {
+        if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+        if (prev.progress >= 0.9) return prev;
+        const serverProg = serverProgRef.current;
+        const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, 0.9) : 0.9;
+        const nudge = prev.progress + 0.008;
+        return { ...prev, progress: Math.min(nudge, ceiling) };
+      });
+    }, 2000);
     const timeout = setTimeout(() => {
       jobIdRef.current = null;
       setJobId(null);
@@ -186,6 +206,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }, GEN_TIMEOUT_MS);
     return () => {
       clearInterval(timer);
+      clearInterval(creepTimer);
       clearTimeout(timeout);
     };
   }, [isGenerating]);
@@ -199,6 +220,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       setIsGenerating(false);
       clearActiveVideoJob();
       setVideoProgress((prev) => prev ? { ...prev, phase: 'completed', progress: 1.0, message: '영상 생성 완료' } : null);
+      serverProgRef.current = 1.0;
       if (outputModeRef.current === 'image') {
         setResultImageUrl(videoUrl);
       } else {
@@ -212,10 +234,25 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       setIsGenerating(false);
       clearActiveVideoJob();
       setVideoProgress((prev) => prev ? { ...prev, phase: 'error', progress: 0, message: errMsg } : null);
+      serverProgRef.current = null;
       logError(new Error(errMsg), { component: 'VideoGenProvider', action: 'polling.onError' });
       setError(friendlyError(new Error(errMsg), errMsg));
     },
   });
+
+  // Sync server-reported progress from polling into a ref + state so the
+  // progress timer can merge it into videoProgress.progress.
+  useEffect(() => {
+    serverProgRef.current = polling.serverProgress;
+    if (polling.serverProgress !== null && isGenerating) {
+      setVideoProgress((prev) => {
+        if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+        const serverProg = Math.min(polling.serverProgress!, 0.95);
+        if (serverProg <= prev.progress) return prev;
+        return { ...prev, progress: serverProg };
+      });
+    }
+  }, [polling.serverProgress, isGenerating]);
 
   const startGeneration = useCallback(async (params: StartGenerationParams) => {
     if (generateLockRef.current) return;

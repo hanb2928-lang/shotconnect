@@ -40,6 +40,7 @@ export function useResultPolling(
 
   const [jobState, setJobState] = useState<JobState>('idle');
   const [progressMessage, setProgressMessage] = useState<string>('');
+  const [serverProgress, setServerProgress] = useState<number | null>(null);
   const [isTimeout, setIsTimeout] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,6 +77,7 @@ export function useResultPolling(
     settledRef.current = false;
     setJobState('polling');
     setProgressMessage('영상 생성 상태를 확인하는 중...');
+    setServerProgress(null);
     setError(null);
     setIsTimeout(false);
 
@@ -117,6 +119,7 @@ export function useResultPolling(
                 const elapsedSec = Math.round((Date.now() - startTime) / 1000);
                 const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
                 setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
+                setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
               }
             }
           },
@@ -225,8 +228,15 @@ export function useResultPolling(
             return;
           } else {
             const rawProgress = pollData.progress ? parseFloat(pollData.progress) : NaN;
-            const pctLabel = !isNaN(rawProgress) ? ` (${Math.round(rawProgress * 100)}%)` : '';
+            const stepProg = stepToProgress(pollData.step as string | undefined);
+            const bestProgress = !isNaN(rawProgress) ? rawProgress : stepProg;
+            const pctLabel = bestProgress !== null && !isNaN(bestProgress as number)
+              ? ` (${Math.round((bestProgress as number) * 100)}%)`
+              : '';
             setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
+            if (bestProgress !== null && !isNaN(bestProgress as number)) {
+              setServerProgress((prev) => Math.max(prev ?? 0, bestProgress as number));
+            }
           }
         }
       } catch {
@@ -336,5 +346,5 @@ export function useResultPolling(
     };
   }, [jobId, scanId, settle]);
 
-  return { jobState, progressMessage, isTimeout, error };
+  return { jobState, progressMessage, serverProgress, isTimeout, error };
 }
