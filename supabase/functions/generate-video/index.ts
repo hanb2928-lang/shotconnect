@@ -1479,6 +1479,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "아직도 이거 모르는 사람 있음?",
     "이거 알면 삶이 바뀜 각",
     "나만 몰랐던 거 실화냐?",
+    "잠깐 이거 봤어? 장난아닌데 진짜",
+    "이거 모르면 평생 손해인 거 맞음",
   ],
   problem: [
     "이거 모르면 호구 되는 거 맞음",
@@ -1487,6 +1489,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "이거 안 사면 후회하는 거 맞다",
     "이걸 몰라서 그동안 낭비한 거",
     "솔직히 광고 아님 이거 진심임",
+    "알면서 안 사는 사람 특: 내년에도 이 고생 반복",
+    "이거 모르면 매달 돈 날리는 거임",
   ],
   transformation: [
     "이랬는데 → 이렇게 됨 충격",
@@ -1495,6 +1499,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "before after 차이 실화냐?",
     "이거 하나로 종결된 거 맞음",
     "이거 쓰면 뭐 다 필요없음 진짜",
+    "택배 뜯자마자 소리 지름 진짜임",
+    "이거 쓰고 나서 전에 쓰던 거 다 버림",
   ],
   social_proof: [
     "실시간 품절 캡처 봐 진짜임",
@@ -1503,6 +1509,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "이거 사고 난 후기 다 똑같음",
     "옆에서 본 애가 사서 나도 샀음",
     "이거 사신 분들 진짜 다 만족함",
+    "나만 몰랐던 치트키 실화냐",
+    "재구매율 89% 리뷰 12,847개 별점 4.8 진짜임",
   ],
   fomo: [
     "품절 전에 확인하셈 진짜 급함",
@@ -1511,6 +1519,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "이거 곧 품절될 거 같아서 급하게 올림",
     "나중에 사려다가 못 사는 거 각",
     "이거 지금 아니면 없다 진짜로",
+    "고민하는 사이 품절됨 ㅋㅋ 진짜임",
+    "이거 지금 안 사면 나중에 2배로 줌",
   ],
   loss_aversion: [
     "이거 안 사면 손해인 거 맞음",
@@ -1519,6 +1529,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "이거 모르면 돈 계속 날림",
     "이거 없으면 손해 보는 거 맞다",
     "안 사면 손해 보는 거 실화임",
+    "이거 안 쓰면 매달 돈 날리는 거임",
+    "이거 모르면 평생 돈 버리는 겁니다",
   ],
   raw_honesty: [
     "솔직히 광고 아님 이거 진심",
@@ -1527,6 +1539,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "이거 쓰고 진심으로 감동함",
     "이거 리뷰 진짜 솔직하게 함",
     "광고 아니라 진짜 추천하는 거",
+    "광고 아님 택배 뜯자마자 소리 지름",
+    "이거 진짜라서 협찬 아니면 안 올림",
   ],
   trend_exclusion: [
     "나만 몰랐던 거 실화인가",
@@ -1535,6 +1549,8 @@ const HOOK_TEXTS: Record<string, string[]> = {
     "요즘 다 이거 쓰던데 나만 몰랐음",
     "이거 안 하면 혼자만 뒤처지는 거",
     "친구들이 다 아는데 나만 몰랐음",
+    "나만 빼고 다 쓰고 있네 진짜",
+    "이거 모르면 SNS에서 왕따 되는 거",
   ],
 };
 
@@ -2000,7 +2016,9 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   for (const mt of modeTokens) tokens.push(mt);
   if (negTag) tokens.push(negTag);
 
-  tokens.push("3phase:hook(loss_aversion+raw_honesty)→contrast(before_after)→cta(urgency), scroll-stopping first 1 second, raw unboxing vibe, smartphone aesthetic, no polished production");
+  tokens.push("3phase_conversion:phase1(0-2s HARD HOOK — loss_aversion OR raw_honesty OR social_proof, scroll-stopping jarring visual, B-grade meme energy, zero corporate tone, before-after contrast or shocking confession), phase2(2-7s PROBLEM AGITATION — pain point sniping, relatable frustration, fast cuts synced to beat, raw handheld aesthetic), phase3(7-end CTA LOOP — insider tip framing not corporate command, urgency without desperation, first-last frame matched for infinite loop replay)");
+  tokens.push("trigger_mandate:at least ONE of [loss_aversion('이거 모르면 돈 버림'), raw_honesty('광고 아님 진짜임'), social_proof('나만 몰랐던 치트키')] must dominate first 2 seconds");
+  tokens.push("banned:corporate jargon, '놓치면 후회', '강력 추천', '혁신적인', '최고의', '완벽한', polished studio tone, spec listing, excessive exclamation, mechanical '~하세요' CTA — use native Korean colloquial meme speech only");
   tokens.push(`tier=${p.qualityTier}, res=${p.resolution}, fps=${p.fps}`);
 
   return safeSlice(tokens.join(" "), 1000);
