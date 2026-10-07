@@ -48,8 +48,27 @@ const RENDERING_MESSAGES = [
 export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenStepTrackerProps) {
   const steps = resolveVideoGenSteps(progress);
   const activeIdx = getCurrentStepIndex(progress);
-  const progressPercent = Math.max(0, Math.min(100, Math.round((progress?.progress ?? 0) * 100) || 0));
+  const rawProgress = Number(progress?.progress ?? 0);
+  const progressPercent = Math.max(0, Math.min(100, Math.round((isNaN(rawProgress) ? 0 : rawProgress) * 100) || 0));
   const [activityMsg, setActivityMsg] = useState('');
+  const [forceMinPercent, setForceMinPercent] = useState(0);
+
+  // Soft progress guard: every 3 seconds, force the displayed percentage up
+  // by at least 2 points so the bar never visually freezes. Only nudges —
+  // never overrides a higher real value. Caps at 90%.
+  const isRendering = activeIdx >= 0 && progress?.phase !== 'completed' && progress?.phase !== 'error';
+  useEffect(() => {
+    if (!isRendering) {
+      setForceMinPercent(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setForceMinPercent((prev) => Math.min(prev + 2, 90));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [isRendering]);
+
+  const displayPercent = Math.max(progressPercent, forceMinPercent);
 
   const pulseSV = useSharedValue(0);
   const prevActiveRef = useRef(-1);
@@ -86,7 +105,6 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   }, [pulseSV]);
 
   // Rotating activity messages during rendering to reduce perceived wait.
-  const isRendering = activeIdx >= 0 && progress?.phase !== 'completed' && progress?.phase !== 'error';
   useEffect(() => {
     if (!isRendering) {
       setActivityMsg('');
@@ -117,7 +135,7 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
         <Text style={styles.titleText}>
           {isCompleted ? '영상 생성 완료' : isError ? '생성 실패' : 'AI 영상 생성 진행 중'}
         </Text>
-        <Text style={styles.percentText}>{progressPercent}%</Text>
+        <Text style={styles.percentText}>{displayPercent}%</Text>
       </View>
 
       <View style={styles.progressBarTrack}>
@@ -125,7 +143,7 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
           style={[
             styles.progressBarFill,
             {
-              width: `${progressPercent}%`,
+              width: `${displayPercent}%`,
               backgroundColor: isError
                 ? theme.colors.error[400]
                 : isCompleted

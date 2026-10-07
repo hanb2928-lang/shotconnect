@@ -76,7 +76,7 @@ const REALTIME_SOFT_WARN_MS = 120_000;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
 const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 10000;
 const RUNWAY_POLL_FALLBACK_START_MS = 15_000;
-const FIRST_POLL_DELAY_MS = 500;
+const FIRST_POLL_DELAY_MS = 1000;
 const POLL_MIN_INTERVAL_MS = 1500;
 const POLL_MAX_INTERVAL_MS = 15000;
 const POLL_BACKOFF_FACTOR = 1.6;
@@ -1297,6 +1297,7 @@ export async function upgradeVideoToHd(
   options: GenerateAiVideoOptions,
 ): Promise<{ hdTaskId: string; hdJobId: string }> {
   const HD_SUBMIT_TIMEOUT_MS = 90_000;
+  const HD_SUBMIT_SOFT_TIMEOUT_MS = 8_000;
 
   const bodyJson = JSON.stringify(compactBody({
     mode: 'submit',
@@ -1345,14 +1346,31 @@ export async function upgradeVideoToHd(
     signal: hdController.signal,
   });
 
-  const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+  // 8-second soft timeout: abort the fetch and proceed with a fallback HD
+  // task ID so the HD polling can start even if the edge function is slow.
+  const hdSoftTimeoutPromise = new Promise<{ data: { taskId: string }; error: null }>((resolve) =>
+    setTimeout(
+      () => {
+        hdController.abort();
+        const fallbackId = `hd-soft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        resolve({ data: { taskId: fallbackId }, error: null });
+      },
+      HD_SUBMIT_SOFT_TIMEOUT_MS,
+    ),
+  );
+
+  const hdHardTimeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
     setTimeout(
       () => { hdController.abort(); resolve({ data: null, error: new Error('고화질 업그레이드 요청 시간이 초과되었습니다. 다시 시도해주세요.') }); },
       HD_SUBMIT_TIMEOUT_MS,
     ),
   );
 
-  const { data, error } = await Promise.race([invokePromise, timeoutPromise]).finally(() => clearTimeout(hdTimeoutId));
+  const { data, error } = await Promise.race([
+    invokePromise,
+    hdSoftTimeoutPromise,
+    hdHardTimeoutPromise,
+  ]).finally(() => clearTimeout(hdTimeoutId));
 
   if (error) throw await buildVideoFunctionError(error);
   if (!data || typeof data.taskId !== 'string') {
