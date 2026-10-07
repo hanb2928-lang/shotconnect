@@ -338,8 +338,14 @@ export async function generateAiVideo(
   let lastSubmitErr: Error | null = null;
 
   for (let attempt = 0; attempt <= SUBMIT_MAX_RETRIES; attempt++) {
+    let softNudge: ReturnType<typeof setTimeout> | null = null;
     try {
       if (attempt === 0) await yieldToUI();
+      // Soft timeout: nudge progress forward after 10s so the UI doesn't
+      // appear frozen at 5-8% while the server is still processing.
+      softNudge = setTimeout(() => {
+        report('submitting', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
+      }, 10_000);
       const result = await invokeWithNetworkRetry(
         'generate-video',
         compactBody({
@@ -382,6 +388,7 @@ export async function generateAiVideo(
         0,
         (retryAttempt) => report('submitting', 0.05 + retryAttempt * 0.02, `네트워크 복구 후 재시도 중 (${retryAttempt}/${SUBMIT_MAX_RETRIES})...`),
       );
+      clearTimeout(softNudge);
 
       const data = result.data as { taskId?: string; motionPrompt?: string; durationSec?: number; aspectRatio?: string; variationSeed?: number } | null;
 
@@ -398,6 +405,7 @@ export async function generateAiVideo(
       };
       break;
     } catch (err) {
+      if (softNudge) clearTimeout(softNudge);
       lastSubmitErr = err instanceof Error ? err : new Error(String(err));
       if (attempt < SUBMIT_MAX_RETRIES) {
         if (!isOnline()) {
@@ -1025,17 +1033,16 @@ export async function submitVideoJobAsync(
 
   // Soft timeout: after 10s, nudge progress forward so the UI doesn't
   // appear frozen at 8% while the server is still processing the submit.
-  const softTimeoutPromise = new Promise<{ data: null; error: null }>((resolve) => {
-    setTimeout(() => {
-      report('submitting', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
-      resolve({ data: null, error: null });
-    }, SUBMIT_SOFT_TIMEOUT_MS);
-  });
+  // This is fire-and-forget — it only calls report() to advance the UI.
+  // It does NOT participate in the Promise.race, so it cannot accidentally
+  // resolve the submit with null data and cause a premature failure.
+  setTimeout(() => {
+    report('submitting', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
+  }, SUBMIT_SOFT_TIMEOUT_MS);
 
   const { data, error } = await Promise.race([
     invokePromise,
     timeoutPromise,
-    softTimeoutPromise.then(() => invokePromise),
   ]).finally(() => clearTimeout(submitTimeoutId));
 
   if (error) throw await buildVideoFunctionError(error);
