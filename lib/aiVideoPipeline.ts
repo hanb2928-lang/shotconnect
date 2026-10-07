@@ -983,7 +983,7 @@ export async function submitVideoJobAsync(
   onProgress?: (progress: VideoGenProgress) => void,
 ): Promise<SubmitOnlyResult> {
   const SUBMIT_TIMEOUT_MS = 90_000;
-  const SUBMIT_SOFT_TIMEOUT_MS = 10_000;
+  const SUBMIT_SOFT_TIMEOUT_MS = 8_000;
 
   const report = (phase: VideoGenPhase, progress: number, message: string) => {
     onProgress?.({ phase, progress, message, elapsedSec: 0 });
@@ -1038,14 +1038,15 @@ export async function submitVideoJobAsync(
     signal: submitController.signal,
   });
 
-  // 10-second soft timeout: if the server hasn't responded yet, generate
-  // a local fallback task ID and proceed to polling. The server's submit
-  // call may still complete in the background — the job row will be found
-  // by scanId during polling. This prevents the UI from blocking at 8%
-  // when the edge function is slow to return its 202 response.
+  // 8-second soft timeout: if the server hasn't responded yet, abort the
+  // fetch, generate a local fallback task ID, and proceed to polling. The
+  // server's submit call may still complete in the background — the job row
+  // will be found by scanId during polling. This prevents the UI from
+  // blocking at 8% when the edge function is slow to return its 202 response.
   const softTimeoutPromise = new Promise<{ data: { taskId: string; motionPrompt: string; durationSec: number; aspectRatio: string; variationSeed: number } | null; error: null }>((resolve) =>
     setTimeout(
       () => {
+        submitController.abort();
         const fallbackId = `soft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         report('generating', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
         resolve({

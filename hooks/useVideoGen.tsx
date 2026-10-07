@@ -195,6 +195,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const GEN_TIMEOUT_MS = 300_000;
     let timer: ReturnType<typeof setInterval> | null = null;
     let creepTimer: ReturnType<typeof setInterval> | null = null;
+    let hardGuardTimer: ReturnType<typeof setInterval> | null = null;
 
     const startTimers = () => {
       if (timer || creepTimer) return;
@@ -225,9 +226,27 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const stopTimers = () => {
       if (timer) { clearInterval(timer); timer = null; }
       if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
+      if (hardGuardTimer) { clearInterval(hardGuardTimer); hardGuardTimer = null; }
     };
 
     startTimers();
+
+    // Hard progression guard: every 10 seconds, force progress forward by
+    // 10% (up to 90%) so the bar can never freeze at a fixed value even
+    // when the server is completely silent. This runs independently of the
+    // soft-creep timer and does not pause — it only nudges, never overrides
+    // a higher server-reported value.
+    hardGuardTimer = setInterval(() => {
+      setVideoProgress((prev) => {
+        if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+        if (prev.phase !== 'generating') return prev;
+        if (prev.progress >= 0.9) return prev;
+        const forced = Math.min(prev.progress + 0.10, 0.9);
+        const serverProg = serverProgRef.current;
+        if (serverProg !== null && serverProg > forced) return prev;
+        return { ...prev, progress: forced };
+      });
+    }, 10_000);
 
     const timeout = setTimeout(() => {
       jobIdRef.current = null;
