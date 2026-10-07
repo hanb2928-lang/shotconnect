@@ -15,7 +15,6 @@ import { hashObject } from '@/lib/contentHash';
 import { cleanBase64 } from '@/lib/base64';
 import { getOpenAiVoiceParams } from '@/lib/ttsVoices';
 import { sanitizeEncodedText } from '@/lib/textSanitizer';
-import { nativeHeapCooldownGuard } from '@/lib/imageEdit';
 import { waitForFileChannelFlush } from '@/lib/smartResize';
 import { isUploadCircuitOpen, recordUploadSuccess, recordUploadFailure } from '@/lib/uploadCircuitBreaker';
 import { logUploadStart, logUploadEvent } from '@/lib/uploadDebugLogger';
@@ -41,7 +40,8 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 const UPLOAD_TIMEOUT_MS = 60_000;
 const COMPRESS_TIMEOUT_MS = 20_000;
 const UPLOAD_RETRY_MAX = 3;
-const UPLOAD_RETRY_BASE_MS = 1000;
+const UPLOAD_RETRY_BASE_MS = 500;
+const MULTI_IMAGE_CONCURRENCY = 2;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -49,6 +49,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
     timer = setTimeout(() => reject(new Error(`${label} (시간 초과)`)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
 }
 
 function withUploadTimeout<T>(
@@ -597,22 +616,24 @@ export async function analyzeMultiShot(
   base64Images: string[],
   fileName: string,
 ): Promise<AnalysisResult> {
-  // Stream each image through compress→upload→release so only one
-  // image's base64 is live at a time, preventing heap OOM on mobile.
-  const imageHashes: string[] = [];
-  const imageUrls: string[] = [];
   const srcCopy = [...base64Images];
 
-  for (let i = 0; i < srcCopy.length; i++) {
-    const dataUrl = buildDataUrl(srcCopy[i], 'image/jpeg');
-    srcCopy[i] = ''; // release source string for GC
-    const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
-    const b64 = cleanBase64(compressed.dataUrl);
-    imageHashes.push(hashObject({ b64 }).slice(0, 16));
-    const url = await uploadWithRetry(b64, compressed.mimeType, undefined, true);
-    imageUrls.push(url);
-    if (i < srcCopy.length - 1) await nativeHeapCooldownGuard();
-  }
+  const { imageHashes, imageUrls } = await mapWithConcurrency(
+    srcCopy.map((b64, i) => ({ b64, i })),
+    MULTI_IMAGE_CONCURRENCY,
+    async ({ b64, i }) => {
+      srcCopy[i] = '';
+      const dataUrl = buildDataUrl(b64, 'image/jpeg');
+      const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
+      const b64Clean = cleanBase64(compressed.dataUrl);
+      const hash = hashObject({ b64: b64Clean }).slice(0, 16);
+      const url = await uploadWithRetry(b64Clean, compressed.mimeType, undefined, true);
+      return { hash, url };
+    },
+  ).then((results) => ({
+    imageHashes: results.map((r) => r.hash),
+    imageUrls: results.map((r) => r.url),
+  }));
 
   const cacheInput = {
     task: 'multi-shot',
@@ -1103,23 +1124,25 @@ export async function analyzeMultiShotQueued(
   fileName: string,
   signal?: AbortSignal,
 ): Promise<AnalysisResult> {
-  // Stream each image through compress→upload→release to avoid holding
-  // all compressed data URLs in memory simultaneously (heap OOM on mobile).
-  const imageHashes: string[] = [];
-  const imageUrls: string[] = [];
   const srcCopy = [...base64Images];
 
-  for (let i = 0; i < srcCopy.length; i++) {
-    if (signal?.aborted) throw new Error('다각도 분석이 취소되었습니다.');
-    const dataUrl = buildDataUrl(srcCopy[i], 'image/jpeg');
-    srcCopy[i] = ''; // release source string for GC
-    const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
-    const b64 = cleanBase64(compressed.dataUrl);
-    imageHashes.push(hashObject({ b64 }).slice(0, 16));
-    const url = await uploadWithRetry(b64, compressed.mimeType, signal);
-    imageUrls.push(url);
-    if (i < srcCopy.length - 1) await nativeHeapCooldownGuard();
-  }
+  const { imageHashes, imageUrls } = await mapWithConcurrency(
+    srcCopy.map((b64, i) => ({ b64, i })),
+    MULTI_IMAGE_CONCURRENCY,
+    async ({ b64, i }) => {
+      if (signal?.aborted) throw new Error('다각도 분석이 취소되었습니다.');
+      srcCopy[i] = '';
+      const dataUrl = buildDataUrl(b64, 'image/jpeg');
+      const compressed = await withTimeout(compressForEdgeFunction(dataUrl), COMPRESS_TIMEOUT_MS, `이미지 압축 (${i + 1}/${srcCopy.length})`);
+      const b64Clean = cleanBase64(compressed.dataUrl);
+      const hash = hashObject({ b64: b64Clean }).slice(0, 16);
+      const url = await uploadWithRetry(b64Clean, compressed.mimeType, signal);
+      return { hash, url };
+    },
+  ).then((results) => ({
+    imageHashes: results.map((r) => r.hash),
+    imageUrls: results.map((r) => r.url),
+  }));
 
   const cacheInput = {
     task: 'multi-shot-queued',
