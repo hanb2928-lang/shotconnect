@@ -188,7 +188,7 @@ Deno.serve(async (req: Request) => {
     const mode = body.mode ?? "submit";
 
     // Validate required fields per mode
-    const validModes = ["submit", "poll", "server-poll", "webhook", "runway-submit"];
+    const validModes = ["submit", "poll", "server-poll", "webhook", "runway-submit", "warmup"];
     if (!validModes.includes(mode)) {
       return new Response(
         JSON.stringify({ error: `지원하지 않는 모드입니다: ${mode}`, step: "validation", provider: "unknown" }),
@@ -196,9 +196,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    if (mode === "warmup") {
+      return new Response(
+        JSON.stringify({ status: "warm", message: "Edge function ready" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     if (mode === "submit") {
       // At least one of prompt, scanId, productName, or productVision must be present
       const hasAnyContext = body.prompt || body.scanId || body.productName || body.productVision;
+      // warmup mode already returned above; submit requires context
       if (!hasAnyContext) {
         return new Response(
           JSON.stringify({ error: "prompt, scanId, productName 중 하나 이상은 필수입니다.", step: "validation", provider: "unknown" }),

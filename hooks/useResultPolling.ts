@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
+import { stepToProgress } from '@/lib/videoGenSteps';
 
 export type JobState = 'idle' | 'polling' | 'completed' | 'failed' | 'timeout';
 
@@ -85,8 +86,45 @@ export function useResultPolling(
     let softWarnTimer: ReturnType<typeof setTimeout> | null = null;
     let pollAbort: AbortController | null = null;
     let forceSyncAbort: AbortController | null = null;
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
     const pollErrorWindow: number[] = [];
     let pollAttempt = 0;
+
+    // Primary trigger: Realtime websocket push on video_jobs row update.
+    // This fires the instant the server writes a terminal status, giving
+    // millisecond-level completion detection without waiting for the next poll.
+    try {
+      realtimeChannel = supabase
+        .channel(`job-poll-${jobId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'video_jobs',
+            filter: `task_id=eq.${jobId}`,
+          },
+          (payload) => {
+            if (cancelled || settledRef.current) return;
+            const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null };
+            if (row.status === 'SUCCESS' && row.video_url) {
+              handleResult(row.status, row.video_url);
+            } else if (row.status === 'FAILED') {
+              handleResult(row.status, null, row.error_message ?? undefined);
+            } else {
+              const stepProg = stepToProgress(row.step);
+              if (stepProg !== null) {
+                const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+                const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
+                setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
+              }
+            }
+          },
+        )
+        .subscribe();
+    } catch {
+      // Realtime unavailable — polling still works as fallback
+    }
 
     const cleanup = () => {
       cancelled = true;
@@ -94,6 +132,9 @@ export function useResultPolling(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+      if (realtimeChannel) {
+        try { supabase.removeChannel(realtimeChannel); } catch { /* ignore */ }
+      }
       pollAbort?.abort();
       forceSyncAbort?.abort();
     };

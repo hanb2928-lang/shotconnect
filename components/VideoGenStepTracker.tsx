@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -34,13 +34,26 @@ const STEP_ICONS: Record<string, string> = {
   finalize: '✨',
 };
 
+const RENDERING_MESSAGES = [
+  '시선 강탈 훅 조합 중...',
+  'AI가 감성 시퀀스 렌더링 중...',
+  '최적의 컷 전환 타이밍 계산 중...',
+  '자막 싱크 맞추는 중...',
+  'BGM과 영상 리듬 동기화 중...',
+  '화면 전환 효과 적용 중...',
+  '색감 보정 및 그레이딩 중...',
+  '마지막 프레임 합성 중...',
+];
+
 export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenStepTrackerProps) {
   const steps = resolveVideoGenSteps(progress);
   const activeIdx = getCurrentStepIndex(progress);
   const progressPercent = Math.round((progress?.progress ?? 0) * 100);
+  const [activityMsg, setActivityMsg] = useState('');
 
   const pulseSV = useSharedValue(0);
   const prevActiveRef = useRef(-1);
+  const msgIdxRef = useRef(0);
 
   useEffect(() => {
     if (activeIdx !== prevActiveRef.current) {
@@ -71,6 +84,22 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   useEffect(() => {
     return () => { cancelAnimation(pulseSV); };
   }, [pulseSV]);
+
+  // Rotating activity messages during rendering to reduce perceived wait.
+  const isRendering = activeIdx >= 0 && progress?.phase !== 'completed' && progress?.phase !== 'error';
+  useEffect(() => {
+    if (!isRendering) {
+      setActivityMsg('');
+      return;
+    }
+    msgIdxRef.current = 0;
+    setActivityMsg(RENDERING_MESSAGES[0]);
+    const interval = setInterval(() => {
+      msgIdxRef.current = (msgIdxRef.current + 1) % RENDERING_MESSAGES.length;
+      setActivityMsg(RENDERING_MESSAGES[msgIdxRef.current]);
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [isRendering]);
 
   const activePulseStyle = useAnimatedStyle(() => ({
     opacity: interpolate(pulseSV.value, [0, 1], [0, 0.6]),
@@ -110,6 +139,12 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
       {isOverlay && steps[activeIdx] && !isCompleted && !isError && (
         <Text style={styles.currentStepText} numberOfLines={2}>
           {steps[activeIdx].label} — {steps[activeIdx].description}
+        </Text>
+      )}
+
+      {activityMsg && !isCompleted && !isError && (
+        <Text style={styles.activityText} numberOfLines={1}>
+          {activityMsg}
         </Text>
       )}
 
@@ -306,5 +341,12 @@ const styles = StyleSheet.create({
     fontFamily: theme.typography.fontFamily.regular,
     color: 'rgba(255,255,255,0.35)',
     textAlign: 'center',
+  },
+  activityText: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.primary[300] + 'CC',
+    lineHeight: 14,
+    marginTop: 2,
   },
 });

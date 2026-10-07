@@ -358,6 +358,8 @@ export default function SynthesisScreen() {
   const genStartRef = useRef<number>(0);
   const progressMsgRef = useRef<string>('');
   const mountedRef = useRef(true);
+  const preUploadCacheRef = useRef<Map<string, string>>(new Map());
+  const preUploadInFlightRef = useRef<Set<string>>(new Set());
   const { saveDraftState, loadDraft, clearDraftId } = useDraftAutoSave('synthesis');
   const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
   const params = useLocalSearchParams<{ draftId?: string }>();
@@ -392,6 +394,40 @@ export default function SynthesisScreen() {
   useEffect(() => {
     return () => { mountedRef.current = false; };
   }, []);
+
+  // Warm-up the generate-video edge function on screen mount to avoid cold-start delay.
+  useEffect(() => {
+    supabase.functions.invoke('generate-video', { body: { mode: 'warmup' } }).catch(() => {});
+  }, []);
+
+  // Pre-upload: start uploading images to storage as soon as they're added,
+  // so the generate button doesn't wait. Results are cached by source URI.
+  useEffect(() => {
+    if (!isOnline()) return;
+    const allImages: SourceImage[] = [
+      ...productImages,
+      ...(modelImage ? [modelImage] : []),
+    ];
+    for (const img of allImages) {
+      const uri = img.uri;
+      if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        preUploadCacheRef.current.set(uri, uri);
+        continue;
+      }
+      if (preUploadCacheRef.current.has(uri) || preUploadInFlightRef.current.has(uri)) continue;
+      preUploadInFlightRef.current.add(uri);
+      uploadImageToStorage(uri)
+        .then((url) => {
+          if (mountedRef.current) preUploadCacheRef.current.set(uri, url);
+        })
+        .catch(() => {
+          // Silent failure — handleGenerate will retry the upload
+        })
+        .finally(() => {
+          preUploadInFlightRef.current.delete(uri);
+        });
+    }
+  }, [productImages, modelImage]);
 
   const productInputRef = useRef<HTMLInputElement | null>(null);
   const modelInputRef = useRef<HTMLInputElement | null>(null);
@@ -702,6 +738,8 @@ export default function SynthesisScreen() {
 
       const uploadSingle = async (img: SourceImage): Promise<string> => {
         if (img.uri.startsWith('http://') || img.uri.startsWith('https://')) return img.uri;
+        const cached = preUploadCacheRef.current.get(img.uri);
+        if (cached) return cached;
         return uploadImageToStorage(img.uri);
       };
 
