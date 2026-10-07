@@ -48,7 +48,7 @@ const RENDERING_MESSAGES = [
 export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenStepTrackerProps) {
   const steps = resolveVideoGenSteps(progress);
   const activeIdx = getCurrentStepIndex(progress);
-  const progressPercent = Math.round((progress?.progress ?? 0) * 100);
+  const progressPercent = Math.max(0, Math.min(100, Math.round((progress?.progress ?? 0) * 100) || 0));
   const [activityMsg, setActivityMsg] = useState('');
 
   const pulseSV = useSharedValue(0);

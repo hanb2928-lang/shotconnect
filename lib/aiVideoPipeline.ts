@@ -1038,25 +1038,42 @@ export async function submitVideoJobAsync(
     signal: submitController.signal,
   });
 
-  const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+  // 10-second soft timeout: if the server hasn't responded yet, generate
+  // a local fallback task ID and proceed to polling. The server's submit
+  // call may still complete in the background — the job row will be found
+  // by scanId during polling. This prevents the UI from blocking at 8%
+  // when the edge function is slow to return its 202 response.
+  const softTimeoutPromise = new Promise<{ data: { taskId: string; motionPrompt: string; durationSec: number; aspectRatio: string; variationSeed: number } | null; error: null }>((resolve) =>
+    setTimeout(
+      () => {
+        const fallbackId = `soft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        report('generating', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
+        resolve({
+          data: {
+            taskId: fallbackId,
+            motionPrompt: '',
+            durationSec: options.durationSec ?? 5,
+            aspectRatio: options.aspectRatio ?? '9:16',
+            variationSeed: options.variationSeed ?? 0,
+          },
+          error: null,
+        });
+      },
+      SUBMIT_SOFT_TIMEOUT_MS,
+    ),
+  );
+
+  const hardTimeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
     setTimeout(
       () => { submitController.abort(); resolve({ data: null, error: new Error('영상 생성 요청 시간이 초과되었습니다. 다시 시도해주세요.') }); },
       SUBMIT_TIMEOUT_MS,
     ),
   );
 
-  // Soft timeout: after 10s, nudge progress forward so the UI doesn't
-  // appear frozen at 8% while the server is still processing the submit.
-  // This is fire-and-forget — it only calls report() to advance the UI.
-  // It does NOT participate in the Promise.race, so it cannot accidentally
-  // resolve the submit with null data and cause a premature failure.
-  setTimeout(() => {
-    report('submitting', 0.10, 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...');
-  }, SUBMIT_SOFT_TIMEOUT_MS);
-
   const { data, error } = await Promise.race([
     invokePromise,
-    timeoutPromise,
+    softTimeoutPromise,
+    hardTimeoutPromise,
   ]).finally(() => clearTimeout(submitTimeoutId));
 
   if (error) throw await buildVideoFunctionError(error);

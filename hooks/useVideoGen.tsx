@@ -8,13 +8,14 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import { supabase } from '@/lib/supabase';
+import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
 import { useResultPolling } from '@/hooks/useResultPolling';
 import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/lib/videoJobPersistence';
 import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
+import { stepToProgress } from '@/lib/videoGenSteps';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 export type GenPhase = 'idle' | 'submitting' | 'generating' | 'completed' | 'error';
@@ -125,40 +126,59 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!jobId) return;
     const handleAppState = (nextState: AppStateStatus) => {
-      if (nextState !== 'active') return;
-      (async () => {
-        try {
-          const { data, error: dbError } = await supabase
-            .from('video_jobs')
-            .select('status, video_url, error_message')
-            .eq('id', jobId)
-            .maybeSingle();
-          if (dbError || !data) return;
-          const row = data as { status: string; video_url: string | null; error_message: string | null };
-          if (row.status === 'SUCCESS' && row.video_url) {
-            clearActiveVideoJob();
-            jobIdRef.current = null;
-            setJobId(null);
-            setIsGenerating(false);
-            if (outputModeRef.current === 'image') {
-              setResultImageUrl(row.video_url);
+      if (nextState === 'active') {
+        // Foreground return: resync job status from DB. Use task_id (not id)
+        // since jobId is the Runway/internal task identifier.
+        (async () => {
+          try {
+            await ensureFreshSession();
+            const { data, error: dbError } = await supabase
+              .from('video_jobs')
+              .select('status, video_url, error_message, step')
+              .eq('task_id', jobId)
+              .maybeSingle();
+            if (dbError || !data) return;
+            const row = data as { status: string; video_url: string | null; error_message: string | null; step: string | null };
+            if (row.status === 'SUCCESS' && row.video_url) {
+              clearActiveVideoJob();
+              jobIdRef.current = null;
+              setJobId(null);
+              setIsGenerating(false);
+              if (outputModeRef.current === 'image') {
+                setResultImageUrl(row.video_url);
+              } else {
+                setResultVideoUrl(row.video_url);
+              }
+              serverProgRef.current = 1.0;
+              setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+              notifyVideoCompleted();
+            } else if (row.status === 'FAILED') {
+              clearActiveVideoJob();
+              jobIdRef.current = null;
+              setJobId(null);
+              setIsGenerating(false);
+              setVideoProgress(null);
+              serverProgRef.current = null;
+              setError(row.error_message ?? '영상 생성에 실패했습니다.');
             } else {
-              setResultVideoUrl(row.video_url);
+              // Still in progress — nudge progress forward to show the UI is alive
+              const stepProg = stepToProgress(row.step);
+              if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
+                serverProgRef.current = stepProg;
+              }
+              setVideoProgress((prev) => {
+                if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+                const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
+                const timeProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
+                const merged = Math.max(prev.progress, timeProgress, stepProg ?? 0);
+                return { ...prev, elapsedSec: elapsed, progress: Math.min(merged, 0.95) };
+              });
             }
-            setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-            notifyVideoCompleted();
-          } else if (row.status === 'FAILED') {
-            clearActiveVideoJob();
-            jobIdRef.current = null;
-            setJobId(null);
-            setIsGenerating(false);
-            setVideoProgress(null);
-            setError(row.error_message ?? '영상 생성에 실패했습니다.');
+          } catch {
+            // ignore — polling will catch up
           }
-        } catch {
-          // ignore — polling will catch up
-        }
-      })();
+        })();
+      }
     };
     const sub = AppState.addEventListener('change', handleAppState);
     return () => sub.remove();
@@ -168,35 +188,47 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   // Combines: (a) time-based interpolation up to 90%, (b) server-reported
   // progress from polling/Realtime, (c) a 2-second soft-creep guard so the
   // bar never visually stalls even when the server is silent.
+  // Pauses during background to avoid wasted renders and progress jumps.
   const serverProgRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isGenerating) return;
     const GEN_TIMEOUT_MS = 300_000;
-    const timer = setInterval(() => {
-      const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
-      setVideoProgress((prev) => {
-        if (!prev) return prev;
-        const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
-        const serverProg = serverProgRef.current;
-        const baseProgress = Math.max(prev.progress, timeBasedProgress);
-        const nextProgress = serverProg !== null
-          ? Math.max(baseProgress, Math.min(serverProg, 0.95))
-          : baseProgress;
-        return { ...prev, elapsedSec: elapsed, progress: nextProgress };
-      });
-    }, 1000);
-    // Soft-creep guard: every 2 seconds, nudge progress forward by a small
-    // amount (up to 90%) so the bar never freezes at a fixed value.
-    const creepTimer = setInterval(() => {
-      setVideoProgress((prev) => {
-        if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-        if (prev.progress >= 0.9) return prev;
-        const serverProg = serverProgRef.current;
-        const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, 0.9) : 0.9;
-        const nudge = prev.progress + 0.008;
-        return { ...prev, progress: Math.min(nudge, ceiling) };
-      });
-    }, 2000);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let creepTimer: ReturnType<typeof setInterval> | null = null;
+
+    const startTimers = () => {
+      if (timer || creepTimer) return;
+      timer = setInterval(() => {
+        const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
+        setVideoProgress((prev) => {
+          if (!prev) return prev;
+          const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
+          const serverProg = serverProgRef.current;
+          const baseProgress = Math.max(prev.progress, timeBasedProgress);
+          const nextProgress = serverProg !== null
+            ? Math.max(baseProgress, Math.min(serverProg, 0.95))
+            : baseProgress;
+          return { ...prev, elapsedSec: elapsed, progress: nextProgress };
+        });
+      }, 1000);
+      creepTimer = setInterval(() => {
+        setVideoProgress((prev) => {
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+          if (prev.progress >= 0.9) return prev;
+          const serverProg = serverProgRef.current;
+          const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, 0.9) : 0.9;
+          const nudge = prev.progress + 0.008;
+          return { ...prev, progress: Math.min(nudge, ceiling) };
+        });
+      }, 2000);
+    };
+    const stopTimers = () => {
+      if (timer) { clearInterval(timer); timer = null; }
+      if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
+    };
+
+    startTimers();
+
     const timeout = setTimeout(() => {
       jobIdRef.current = null;
       setJobId(null);
@@ -204,10 +236,21 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       setVideoProgress(null);
       setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
     }, GEN_TIMEOUT_MS);
+
+    // Pause timers when app goes to background to avoid wasted renders and
+    // prevent a large progress jump when returning to foreground.
+    const appSub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'background' || state === 'inactive') {
+        stopTimers();
+      } else if (state === 'active') {
+        startTimers();
+      }
+    });
+
     return () => {
-      clearInterval(timer);
-      clearInterval(creepTimer);
+      stopTimers();
       clearTimeout(timeout);
+      appSub.remove();
     };
   }, [isGenerating]);
 
@@ -243,12 +286,13 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   // Sync server-reported progress from polling into a ref + state so the
   // progress timer can merge it into videoProgress.progress.
   useEffect(() => {
-    serverProgRef.current = polling.serverProgress;
-    if (polling.serverProgress !== null && isGenerating) {
+    const sp = polling.serverProgress;
+    serverProgRef.current = sp;
+    if (sp !== null && !isNaN(sp) && isFinite(sp) && sp > 0 && isGenerating) {
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-        const serverProg = Math.min(polling.serverProgress!, 0.95);
-        if (serverProg <= prev.progress) return prev;
+        const serverProg = Math.min(sp, 0.95);
+        if (isNaN(serverProg) || serverProg <= prev.progress) return prev;
         return { ...prev, progress: serverProg };
       });
     }

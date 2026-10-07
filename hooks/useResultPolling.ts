@@ -108,19 +108,24 @@ export function useResultPolling(
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
-            const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null };
-            if (row.status === 'SUCCESS' && row.video_url) {
-              handleResult(row.status, row.video_url);
-            } else if (row.status === 'FAILED') {
-              handleResult(row.status, null, row.error_message ?? undefined);
-            } else {
-              const stepProg = stepToProgress(row.step);
-              if (stepProg !== null) {
-                const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-                const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
-                setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
-                setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
+            try {
+              const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null };
+              if (!row || typeof row.status !== 'string') return;
+              if (row.status === 'SUCCESS' && row.video_url) {
+                handleResult(row.status, row.video_url);
+              } else if (row.status === 'FAILED') {
+                handleResult(row.status, null, row.error_message ?? undefined);
+              } else {
+                const stepProg = stepToProgress(row.step);
+                if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
+                  const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+                  const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
+                  setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
+                  setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
+                }
               }
+            } catch {
+              // Malformed payload — ignore, polling will catch up
             }
           },
         )
