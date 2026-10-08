@@ -147,11 +147,13 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         (async () => {
           try {
             await ensureFreshSession();
-            const { data, error: dbError } = await supabase
+            const isSoft = jobId.startsWith('soft-');
+            let query = supabase
               .from('video_jobs')
-              .select('status, video_url, error_message, step')
-              .eq('task_id', jobId)
-              .maybeSingle();
+              .select('status, video_url, error_message, step');
+            const { data, error: dbError } = isSoft && scanIdRef.current
+              ? await query.eq('scan_id', scanIdRef.current).order('created_at', { ascending: false }).limit(1).maybeSingle()
+              : await query.eq('task_id', jobId).maybeSingle();
             if (dbError || !data) return;
             const row = data as { status: string; video_url: string | null; error_message: string | null; step: string | null };
             if (row.status === 'SUCCESS' && row.video_url) {

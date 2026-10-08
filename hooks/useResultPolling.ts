@@ -98,6 +98,13 @@ export function useResultPolling(
     // Primary trigger: Realtime websocket push on video_jobs row update.
     // This fires the instant the server writes a terminal status, giving
     // millisecond-level completion detection without waiting for the next poll.
+    // When the task ID is a soft-fallback placeholder (server didn't respond
+    // within 10s), filter by scan_id instead of task_id so we still receive
+    // updates for the real job row the server created asynchronously.
+    const isSoftTaskId = jobId.startsWith('soft-');
+    const realtimeFilter = isSoftTaskId && scanId
+      ? `scan_id=eq.${scanId}`
+      : `task_id=eq.${jobId}`;
     try {
       realtimeChannel = supabase
         .channel(`job-poll-${jobId}`)
@@ -107,7 +114,7 @@ export function useResultPolling(
             event: 'UPDATE',
             schema: 'public',
             table: 'video_jobs',
-            filter: `task_id=eq.${jobId}`,
+            filter: realtimeFilter,
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
@@ -152,39 +159,43 @@ export function useResultPolling(
     };
 
     // Direct DB force-sync: query video_jobs table as a fallback.
-    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null } | null> => {
+    // For soft-fallback task IDs, look up by scan_id since no real row
+    // has the fake task ID.
+    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null } | null> => {
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
-        const { data, error: dbError } = await supabase
+        let query = supabase
           .from('video_jobs')
-          .select('status, video_url')
-          .eq('task_id', jobId)
-          .maybeSingle();
+          .select('status, video_url, step');
+        const { data, error: dbError } = isSoftTaskId && scanId
+          ? await query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+          : await query.eq('task_id', jobId).maybeSingle();
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
-        const row = data as { status: string; video_url: string | null };
-        return { status: row.status, videoUrl: row.video_url };
+        const row = data as { status: string; video_url: string | null; step: string | null };
+        return { status: row.status, videoUrl: row.video_url, step: row.step };
       } catch {
         return null;
       }
     };
 
     // Also check by scan_id if the task_id lookup fails.
-    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null } | null> => {
+    // Returns step so the soft-fallback path can propagate progress.
+    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null } | null> => {
       if (!scanId) return null;
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
         const { data, error: dbError } = await supabase
           .from('video_jobs')
-          .select('status, video_url')
+          .select('status, video_url, step')
           .eq('scan_id', scanId)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
-        const row = data as { status: string; video_url: string | null };
-        return { status: row.status, videoUrl: row.video_url };
+        const row = data as { status: string; video_url: string | null; step: string | null };
+        return { status: row.status, videoUrl: row.video_url, step: row.step };
       } catch {
         return null;
       }
@@ -213,16 +224,25 @@ export function useResultPolling(
       }
 
       const elapsedSec = Math.round(elapsed / 1000);
-      const isSoftTaskId = jobId.startsWith('soft-');
 
       // When the task ID is a soft-fallback placeholder, skip the edge
       // function poll (it can't find the job by a fake task ID) and go
       // straight to DB lookup by scanId — the real job row was created
-      // server-side even though we never got the response.
+      // server-side even though we never got the response. Also propagate
+      // step/progress so the UI stays live during the soft path.
       if (isSoftTaskId) {
         const scanResult = await forceSyncByScan();
         if (cancelled || settledRef.current) return;
         if (scanResult) {
+          if (scanResult.step) {
+            const stepProg = stepToProgress(scanResult.step);
+            if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
+              setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
+              const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
+              setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
+            }
+            setServerStep(scanResult.step);
+          }
           handleResult(scanResult.status, scanResult.videoUrl);
           if (settledRef.current) return;
         }
@@ -374,7 +394,7 @@ export function useResultPolling(
                     event: 'UPDATE',
                     schema: 'public',
                     table: 'video_jobs',
-                    filter: `task_id=eq.${jobId}`,
+                    filter: realtimeFilter,
                   },
                   (payload) => {
                     if (cancelled || settledRef.current) return;

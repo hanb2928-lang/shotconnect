@@ -1171,15 +1171,23 @@ export function subscribeVideoJob(
   let channel: ReturnType<typeof supabase.channel> | null = null;
   let consecutivePollFailures = 0;
 
+  const isSoftTaskId = taskId.startsWith('soft-') || taskId.startsWith('hd-soft-');
+
   const checkAndNotify = async () => {
     if (settled) return;
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('video_jobs')
         .select('status, video_url, error_message')
-        .eq('scan_id', scanId)
-        .eq('task_id', taskId)
-        .maybeSingle();
+        .eq('scan_id', scanId);
+      // For soft-fallback task IDs, no real DB row has that ID — look up
+      // by scan_id only and take the most recent row.
+      if (isSoftTaskId) {
+        query = query.order('created_at', { ascending: false }).limit(1);
+      } else {
+        query = query.eq('task_id', taskId);
+      }
+      const { data, error } = await query.maybeSingle();
       if (error) throw new Error(error.message);
       if (!data) return;
       consecutivePollFailures = 0;
