@@ -192,7 +192,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
                 const timeProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
                 const merged = Math.max(prev.progress, timeProgress, stepProg ?? 0);
-                return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(0.95, merged || 0)) };
+                const clampMax = row.step === 'finalizing' ? 0.98 : 0.95;
+                return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(clampMax, merged || 0)) };
               });
             }
           } catch {
@@ -213,7 +214,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const serverProgRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isGenerating) return;
-    const GEN_TIMEOUT_MS = 300_000;
+    const GEN_TIMEOUT_MS = 600_000;
     let timer: ReturnType<typeof setInterval> | null = null;
     let creepTimer: ReturnType<typeof setInterval> | null = null;
     let hardGuardTimer: ReturnType<typeof setInterval> | null = null;
@@ -224,22 +225,26 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
         setVideoProgress((prev) => {
           if (!prev) return prev;
+          const isFinalizing = prev.serverStep === 'finalizing';
+          const clampMax = isFinalizing ? 0.98 : 0.95;
           const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
           const serverProg = serverProgRef.current;
           const safeServer = (serverProg !== null && !isNaN(serverProg) && isFinite(serverProg)) ? serverProg : null;
           const baseProgress = Math.max(prev.progress, timeBasedProgress);
           const nextProgress = safeServer !== null
-            ? Math.max(baseProgress, Math.min(safeServer, 0.95))
+            ? Math.max(baseProgress, Math.min(safeServer, clampMax))
             : baseProgress;
-          return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(0.95, nextProgress)) };
+          return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(clampMax, nextProgress)) };
         });
       }, 1500);
       creepTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          if (prev.progress >= 0.9) return prev;
+          const isFinalizing = prev.serverStep === 'finalizing';
+          const creepCeiling = isFinalizing ? 0.98 : 0.9;
+          if (prev.progress >= creepCeiling) return prev;
           const serverProg = serverProgRef.current;
-          const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, 0.9) : 0.9;
+          const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, creepCeiling) : creepCeiling;
           const nudge = prev.progress + 0.02;
           return { ...prev, progress: Math.min(nudge, ceiling) };
         });
@@ -250,8 +255,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       hardGuardTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          if (prev.progress >= 0.9) return prev;
-          const forced = Math.min(prev.progress + 0.10, 0.9);
+          const isFinalizing = prev.serverStep === 'finalizing';
+          const guardCeiling = isFinalizing ? 0.98 : 0.9;
+          if (prev.progress >= guardCeiling) return prev;
+          const forced = Math.min(prev.progress + 0.10, guardCeiling);
           const serverProg = serverProgRef.current;
           if (serverProg !== null && serverProg > forced) return prev;
           return { ...prev, progress: forced };
@@ -333,12 +340,15 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const sp = polling.serverProgress;
     serverProgRef.current = sp;
     if (sp !== null && !isNaN(sp) && isFinite(sp) && sp > 0 && isGenerating) {
-      const clamped = Math.max(0, Math.min(0.95, sp));
+      const clamped = Math.max(0, Math.min(0.98, sp));
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (isNaN(clamped) || clamped <= prev.progress) return prev;
         const pctLabel = ` (${Math.round(clamped * 100)}%)`;
-        return { ...prev, progress: clamped, message: `AI가 영상을 렌더링하고 있어요${pctLabel}...` };
+        const msg = prev.serverStep === 'finalizing'
+          ? `최종 자막 합성 중${pctLabel}...`
+          : `AI가 영상을 렌더링하고 있어요${pctLabel}...`;
+        return { ...prev, progress: clamped, message: msg };
       });
     }
   }, [polling.serverProgress, isGenerating]);
@@ -432,6 +442,55 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         }
         const stalledFor = now - stepStallRef.current.since;
         if (stalledFor < STEP_STALL_MS) return prev;
+
+        // When stuck at "finalizing" (the last step), there's no next step
+        // to advance to. Instead, do a DB force-sync to check if the job
+        // already completed but the Realtime/polling missed the update.
+        if (currentStep === 'finalizing') {
+          const currentJobId = jobIdRef.current;
+          const currentScanId = scanIdRef.current;
+          if (currentJobId) {
+            (async () => {
+              try {
+                await ensureFreshSession();
+                const isSoft = currentJobId.startsWith('soft-');
+                let q = supabase.from('video_jobs').select('status, video_url, error_message');
+                const { data, error: dbErr } = isSoft && currentScanId
+                  ? await q.eq('scan_id', currentScanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+                  : await q.eq('task_id', currentJobId).maybeSingle();
+                if (dbErr || !data) return;
+                const row = data as { status: string; video_url: string | null; error_message: string | null };
+                if (row.status === 'SUCCESS' && row.video_url) {
+                  clearActiveVideoJob();
+                  jobIdRef.current = null;
+                  setJobId(null);
+                  setIsGenerating(false);
+                  serverProgRef.current = 1.0;
+                  if (outputModeRef.current === 'image') {
+                    setResultImageUrl(row.video_url);
+                  } else {
+                    setResultVideoUrl(row.video_url);
+                  }
+                  setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+                  notifyVideoCompleted();
+                } else if (row.status === 'FAILED') {
+                  clearActiveVideoJob();
+                  jobIdRef.current = null;
+                  setJobId(null);
+                  setIsGenerating(false);
+                  setVideoProgress(null);
+                  serverProgRef.current = null;
+                  setError(row.error_message ?? '영상 생성에 실패했습니다.');
+                }
+              } catch {
+                // DB unreachable — reset stall timer so we retry on next tick
+              }
+            })();
+          }
+          // Reset stall timer so we retry the DB check every 30s
+          stepStallRef.current = { step: currentStep, since: now };
+          return prev;
+        }
 
         const idx = STEP_ORDER.indexOf(currentStep);
         if (idx < 0 || idx >= STEP_ORDER.length - 1) return prev;

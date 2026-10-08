@@ -555,6 +555,7 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
     if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
       let persistedUrl: string | null = null;
       if (supabaseUrl && serviceRoleKey) {
+        await updateVideoJobStep(body.scanId, taskId, "finalizing");
         persistedUrl = await uploadToStorage(pollStatus.videoUrl, body.scanId);
         if (persistedUrl) {
           await updateScanWithVideo(body.scanId, persistedUrl);
@@ -716,6 +717,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
 
     let persistedUrl: string | null = null;
     if (supabaseUrl && serviceRoleKey) {
+      await updateVideoJobStep(scanId, internalJobId, "finalizing");
       persistedUrl = await uploadToStorage(status.videoUrl, scanId);
       if (persistedUrl) {
         await updateScanWithVideo(scanId, persistedUrl);
@@ -848,6 +850,7 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
 
     let persistedUrl: string | null = null;
     if (supabaseUrl && serviceRoleKey) {
+      await updateVideoJobStep(scanId, internalJobId, "finalizing");
       persistedUrl = await uploadToStorage(videoUrl, scanId);
       if (persistedUrl) {
         await updateScanWithVideo(scanId, persistedUrl);
