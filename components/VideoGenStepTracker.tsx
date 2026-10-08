@@ -70,9 +70,12 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   const serverStepProg = progress?.serverStep
     ? stepToProgress(progress.serverStep)
     : null;
-  const creepCap = serverStepProg !== null && serverStepProg > 0
-    ? Math.min(Math.round(serverStepProg * 100), 90)
-    : 90;
+  // Don't bind the creep cap to the server step — if the websocket drops,
+  // the stale server step would clamp the bar below its actual position.
+  // Instead, always allow creep up to 90% so the bar stays alive while
+  // the step icons are driven by resolveVideoGenSteps (which now also
+  // factors in the raw percentage).
+  const creepCap = 90;
 
   useEffect(() => {
     if (!isRendering) {

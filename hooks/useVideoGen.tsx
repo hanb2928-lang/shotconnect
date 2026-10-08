@@ -82,6 +82,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const productNameRef = useRef<string>('');
   const hookTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefetchedHookRef = useRef<ReturnType<typeof autoSelectHook> | null>(null);
+  const stepStallRef = useRef<{ step: string; since: number } | null>(null);
+  const stepStallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -393,6 +395,65 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     };
   }, [polling.serverStep]);
 
+  // General step stall guard: if the serverStep hasn't changed for 30 seconds,
+  // force-advance it to the next step so the step icons never freeze when the
+  // Realtime websocket drops. This complements the hooking-specific timeout
+  // above and covers all pipeline stages.
+  useEffect(() => {
+    if (!isGenerating) {
+      stepStallRef.current = null;
+      if (stepStallTimerRef.current) {
+        clearInterval(stepStallTimerRef.current);
+        stepStallTimerRef.current = null;
+      }
+      return;
+    }
+    if (stepStallTimerRef.current) return;
+
+    const STEP_ORDER = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering', 'finalizing'];
+    const STEP_STALL_MS = 30_000;
+    const STEP_THRESHOLDS: Record<string, number> = {
+      analyzing: 0.05,
+      hooking: 0.15,
+      planning: 0.25,
+      submitting: 0.35,
+      rendering: 0.85,
+      finalizing: 0.95,
+    };
+
+    stepStallTimerRef.current = setInterval(() => {
+      setVideoProgress((prev) => {
+        if (!prev || prev.phase === 'completed' || prev.phase === 'error' || prev.phase === 'submitting') return prev;
+        const currentStep = prev.serverStep ?? 'analyzing';
+        const now = Date.now();
+        if (!stepStallRef.current || stepStallRef.current.step !== currentStep) {
+          stepStallRef.current = { step: currentStep, since: now };
+          return prev;
+        }
+        const stalledFor = now - stepStallRef.current.since;
+        if (stalledFor < STEP_STALL_MS) return prev;
+
+        const idx = STEP_ORDER.indexOf(currentStep);
+        if (idx < 0 || idx >= STEP_ORDER.length - 1) return prev;
+        const nextStep = STEP_ORDER[idx + 1];
+        const nextThreshold = STEP_THRESHOLDS[nextStep] ?? prev.progress;
+        stepStallRef.current = { step: nextStep, since: now };
+        return {
+          ...prev,
+          serverStep: nextStep,
+          progress: Math.max(prev.progress, nextThreshold),
+        };
+      });
+    }, 2000);
+
+    return () => {
+      if (stepStallTimerRef.current) {
+        clearInterval(stepStallTimerRef.current);
+        stepStallTimerRef.current = null;
+      }
+    };
+  }, [isGenerating]);
+
   const startGeneration = useCallback(async (params: StartGenerationParams) => {
     if (generateLockRef.current) return;
     if (isGenerating || jobIdRef.current) return;
@@ -540,6 +601,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       clearTimeout(hookTimeoutRef.current);
       hookTimeoutRef.current = null;
     }
+    stepStallRef.current = null;
     clearActiveVideoJob();
   }, []);
 

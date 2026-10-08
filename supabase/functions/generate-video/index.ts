@@ -286,7 +286,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
 
   const isDraft = body.draft === true;
   const requestedDuration = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 10);
-  const durationSec = isDraft ? Math.min(requestedDuration, 5) : requestedDuration;
+  const durationSec = requestedDuration;
 
   const sanitizedProductName = sanitizeVideoProductName(body.productName);
   const sanitizedCaptionText = sanitizeVideoText(body.captionText);
