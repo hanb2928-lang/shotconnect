@@ -2764,9 +2764,10 @@ export default function ResultScreen() {
         bgmOverride,
         productVision ?? undefined,
         (settings?.default_caption_tone as ContentTone) ?? 'casual',
+        Math.max(3, selectedDurationMs / 1000),
       );
     },
-    [targetPlatform, inlineEdit.aiPrompt, inlineEdit.bgmMood, activeOneLiner, scan?.summary, activeHook, activeProductName, affiliatePlatforms, productVision, settings?.default_caption_tone],
+    [targetPlatform, inlineEdit.aiPrompt, inlineEdit.bgmMood, activeOneLiner, scan?.summary, activeHook, activeProductName, affiliatePlatforms, productVision, settings?.default_caption_tone, selectedDurationMs],
   );
 
   const disclosureText = getDisclosureForPlatforms(affiliatePlatforms);
@@ -4038,10 +4039,10 @@ export default function ResultScreen() {
           <HumanTtsProfileCard
             narrationText={activeHook || activeOneLiner || scan?.summary || ''}
             moodLabel={inlineEdit.bgmMood || '트렌디'}
-            totalDurationSec={15}
+            totalDurationSec={Math.max(3, Math.round(selectedDurationMs / 1000))}
           />
 
-          <ViralFormulaCard totalDurationSec={15} />
+          <ViralFormulaCard totalDurationSec={Math.max(3, Math.round(selectedDurationMs / 1000))} />
 
           <AutoHookSubtitleCard
             productName={activeProductName}

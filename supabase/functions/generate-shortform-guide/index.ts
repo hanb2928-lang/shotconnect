@@ -228,7 +228,7 @@ function normalizeGuide(raw: Record<string, unknown>): ShortFormGuide {
 
 function generateLocalGuide(data: GuideRequest): ShortFormGuide {
   const name = data.productName || "이 제품";
-  const nameShort = name.length > 10 ? name.slice(0, 10) + "…" : name;
+  const nameShort = name;
   const advantages = data.productAdvantages?.length ? data.productAdvantages : ["가성비"];
   const price = data.priceEstimate || "";
   const category = (data.productCategory || "").toLowerCase();

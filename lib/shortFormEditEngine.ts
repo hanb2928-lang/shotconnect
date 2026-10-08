@@ -73,7 +73,7 @@ const PSYCHOLOGY_TRIGGERS: Record<EmotionPhase, { label: string; templates: stri
 
 export function generateHookOptions(customPrompt: string, productName?: string): HookOption[] {
   const pName = productName?.trim() || '이 제품';
-  const nameShort = pName.length > 10 ? pName.slice(0, 10) + '...' : pName;
+  const nameShort = pName;
 
   const promptLower = customPrompt.toLowerCase();
   let preferredEmotions: EmotionPhase[] = ['curiosity', 'shock', 'desire'];
@@ -633,8 +633,9 @@ export function buildShortFormEditPlan(
   bgmOverride?: { templateId: string; label: string; mood: string; bpm: number; reason?: string; highlightStartSec?: number; highlightDurationSec?: number; energyCurve?: number[] },
   productVision?: ProductVisionResult,
   contentTone?: ContentTone,
+  durationSec?: number,
 ): ShortFormEditPlan {
-  return computeEditPlan(platform, customPrompt, selectedHook, productName, affiliatePlatforms, autoDisclosure, disclosureEnabled, customSpec, bgmOverride, productVision, contentTone);
+  return computeEditPlan(platform, customPrompt, selectedHook, productName, affiliatePlatforms, autoDisclosure, disclosureEnabled, customSpec, bgmOverride, productVision, contentTone, durationSec);
 }
 
 export async function buildShortFormEditPlanCached(
@@ -683,9 +684,10 @@ function computeEditPlan(
   bgmOverride?: { templateId: string; label: string; mood: string; bpm: number; reason?: string; highlightStartSec?: number; highlightDurationSec?: number; energyCurve?: number[] },
   productVision?: ProductVisionResult,
   contentTone: ContentTone = 'casual',
+  durationSec: number = 15,
 ): ShortFormEditPlan {
   const { label, spec, safeZone } = getPlatformInfo(platform, customSpec);
-  const totalDurationSec = 15;
+  const totalDurationSec = Math.max(3, Math.round(durationSec));
   const hookOptions = generateHookOptions(customPrompt, productName);
   const fallbackHook = hookOptions[0]?.text || '이거 보면 무조건 클릭';
   const hook = selectedHook || fallbackHook;
@@ -702,11 +704,17 @@ function computeEditPlan(
   const { benefit: emotionalBenefit, tts: ttsNarration } = applyToneToBenefit(rawBenefit, rawTts, contentTone, benefitCategory, benefitSeed);
   const visionFeatureHint = productVision?.visualFeatures?.slice(0, 2).join(' · ') ?? '';
 
+  const d = totalDurationSec;
+  const hookEnd = Math.round(d * 0.2);
+  const needEnd = Math.round(d * 0.47);
+  const transformEnd = Math.round(d * 0.73);
+  const ctaEnd = Math.round(d * 0.87);
+
   const segments: EditSegment[] = [
     {
       index: 0,
       startSec: 0,
-      endSec: 3,
+      endSec: hookEnd,
       label: '시선 포착',
       purpose: '상위 1% 후킹: 0~3초 시선 강탈, 화면 전환 없음, 오디오 빌드업으로 이탈 방지',
       textOverlay: story.gazeHook,
@@ -716,8 +724,8 @@ function computeEditPlan(
     },
     {
       index: 1,
-      startSec: 3,
-      endSec: 7,
+      startSec: hookEnd,
+      endSec: needEnd,
       label: '서사 전개',
       purpose: '왜 이 제품이 필요한지 리얼리티 서사로 연결, 다각도 입체 컷 전환',
       textOverlay: story.needDiscovery,
@@ -729,8 +737,8 @@ function computeEditPlan(
     },
     {
       index: 2,
-      startSec: 7,
-      endSec: 11,
+      startSec: needEnd,
+      endSec: transformEnd,
       label: '변화·몰입',
       purpose: '사용 후 일상적 변화를 감성적으로 전달, 디테일 클로즈업 전환',
       textOverlay: visionFeatureHint || story.transformation,
@@ -742,8 +750,8 @@ function computeEditPlan(
     },
     {
       index: 3,
-      startSec: 11,
-      endSec: 13,
+      startSec: transformEnd,
+      endSec: ctaEnd,
       label: 'CTA',
       purpose: '시청자를 향한 직접적 행동 유도, 감정 최고점에서 클로징',
       textOverlay: disclosureEnabled ? story.ctaCall : segmentTexts.cta,
@@ -757,9 +765,9 @@ function computeEditPlan(
   const disclosureShort = getDisclosureShortForPlatforms(affiliatePlatforms, autoDisclosure && disclosureEnabled);
 
   const disclosureOverlay: DisclosureOverlayPlan = {
-    startSec: 13,
-    endSec: 15,
-    durationSec: 2,
+    startSec: ctaEnd,
+    endSec: d,
+    durationSec: d - ctaEnd,
     text: disclosureEnabled ? (disclosureText || '본 영상은 광고/협찬/업체 지원을 받아 제작되었습니다.') : '',
     shortText: disclosureEnabled ? (disclosureShort || '광고·협찬 포함') : '',
     position: 'bottom-center',

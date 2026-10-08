@@ -44,7 +44,6 @@ interface ShortFormPreviewPlayerProps {
   ttsUrl?: string | null;
 }
 
-const TOTAL_DURATION = 15;
 const TICK_MS = 250;
 const LUMINANCE_SAMPLE_MS = 1000;
 const VIDEO_LOAD_TIMEOUT_MS = 5000;
@@ -71,6 +70,7 @@ const STORY_PHASE_COLORS: Record<StoryPhase, string> = {
 export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, videoGenProgress, bgmVolume = 0.75, copyOverlays = null, narrationActive = false, ttsUrl = null }: ShortFormPreviewPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSec, setCurrentSec] = useState(0);
+  const totalDuration = editPlan.totalDurationSec || 15;
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [luminanceLevel, setLuminanceLevel] = useState<LuminanceLevel>('dark');
 
@@ -327,7 +327,7 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
         narrationDuckedRef.current = false;
       }
     } else {
-      if (currentSec >= TOTAL_DURATION) {
+      if (currentSec >= totalDuration) {
         setCurrentSec(0);
       }
       if (Platform.OS === 'web') {
@@ -440,7 +440,7 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
     intervalRef.current = setInterval(() => {
       setCurrentSec((prev) => {
         const next = prev + TICK_MS / 1000;
-        if (next >= TOTAL_DURATION) {
+        if (next >= totalDuration) {
           return 0;
         }
         return next;
@@ -522,8 +522,8 @@ useEffect(() => {
     editPlan?.disclosureEnabled &&
     currentSec >= (editPlan?.disclosureOverlay?.startSec ?? 99) &&
     currentSec < (editPlan?.disclosureOverlay?.endSec ?? 99);
-  const progressPercent = (currentSec / TOTAL_DURATION) * 100;
-  const isBgmActive = currentSec > 0 && currentSec < TOTAL_DURATION;
+  const progressPercent = (currentSec / totalDuration) * 100;
+  const isBgmActive = currentSec > 0 && currentSec < totalDuration;
 
   const responsiveHeight = Math.min(screenHeight * 0.45, screenWidth * 0.55 * (16 / 9));
   const responsiveWidth = responsiveHeight * (9 / 16);
@@ -560,7 +560,7 @@ useEffect(() => {
     <View style={styles.container}>
       <View style={styles.labelRow}>
         <Play size={13} color={theme.colors.primary[400]} strokeWidth={2.5} />
-        <Text style={styles.labelText}>실시간 미리보기 (15초)</Text>
+        <Text style={styles.labelText}>실시간 미리보기 ({totalDuration}초)</Text>
       </View>
 
       <View style={[styles.previewFrame, { width: responsiveWidth, height: responsiveHeight }]}>
@@ -710,7 +710,7 @@ useEffect(() => {
 
           {hasGeneratedVideo && (
             <View style={styles.timeBadge}>
-              <Text style={styles.timeText}>{currentSec.toFixed(1)}s / {TOTAL_DURATION}s</Text>
+              <Text style={styles.timeText}>{currentSec.toFixed(1)}s / {totalDuration}s</Text>
             </View>
           )}
 
@@ -735,12 +735,12 @@ useEffect(() => {
             {(editPlan?.segments ?? []).map((seg) => (
               <View
                 key={seg.index}
-                style={[styles.segmentMarker, { left: `${(seg.startSec / TOTAL_DURATION) * 100}%` }]}
+                style={[styles.segmentMarker, { left: `${(seg.startSec / totalDuration) * 100}%` }]}
               />
             ))}
             {editPlan?.disclosureEnabled && (
               <View
-                style={[styles.segmentMarker, styles.disclosureMarker, { left: `${((editPlan?.disclosureOverlay?.startSec ?? 0) / TOTAL_DURATION) * 100}%` }]}
+                style={[styles.segmentMarker, styles.disclosureMarker, { left: `${((editPlan?.disclosureOverlay?.startSec ?? 0) / totalDuration) * 100}%` }]}
               />
             )}
           </View>
