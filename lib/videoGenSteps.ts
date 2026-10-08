@@ -26,15 +26,15 @@ const STEP_TO_PROGRESS: Record<string, number> = {
   hooking: 0.15,
   planning: 0.25,
   submitting: 0.35,
-  rendering: 0.50,
+  rendering: 0.85,
   finalizing: 0.95,
   completed: 1.0,
   failed: 0,
 
   // Runway API status values (from pollRunwayTask) — lowercased
   pending: 0.35,
-  processing: 0.50,
-  running: 0.50,
+  processing: 0.85,
+  running: 0.85,
   throttled: 0.45,
   queued: 0.38,
   success: 1.0,

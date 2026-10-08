@@ -256,12 +256,13 @@ export async function generateAiVideo(
 ): Promise<VideoGenResult> {
   const startTime = monotonicStart();
 
-  const report = (phase: VideoGenPhase, progress: number, message: string) => {
+  const report = (phase: VideoGenPhase, progress: number, message: string, serverStep?: string | null) => {
     onProgress?.({
       phase,
       progress,
       message,
       elapsedSec: monotonicElapsedSec(startTime),
+      serverStep: serverStep ?? undefined,
     });
   };
 
@@ -575,7 +576,7 @@ function waitForVideoCompletion(
   submitData: { taskId: string; motionPrompt: string; durationSec: number; aspectRatio: string; variationSeed: number },
   scanId: string | undefined,
   startTime: number,
-  report: (phase: VideoGenPhase, progress: number, message: string) => void,
+  report: (phase: VideoGenPhase, progress: number, message: string, serverStep?: string | null) => void,
   signal?: AbortSignal,
 ): Promise<VideoGenResult> {
   return new Promise((resolve, reject) => {
@@ -669,7 +670,7 @@ function waitForVideoCompletion(
         const stepLabel = row.step
           ? STEP_LABELS[row.step.toLowerCase()] ?? row.step
           : '처리 중';
-        report(phase, mapped, `${stepLabel}...`);
+        report(phase, mapped, `${stepLabel}...`, row.step);
       }
       return false;
     };
@@ -1020,8 +1021,8 @@ export async function submitVideoJobAsync(
   const SUBMIT_TIMEOUT_MS = 90_000;
   const SUBMIT_SOFT_TIMEOUT_MS = 7_000;
 
-  const report = (phase: VideoGenPhase, progress: number, message: string) => {
-    onProgress?.({ phase, progress, message, elapsedSec: 0 });
+  const report = (phase: VideoGenPhase, progress: number, message: string, serverStep?: string | null) => {
+    onProgress?.({ phase, progress, message, elapsedSec: 0, serverStep: serverStep ?? undefined });
   };
 
   const bodyJson = JSON.stringify(compactBody({

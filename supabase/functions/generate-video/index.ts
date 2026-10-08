@@ -371,11 +371,11 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
         fps,
         mainImageUrl: body.mainImageUrl,
       }),
-    }).catch((err) => {
+    }).catch(async (err) => {
       console.error("[generate-video] Failed to self-invoke runway-submit:", err);
       // Mark job as FAILED if we can't even start the Runway submission
       if (body.scanId) {
-        markVideoJobFailed(body.scanId, internalJobId, "Runway API 호출 시작에 실패했습니다.");
+        await markVideoJobFailed(body.scanId, internalJobId, "Runway API 호출 시작에 실패했습니다.");
       }
     });
   }
@@ -429,6 +429,8 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
   // stage handles the high-res pass separately.
   const resolution = isDraft ? "720p" : (body.resolution ?? (hdUpscale ? "1080p" : "720p"));
   const fps = isDraft ? 24 : (body.fps ?? (hdUpscale ? 30 : 24));
+
+  await updateVideoJobStep(scanId, internalJobId, "submitting");
 
   try {
     const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
@@ -965,7 +967,7 @@ async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, is
         scan_id: scanId,
         task_id: taskId,
         status: "PENDING",
-        step: "rendering",
+        step: "analyzing",
         is_draft: isDraft,
         is_hd: isHd,
       }),
@@ -1041,6 +1043,7 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
 
 async function markVideoJobComplete(scanId: string, taskId: string, videoUrl: string): Promise<void> {
   if (!supabaseUrl || !serviceRoleKey) return;
+  await updateVideoJobStep(scanId, taskId, "finalizing");
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);

@@ -483,6 +483,7 @@ export default function ResultScreen() {
   const [hdUpgradeProgress, setHdUpgradeProgress] = useState<string | null>(null);
   const hdUnsubRef = useRef<(() => void) | null>(null);
   const videoUnsubRef = useRef<(() => void) | null>(null);
+  const currentVideoTaskIdRef = useRef<string | null>(null);
   const videoGenLockRef = useRef(false);
   const draftProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showAdvancedCamera, setShowAdvancedCamera] = useState(false);
@@ -580,7 +581,7 @@ export default function ResultScreen() {
       stepAdvanceTimerRef.current = setInterval(() => {
         if (!mountedRef.current) return;
         setVideoGenProgress((prev) => {
-          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error' || prev.phase === 'submitting') return prev;
           const currentStep = prev.serverStep ?? 'analyzing';
           const now = Date.now();
           if (!serverStepStallRef.current || serverStepStallRef.current.step !== currentStep) {
@@ -596,6 +597,7 @@ export default function ResultScreen() {
           const nextThreshold = stepThresholds[nextStep] ?? prev.progress;
           serverStepStallRef.current = { step: nextStep, since: now };
           const nextLabel: Record<string, string> = {
+            hooking: '훅 문구 추출 중...',
             planning: '편집 플랜 구성 중...',
             submitting: 'AI 렌더링 요청 중...',
             rendering: '영상 렌더링 중...',
@@ -636,13 +638,17 @@ export default function ResultScreen() {
     localPollTimerRef.current = setInterval(async () => {
       if (!mountedRef.current || !scan) return;
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('video_jobs')
           .select('status, step, video_url, error_message')
-          .eq('scan_id', scan.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .eq('scan_id', scan.id);
+        const taskId = currentVideoTaskIdRef.current;
+        if (taskId && !taskId.startsWith('soft-') && !taskId.startsWith('hd-soft-')) {
+          query = query.eq('task_id', taskId);
+        } else {
+          query = query.order('created_at', { ascending: false }).limit(1);
+        }
+        const { data, error } = await query.maybeSingle();
         if (error || !data) return;
         const row = data as { status: string; step?: string | null; video_url?: string | null; error_message?: string | null };
         if (row.status === 'SUCCESS' && row.video_url) return;
@@ -1025,11 +1031,22 @@ export default function ResultScreen() {
         const elapsed = Math.round((Date.now() - draftStartTime) / 1000);
         // Asymptotic progress curve — approaches 0.92 but never reaches 1.0
         const simulated = Math.min(0.08 + 0.84 * (1 - Math.exp(-elapsed / 45)), 0.92);
-        setVideoGenProgress({
-          phase: 'generating',
-          progress: simulated,
-          message: `AI가 영상을 렌더링하고 있어요${elapsed > 5 ? ` (${Math.round(simulated * 100)}%)` : ''}`,
-          elapsedSec: elapsed,
+        setVideoGenProgress((prev) => {
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+          // Never regress progress — the server/poll/Realtime may have set it higher
+          const effectiveProgress = Math.max(prev.progress, simulated);
+          // Only use the generic message if the server hasn't set a step-specific one
+          const hasServerStep = !!prev.serverStep;
+          const message = hasServerStep
+            ? prev.message
+            : `AI가 영상을 렌더링하고 있어요${elapsed > 5 ? ` (${Math.round(effectiveProgress * 100)}%)` : ''}`;
+          return {
+            ...prev,
+            phase: 'generating',
+            progress: effectiveProgress,
+            message,
+            elapsedSec: elapsed,
+          };
         });
       }, 2000);
       draftProgressTimerRef.current = draftProgressTimer;
@@ -1050,6 +1067,7 @@ export default function ResultScreen() {
       // Subscribe to the video job via Realtime — non-blocking.
       // When the draft completes, show it immediately. If HD was requested,
       // kick off the HD upgrade in the background after the draft is ready.
+      currentVideoTaskIdRef.current = submitResult.taskId;
       videoUnsubRef.current = subscribeVideoJob(scan.id, submitResult.taskId, (result) => {
         if (!mountedRef.current) return;
         try {
@@ -1061,15 +1079,15 @@ export default function ResultScreen() {
               const serverProgress = typeof result.progress === 'number' && Number.isFinite(result.progress)
                 ? Math.max(0, Math.min(0.95, result.progress))
                 : prev.progress;
-              const stepLabel = result.step === 'hooking'
-                ? '훅 문구 추출 중...'
-                : result.step === 'planning'
-                  ? '편집 플랜 구성 중...'
-                  : result.step === 'submitting'
-                    ? 'AI 렌더링 요청 중...'
-                    : result.step === 'rendering'
-                      ? '영상 렌더링 중...'
-                      : prev.message;
+              const stepLabelMap: Record<string, string> = {
+                analyzing: '다각도 컷 분석 중...',
+                hooking: '훅 문구 추출 중...',
+                planning: '편집 플랜 구성 중...',
+                submitting: 'AI 렌더링 요청 중...',
+                rendering: '영상 렌더링 중...',
+                finalizing: '최종 자막 합성 중...',
+              };
+              const stepLabel = result.step ? (stepLabelMap[result.step] ?? prev.message) : prev.message;
               return {
                 ...prev,
                 progress: Math.max(prev.progress, serverProgress),

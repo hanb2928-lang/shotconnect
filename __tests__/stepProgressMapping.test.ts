@@ -28,8 +28,8 @@ describe('stepToProgress — backend step values', () => {
     expect(stepToProgress('submitting')).toBe(0.35);
   });
 
-  it('maps "rendering" to render range (0.50)', () => {
-    expect(stepToProgress('rendering')).toBe(0.50);
+  it('maps "rendering" to render range (0.85)', () => {
+    expect(stepToProgress('rendering')).toBe(0.85);
   });
 
   it('maps "finalizing" to finalize threshold (0.95)', () => {
@@ -51,11 +51,11 @@ describe('stepToProgress — Runway API status values', () => {
   });
 
   it('maps PROCESSING to rendering range', () => {
-    expect(stepToProgress('PROCESSING')).toBe(0.50);
+    expect(stepToProgress('PROCESSING')).toBe(0.85);
   });
 
   it('maps RUNNING to rendering range', () => {
-    expect(stepToProgress('RUNNING')).toBe(0.50);
+    expect(stepToProgress('RUNNING')).toBe(0.85);
   });
 
   it('maps THROTTLED to rendering range', () => {
@@ -101,8 +101,8 @@ describe('stepToProgress — edge cases', () => {
   });
 
   it('is case-insensitive', () => {
-    expect(stepToProgress('RENDERING')).toBe(0.50);
-    expect(stepToProgress('Rendering')).toBe(0.50);
-    expect(stepToProgress('rendering')).toBe(0.50);
+    expect(stepToProgress('RENDERING')).toBe(0.85);
+    expect(stepToProgress('Rendering')).toBe(0.85);
+    expect(stepToProgress('rendering')).toBe(0.85);
   });
 });
