@@ -1,0 +1,160 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+};
+
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+interface MuxRequest {
+  videoUrl: string;
+  audioUrl: string;
+  scanId?: string;
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+  if (req.method !== "POST") {
+    return new Response(
+      JSON.stringify({ error: "Method not allowed" }),
+      { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  try {
+    const body = await req.json() as MuxRequest;
+    const { videoUrl, audioUrl, scanId } = body;
+
+    if (!videoUrl || !audioUrl) {
+      return new Response(
+        JSON.stringify({ error: "videoUrl과 audioUrl이 필요합니다." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Download both files
+    const [videoResp, audioResp] = await Promise.all([
+      fetch(videoUrl),
+      fetch(audioUrl),
+    ]);
+
+    if (!videoResp.ok) {
+      return new Response(
+        JSON.stringify({ error: "비디오 파일을 다운로드할 수 없습니다." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (!audioResp.ok) {
+      return new Response(
+        JSON.stringify({ error: "오디오 파일을 다운로드할 수 없습니다." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const videoBlob = await videoResp.blob();
+    const audioBlob = await audioResp.blob();
+
+    // Use ffmpeg.wasm to mux video + audio into a single MP4
+    const { FFmpeg } = await import("npm:@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
+    const { fetchFile, toBlobURL } = await import("npm:@ffmpeg/util@0.12.1/dist/esm/index.js");
+
+    const ffmpeg = new FFmpeg();
+    const coreURL = await toBlobURL(
+      "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
+      "text/javascript",
+    );
+    const wasmURL = await toBlobURL(
+      "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
+      "application/wasm",
+    );
+    await ffmpeg.load({ coreURL, wasmURL });
+
+    await ffmpeg.writeFile("input_video.mp4", await fetchFile(videoBlob));
+    await ffmpeg.writeFile("input_audio.mp3", await fetchFile(audioBlob));
+
+    // Merge: copy video stream, encode audio as AAC, output MP4
+    await ffmpeg.exec([
+      "-i", "input_video.mp4",
+      "-i", "input_audio.mp3",
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-shortest",
+      "-movflags", "+faststart",
+      "output.mp4",
+    ]);
+
+    const output = await ffmpeg.readFile("output.mp4");
+    const outputBlob = new Blob([output], { type: "video/mp4" });
+
+    // Clean up virtual FS
+    await ffmpeg.deleteFile("input_video.mp4");
+    await ffmpeg.deleteFile("input_audio.mp3");
+    await ffmpeg.deleteFile("output.mp4");
+
+    // Upload to Supabase Storage
+    if (!supabaseUrl || !serviceRoleKey) {
+      return new Response(
+        JSON.stringify({ error: "스토리지 설정이 누락되었습니다." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const fileName = `${scanId ?? "unknown"}/${Date.now()}_muxed.mp4`;
+    const uploadPath = `videos/${fileName}`;
+    const uploadUrl = `${supabaseUrl}/storage/v1/object/${uploadPath}`;
+
+    const uploadResp = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${serviceRoleKey}`,
+        "Content-Type": "video/mp4",
+        "x-upsert": "true",
+      },
+      body: outputBlob,
+    });
+
+    if (!uploadResp.ok) {
+      const uploadErr = await uploadResp.text();
+      return new Response(
+        JSON.stringify({ error: `스토리지 업로드 실패: ${uploadErr}` }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${uploadPath}`;
+
+    // Update scans row with muxed_video_url if scanId is provided
+    if (scanId) {
+      try {
+        await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
+          method: "PATCH",
+          headers: {
+            "Authorization": `Bearer ${serviceRoleKey}`,
+            "apikey": serviceRoleKey,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+          },
+          body: JSON.stringify({ muxed_video_url: publicUrl }),
+        });
+      } catch {
+        // Non-fatal — the muxed video is still in storage
+      }
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, muxedUrl: publicUrl }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : "알 수 없는 오류";
+    return new Response(
+      JSON.stringify({ error: `나레이션 합성 실패: ${errMsg}` }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+});

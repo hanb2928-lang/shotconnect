@@ -1845,93 +1845,129 @@ export default function ResultScreen() {
   // Mux TTS narration audio into the AI-generated video.
   // Triggers when both generatedVideoUrl and ttsUrl are available
   // and we haven't already muxed this particular video+audio pair.
-  // Pre-flight probes both URLs to ensure the media files are fully
-  // uploaded and accessible before attempting muxing, preventing
-  // "Audio track not found" crashes from half-uploaded TTS files.
+  // On web: uses client-side Canvas/MediaRecorder muxing.
+  // On native: calls the mux-video-audio edge function (server-side ffmpeg.wasm).
   useEffect(() => {
     if (!generatedVideoUrl || !ttsUrl) return;
     if (isMuxing) return;
     const pairKey = `${generatedVideoUrl}::${ttsUrl}`;
     if (muxDoneRef.current === pairKey) return;
 
-    // Only attempt client-side muxing on web — native platforms lack
-    // the required Canvas captureStream / MediaRecorder APIs.
-    if (Platform.OS !== 'web') return;
-
     let cancelled = false;
-    (async () => {
-      // Pre-flight: verify both URLs are accessible. The TTS file may
-      // still be uploading to storage when ttsUrl is first set, so we
-      // probe with retries before committing to muxing.
-      const [videoReady, audioReady] = await Promise.all([
-        probeUrlAccessible(generatedVideoUrl),
-        probeUrlAccessible(ttsUrl),
-      ]);
-      if (cancelled) return;
-      if (!videoReady || !audioReady) {
-        if (!cancelled) {
-          setMuxError(audioReady ? '비디오 파일에 접근할 수 없습니다.' : '나레이션 음성 파일이 아직 준비되지 않았습니다. 잠시 후 자동으로 재시도합니다.');
-        }
-        // Don't mark as done — allow retry when the URL becomes available
-        return;
-      }
 
+    if (Platform.OS === 'web') {
+      (async () => {
+        // Pre-flight: verify both URLs are accessible. The TTS file may
+        // still be uploading to storage when ttsUrl is first set, so we
+        // probe with retries before committing to muxing.
+        const [videoReady, audioReady] = await Promise.all([
+          probeUrlAccessible(generatedVideoUrl),
+          probeUrlAccessible(ttsUrl),
+        ]);
+        if (cancelled) return;
+        if (!videoReady || !audioReady) {
+          if (!cancelled) {
+            setMuxError(audioReady ? '비디오 파일에 접근할 수 없습니다.' : '나레이션 음성 파일이 아직 준비되지 않았습니다. 잠시 후 자동으로 재시도합니다.');
+          }
+          return;
+        }
+
+        muxDoneRef.current = pairKey;
+        setIsMuxing(true);
+        setMuxProgress(0);
+        setMuxError(null);
+
+        try {
+          const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
+            if (!cancelled) setMuxProgress(p.progress);
+          });
+          if (!result || cancelled) {
+            result?.revoke();
+            return;
+          }
+
+          const ext = result.blob.type.includes('webm') ? 'webm' : 'mp4';
+          const fileName = `${scan?.id ?? 'unknown'}/${Date.now()}_muxed.${ext}`;
+          let finalUrl = result.url;
+          let uploadOk = false;
+          try {
+            const { uploadBytesToStorage } = await import('@/lib/imageEdit');
+            const publicUrl = await uploadBytesToStorage(result.blob, 'videos', fileName, result.blob.type, true);
+            finalUrl = publicUrl;
+            uploadOk = true;
+          } catch { /* upload failed */ }
+
+          if (uploadOk) {
+            URL.revokeObjectURL(result.url);
+              await supabase
+                .from('scans')
+                .update({ muxed_video_url: finalUrl })
+                .eq('id', scan?.id ?? '');
+              registerStorageObject(scan?.id ?? '', 'videos', fileName, 'video', result.blob.size).catch(() => {});
+          }
+          if (!cancelled) {
+            if (muxedBlobUrlRef.current && muxedBlobUrlRef.current !== finalUrl) {
+              URL.revokeObjectURL(muxedBlobUrlRef.current);
+            }
+            muxedBlobUrlRef.current = finalUrl.startsWith('blob:') ? finalUrl : null;
+            setMuxedVideoUrl(finalUrl);
+          } else if (finalUrl === result.url) {
+            result.revoke();
+          }
+        } catch {
+          if (!cancelled) {
+            setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
+          }
+        } finally {
+          if (!cancelled) {
+            setIsMuxing(false);
+            setMuxProgress(0);
+          }
+        }
+      })();
+    } else {
+      // Native: call server-side mux edge function
       muxDoneRef.current = pairKey;
       setIsMuxing(true);
       setMuxProgress(0);
       setMuxError(null);
 
-      try {
-        const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
-          if (!cancelled) setMuxProgress(p.progress);
-        });
-        if (!result || cancelled) {
-          result?.revoke();
-          return;
-        }
-
-        // Persist the muxed video to Supabase Storage so it can be
-        // shared/downloaded with the narration baked in.
-        const ext = result.blob.type.includes('webm') ? 'webm' : 'mp4';
-        const fileName = `${scan?.id ?? 'unknown'}/${Date.now()}_muxed.${ext}`;
-        let finalUrl = result.url;
-        let uploadOk = false;
+      (async () => {
         try {
-          const { uploadBytesToStorage } = await import('@/lib/imageEdit');
-          const publicUrl = await uploadBytesToStorage(result.blob, 'videos', fileName, result.blob.type, true);
-          finalUrl = publicUrl;
-          uploadOk = true;
-        } catch { /* upload failed */ }
+          const { data, error: invokeError } = await supabase.functions.invoke('mux-video-audio', {
+            body: {
+              videoUrl: generatedVideoUrl,
+              audioUrl: ttsUrl,
+              scanId: scan?.id,
+            },
+          });
 
-        if (uploadOk) {
-          URL.revokeObjectURL(result.url);
-            await supabase
-              .from('scans')
-              .update({ muxed_video_url: finalUrl })
-              .eq('id', scan?.id ?? '');
-            registerStorageObject(scan?.id ?? '', 'videos', fileName, 'video', result.blob.size).catch(() => {});
-        }
-        if (!cancelled) {
-          if (muxedBlobUrlRef.current && muxedBlobUrlRef.current !== finalUrl) {
-            URL.revokeObjectURL(muxedBlobUrlRef.current);
+          if (cancelled) return;
+
+          if (invokeError || !data || data.error) {
+            const errMsg = data?.error || invokeError?.message || '나레이션 합성에 실패했습니다.';
+            setMuxError(errMsg);
+            muxDoneRef.current = null;
+            return;
           }
-          muxedBlobUrlRef.current = finalUrl.startsWith('blob:') ? finalUrl : null;
-          setMuxedVideoUrl(finalUrl);
-        } else if (finalUrl === result.url) {
-          result.revoke();
+
+          if (data.muxedUrl) {
+            setMuxedVideoUrl(data.muxedUrl);
+            setMuxProgress(1);
+          }
+        } catch {
+          if (!cancelled) {
+            setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
+            muxDoneRef.current = null;
+          }
+        } finally {
+          if (!cancelled) {
+            setIsMuxing(false);
+            setMuxProgress(0);
+          }
         }
-      } catch {
-        // Muxing failed — the original silent video is still playable
-        if (!cancelled) {
-          setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
-        }
-      } finally {
-        if (!cancelled) {
-          setIsMuxing(false);
-          setMuxProgress(0);
-        }
-      }
-    })();
+      })();
+    }
 
     return () => { cancelled = true; };
   }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id]);

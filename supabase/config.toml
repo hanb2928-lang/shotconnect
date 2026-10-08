@@ -103,3 +103,6 @@ verify_jwt = false
 [functions.storage-lifecycle-sweep]
 verify_jwt = false
 
+[functions.mux-video-audio]
+verify_jwt = false
+
