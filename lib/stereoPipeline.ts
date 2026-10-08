@@ -162,6 +162,7 @@ async function uploadAngleShotsConcurrently(
   shots: AngleShot[],
   concurrency: number,
   signal?: AbortSignal,
+  onProgress?: (completed: number, total: number) => void,
 ): Promise<{ results: ParallelUploadResult[]; failures: number; uploadedPaths: string[]; failureDetails: string[] }> {
   const results: ParallelUploadResult[] = [];
   let failures = 0;
@@ -210,6 +211,7 @@ async function uploadAngleShotsConcurrently(
           return;
         }
         results.push({ url, shot });
+        onProgress?.(results.length, shots.length);
         const p = extractStoragePath(url);
         if (p) uploadedPaths.push(p);
         (shot as { base64?: string }).base64 = undefined;
@@ -389,6 +391,7 @@ export const STEREO_MAX_SHOTS = 5;
 export async function createScanFromAngleShots(
   shots: AngleShot[],
   signal?: AbortSignal,
+  onUploadProgress?: (completed: number, total: number) => void,
 ): Promise<{ scanId: string; uploadedUrls: string[] }> {
   const aborted = (): boolean => signal?.aborted === true;
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
@@ -407,7 +410,7 @@ export async function createScanFromAngleShots(
     }
   }
 
-  const { results, failures, uploadedPaths, failureDetails } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
+  const { results, failures, uploadedPaths, failureDetails } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal, onUploadProgress);
   if (aborted()) {
     await rollbackUploads(uploadedPaths);
     throw new Error('업로드가 취소되었습니다.');
@@ -462,13 +465,13 @@ export async function runStereoPipeline(
   };
 
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
-  const allShots = sorted.filter((s) => s.base64);
+  const uploadedShotCount = existingUploadUrls?.length ?? 0;
+  const allShots = uploadedShotCount > 0
+    ? sorted.slice(0, Math.min(uploadedShotCount, STEREO_MAX_SHOTS))
+    : sorted.filter((s) => s.base64).slice(0, STEREO_MAX_SHOTS);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
   if (allShots.length < STEREO_MIN_SHOTS) {
     throw new Error(`입체컷 오토는 최소 ${STEREO_MIN_SHOTS}컷이 필요합니다. 정면, 좌측, 우측을 촬영해주세요.`);
-  }
-  if (allShots.length > STEREO_MAX_SHOTS) {
-    allShots.length = STEREO_MAX_SHOTS;
   }
 
   let imageUrl: string;
@@ -534,7 +537,7 @@ export async function runStereoPipeline(
   // The edge function only needs metadata (key, label, orderIndex) for its
   // synthesis logic — sending multi-MB base64 strings through the JS bridge
   // causes native heap OOM kills on Android.
-  const validShots = sorted.filter((s) => s.base64);
+  const validShots = allShots;
   const allUrls = [imageUrl, ...additionalUrls];
   const anglePayloads: AngleImagePayload[] = validShots.map((s, i) => ({
     key: ['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front',

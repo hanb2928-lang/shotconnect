@@ -848,7 +848,29 @@ function CameraScreenInner() {
     let scanId: string;
     let uploadedUrls: string[];
     try {
-      const result = await stereoMod.createScanFromAngleShots(sorted, controller.signal);
+      setStereoProgress((previous) => ({
+        ...previous,
+        currentStep: 0,
+        overallProgress: 0.03,
+        steps: previous.steps.map((step, index) => index === 0
+          ? { ...step, status: 'active', detail: '다각도 이미지 업로드 준비 중...' }
+          : step),
+      }));
+      const result = await stereoMod.createScanFromAngleShots(
+        sorted,
+        controller.signal,
+        (completed, total) => {
+          if (!isMountedRef.current || total <= 0) return;
+          setStereoProgress((previous) => ({
+            ...previous,
+            currentStep: 0,
+            overallProgress: 0.03 + (completed / total) * 0.17,
+            steps: previous.steps.map((step, index) => index === 0
+              ? { ...step, status: 'active', detail: `${completed}/${total}각도 이미지 업로드 중...` }
+              : step),
+          }));
+        },
+      );
       scanId = result.scanId;
       uploadedUrls = result.uploadedUrls;
     } catch (err) {
@@ -861,20 +883,36 @@ function CameraScreenInner() {
       return;
     }
 
-    if (isMountedRef.current) {
-      stereoOverlayRef.current = false;
-      setStereoOverlayVisible(false);
-      router.replace({ pathname: '/result/[id]', params: { id: scanId } });
-    }
-
     const pipelineShots = [...sorted];
-    nativeHeapCooldownGuard().finally(() => {
-      if (controller.signal.aborted) { releasePipelineLock(); return; }
-      stereoMod.runStereoPipeline(pipelineShots, () => {}, cleanMode, scanId, contentTone, studioSliders, uploadedUrls, controller.signal).catch(() => {}).finally(() => {
-        if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
-        releasePipelineLock();
-      });
-    });
+    try {
+      await nativeHeapCooldownGuard();
+      if (controller.signal.aborted) return;
+      const pipelineResult = await stereoMod.runStereoPipeline(
+        pipelineShots,
+        (progress) => {
+          if (isMountedRef.current) setStereoProgress(progress);
+        },
+        cleanMode,
+        scanId,
+        contentTone,
+        studioSliders,
+        uploadedUrls,
+        controller.signal,
+      );
+      if (isMountedRef.current) {
+        setStereoProgress((previous) => ({ ...previous, result: pipelineResult, overallProgress: 1 }));
+        stereoOverlayRef.current = false;
+        setStereoOverlayVisible(false);
+        router.replace({ pathname: '/result/[id]', params: { id: scanId } });
+      }
+    } catch (err) {
+      if (isMountedRef.current) {
+        setStereoProgress((previous) => ({ ...previous, error: friendlyError(err, 'AI 입체컷 생성에 실패했습니다.') }));
+      }
+    } finally {
+      if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
+      releasePipelineLock();
+    }
     sorted.length = 0;
     validShots.length = 0;
     shots.length = 0;
