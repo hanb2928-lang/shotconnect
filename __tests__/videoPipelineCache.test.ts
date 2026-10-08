@@ -26,6 +26,7 @@ jest.mock('@/lib/supabase', () => {
 jest.mock('@/lib/aiCache', () => ({
   getMultiAngleCache: jest.fn(),
   setMultiAngleCache: jest.fn(),
+  findSimilarMultiAngleCache: jest.fn(() => Promise.resolve(null)),
 }));
 
 jest.mock('@/hooks/useNetworkStatus', () => ({ isOnline: jest.fn(() => true) }));

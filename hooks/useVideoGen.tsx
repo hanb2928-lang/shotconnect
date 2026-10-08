@@ -231,17 +231,17 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             : baseProgress;
           return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(0.95, nextProgress)) };
         });
-      }, 1000);
+      }, 1500);
       creepTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           if (prev.progress >= 0.9) return prev;
           const serverProg = serverProgRef.current;
           const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, 0.9) : 0.9;
-          const nudge = prev.progress + 0.015;
+          const nudge = prev.progress + 0.02;
           return { ...prev, progress: Math.min(nudge, ceiling) };
         });
-      }, 2000);
+      }, 3000);
       // Hard progression guard: every 10 seconds, force progress forward by
       // 10% (up to 90%) so the bar can never freeze at a fixed value even
       // when the server is completely silent.
@@ -254,7 +254,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           if (serverProg !== null && serverProg > forced) return prev;
           return { ...prev, progress: forced };
         });
-      }, 10_000);
+      }, 12_000);
     };
     const stopTimers = () => {
       if (timer) { clearInterval(timer); timer = null; }
@@ -421,7 +421,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         if (!prev || prev.phase !== 'submitting') return prev;
         return { ...prev, progress: Math.max(prev.progress, simProgress), message: stepMsg };
       });
-    }, 200);
+    }, 300);
 
     let nudgeTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -448,7 +448,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           const next = Math.min(prev.progress + 0.008, 0.15);
           return { ...prev, progress: next, message: 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...' };
         });
-      }, 1500);
+      }, 2000);
 
       const { data: scanData, error: scanError } = await supabase
         .from('scans')

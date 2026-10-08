@@ -73,7 +73,7 @@ interface GenerateAiVideoOptions {
 
 
 const SUBMIT_MAX_RETRIES = 2;
-const SUBMIT_RETRY_DELAY_MS = 800;
+const SUBMIT_RETRY_DELAY_MS = 500;
 const REALTIME_TIMEOUT_MS = 300_000;
 const REALTIME_SOFT_WARN_MS = 120_000;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
@@ -296,7 +296,12 @@ export async function generateAiVideo(
   });
 
   if (options.imageHash && options.contentTone && !isDraft) {
-    const cached = await getMultiAngleCache(options.imageHash, options.contentTone, motionTemplateHash);
+    const [cached, similar] = await Promise.all([
+      getMultiAngleCache(options.imageHash, options.contentTone, motionTemplateHash),
+      options.contentTone
+        ? findSimilarMultiAngleCache(motionTemplateHash, options.contentTone, options.productVision?.productCategory)
+        : Promise.resolve(null),
+    ]);
     if (cached) {
       report('completed', 1.0, '캐시된 영상을 불러왔습니다.');
       return {
@@ -310,18 +315,6 @@ export async function generateAiVideo(
         provider: 'cache',
       };
     }
-  }
-
-  // Cross-user similar-template cache: if no exact match was found, search
-  // for entries with the same motion_template_hash and a compatible tone.
-  // This lets us reuse rendered videos from other users who chose similar
-  // style/duration/camera settings, skipping the GPU pipeline entirely.
-  if (options.contentTone && !isDraft) {
-    const similar = await findSimilarMultiAngleCache(
-      motionTemplateHash,
-      options.contentTone,
-      options.productVision?.productCategory,
-    );
     if (similar) {
       report('completed', 1.0, `유사 템플릿 매칭 — 즉시 완료 (유사도 ${Math.round(similar.similarityScore * 100)}%)`);
       // Store as an exact-match entry for this user's image hash so future
@@ -360,7 +353,6 @@ export async function generateAiVideo(
     try {
       if (attempt === 0) {
         await ensureFreshSession();
-        await yieldToUI();
       }
       // Soft timeout: nudge progress forward after 10s so the UI doesn't
       // appear frozen at 5-8% while the server is still processing.
@@ -1022,7 +1014,7 @@ export async function submitVideoJobAsync(
   onProgress?: (progress: VideoGenProgress) => void,
 ): Promise<SubmitOnlyResult> {
   const SUBMIT_TIMEOUT_MS = 90_000;
-  const SUBMIT_SOFT_TIMEOUT_MS = 10_000;
+  const SUBMIT_SOFT_TIMEOUT_MS = 7_000;
 
   const report = (phase: VideoGenPhase, progress: number, message: string) => {
     onProgress?.({ phase, progress, message, elapsedSec: 0 });
@@ -1067,7 +1059,6 @@ export async function submitVideoJobAsync(
   }));
 
   await ensureFreshSession();
-  await yieldToUI();
 
   report('submitting', 0.08, 'AI 렌더링 요청 전송 중...');
 
@@ -1376,7 +1367,7 @@ export async function upgradeVideoToHd(
   options: GenerateAiVideoOptions,
 ): Promise<{ hdTaskId: string; hdJobId: string }> {
   const HD_SUBMIT_TIMEOUT_MS = 90_000;
-  const HD_SUBMIT_SOFT_TIMEOUT_MS = 8_000;
+  const HD_SUBMIT_SOFT_TIMEOUT_MS = 6_000;
 
   const bodyJson = JSON.stringify(compactBody({
     mode: 'submit',
@@ -1417,7 +1408,6 @@ export async function upgradeVideoToHd(
   }));
 
   await ensureFreshSession();
-  await yieldToUI();
 
   const hdController = new AbortController();
   const hdTimeoutId = setTimeout(() => hdController.abort(), HD_SUBMIT_TIMEOUT_MS);
