@@ -16,10 +16,10 @@ export interface ResultPollingOptions {
   onSoftWarn?: () => void;
 }
 
-const POLL_FIRST_DELAY_MS = 3000;
-const POLL_INITIAL_MS = 5000;
+const POLL_FIRST_DELAY_MS = 5000;
+const POLL_INITIAL_MS = 7000;
 const POLL_MAX_MS = 30000;
-const POLL_BACKOFF_FACTOR = 2.0;
+const POLL_BACKOFF_FACTOR = 1.8;
 const SOFT_WARN_MS = 120_000;
 const HARD_TIMEOUT_MS = 300_000;
 const POLL_ERROR_WINDOW_MS = 60_000;

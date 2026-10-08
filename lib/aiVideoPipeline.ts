@@ -77,14 +77,14 @@ const SUBMIT_RETRY_DELAY_MS = 800;
 const REALTIME_TIMEOUT_MS = 300_000;
 const REALTIME_SOFT_WARN_MS = 120_000;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
-const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 10000;
-const RUNWAY_POLL_FALLBACK_START_MS = 15_000;
-const FIRST_POLL_DELAY_MS = 500;
-const POLL_MIN_INTERVAL_MS = 1500;
+const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 12000;
+const RUNWAY_POLL_FALLBACK_START_MS = 20_000;
+const FIRST_POLL_DELAY_MS = 3000;
+const POLL_MIN_INTERVAL_MS = 2000;
 const POLL_MAX_INTERVAL_MS = 15000;
 const POLL_BACKOFF_FACTOR = 1.6;
-const POLL_FAST_PHASE_MS = 10_000;
-const POLL_NORMAL_PHASE_MS = 20_000;
+const POLL_FAST_PHASE_MS = 15_000;
+const POLL_NORMAL_PHASE_MS = 30_000;
 const CHANNEL_RECONNECT_DELAY_MS = 3000;
 const JITTER = () => 0.8 + Math.random() * 0.4;
 const CHANNEL_MAX_RECONNECT_ATTEMPTS = 5;
@@ -143,7 +143,7 @@ function computeBackoffDelay(attempt: number, elapsedMs?: number): number {
   const attemptBased = Math.min(Math.round(base), POLL_MAX_INTERVAL_MS);
   if (elapsedMs == null) return attemptBased;
   if (elapsedMs < POLL_FAST_PHASE_MS) return POLL_MIN_INTERVAL_MS;
-  if (elapsedMs < POLL_NORMAL_PHASE_MS) return Math.min(3000, attemptBased);
+  if (elapsedMs < POLL_NORMAL_PHASE_MS) return Math.min(4000, attemptBased);
   return attemptBased;
 }
 
