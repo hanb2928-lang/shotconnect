@@ -4,13 +4,15 @@ export const ACTIVE_VIDEO_JOB_KEY = 'active_video_job';
 
 export interface ActiveVideoJob {
   jobId: string;
+  scanId: string | null;
   step: string;
   startedAt: number;
 }
 
-export async function saveActiveVideoJob(jobId: string, step: string): Promise<void> {
+export async function saveActiveVideoJob(jobId: string, step: string, scanId?: string | null): Promise<void> {
   const data: ActiveVideoJob = {
     jobId,
+    scanId: scanId ?? null,
     step,
     startedAt: Date.now(),
   };

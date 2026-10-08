@@ -111,11 +111,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       const active = await getActiveVideoJob();
       if (cancelled || !active || !active.jobId) return;
       try {
-        const { data, error: dbError } = await supabase
-          .from('video_jobs')
-          .select('status')
-          .eq('id', active.jobId)
-          .maybeSingle();
+        const isSoft = active.jobId.startsWith('soft-') || active.jobId.startsWith('hd-soft-');
+        let query = supabase.from('video_jobs').select('status');
+        const { data, error: dbError } = isSoft && active.scanId
+          ? await query.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+          : await query.eq('task_id', active.jobId).maybeSingle();
         if (cancelled) return;
         if (dbError || !data) {
           clearActiveVideoJob();
@@ -126,6 +126,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           clearActiveVideoJob();
           return;
         }
+        if (active.scanId) scanIdRef.current = active.scanId;
         jobIdRef.current = active.jobId;
         setJobId(active.jobId);
         setIsGenerating(true);
@@ -476,7 +477,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       nudgeTimer = null;
       jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
-      await saveActiveVideoJob(submitResult.taskId, 'submitting');
+      await saveActiveVideoJob(submitResult.taskId, 'submitting', scanIdRef.current);
       setVideoProgress({ phase: 'generating', progress: 0.15, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; }

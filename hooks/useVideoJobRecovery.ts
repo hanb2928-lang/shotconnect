@@ -44,11 +44,20 @@ export function useVideoJobRecovery() {
 
     try {
       await ensureFreshSession();
-      const queryPromise = supabase
+      const isSoft = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
+
+      // For soft-fallback IDs, no DB row has that task_id — look up by
+      // scan_id instead (stored in the persisted ActiveVideoJob).
+      const activeJob = await getActiveVideoJob();
+      const scanId = activeJob?.scanId ?? null;
+
+      let query = supabase
         .from('video_jobs')
-        .select('id, status, step, video_url, error_message')
-        .eq('task_id', jobId)
-        .maybeSingle();
+        .select('id, status, step, video_url, error_message');
+
+      const queryPromise = (isSoft && scanId)
+        ? query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+        : query.eq('task_id', jobId).maybeSingle();
 
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
