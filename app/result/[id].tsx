@@ -126,6 +126,7 @@ import { buildShortFormEditPlan, type ContentTone } from '@/lib/shortFormEditEng
 import { getBgmTemplateForMood } from '@/lib/bgmEngine';
 import { buildNarrativePlan, getNarrativeSummary, type NarrativePlan } from '@/lib/humanRealityNarrativeEngine';
 import { submitVideoJobAsync, subscribeVideoJob, upgradeVideoToHd, subscribeHdUpgrade, recoverVideoJob, type VideoGenProgress } from '@/lib/aiVideoPipeline';
+import { stepToProgress } from '@/lib/videoGenSteps';
 import { analyzeProductVision, type ProductVisionResult } from '@/lib/productVision';
 import {
   buildViralAudioSyncProfile,
@@ -474,6 +475,9 @@ export default function ResultScreen() {
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const generatedVideoUrlRef = useRef<string | null>(null);
   const [videoGenProgress, setVideoGenProgress] = useState<VideoGenProgress | null>(null);
+  const serverStepStallRef = useRef<{ step: string; since: number } | null>(null);
+  const stepAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const localPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [videoStage, setVideoStage] = useState<'idle' | 'drafting' | 'draft_ready' | 'hd_upgrading' | 'hd_ready' | 'failed'>('idle');
   const [draftVideoUrl, setDraftVideoUrl] = useState<string | null>(null);
   const [hdUpgradeProgress, setHdUpgradeProgress] = useState<string | null>(null);
@@ -546,6 +550,138 @@ export default function ResultScreen() {
     generatedVideoUrlRef.current = generatedVideoUrl;
   }, [generatedVideoUrl]);
   const bgVideoChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  // Step-stall guard: if the server step doesn't change for 4 seconds while
+  // generating, force-advance the local progress to the next step threshold so
+  // the bottom sequence icons keep moving even when Realtime is disconnected
+  // or the server hasn't updated the step field yet.
+  useEffect(() => {
+    if (!isGeneratingVideo || !videoGenProgress) {
+      serverStepStallRef.current = null;
+      if (stepAdvanceTimerRef.current) {
+        clearInterval(stepAdvanceTimerRef.current);
+        stepAdvanceTimerRef.current = null;
+      }
+      return;
+    }
+
+    const STEP_STALL_MS = 4000;
+    const stepOrder = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering', 'finalizing'] as const;
+    const stepThresholds: Record<string, number> = {
+      analyzing: 0.05,
+      hooking: 0.15,
+      planning: 0.25,
+      submitting: 0.35,
+      rendering: 0.50,
+      finalizing: 0.95,
+    };
+
+    if (!stepAdvanceTimerRef.current) {
+      stepAdvanceTimerRef.current = setInterval(() => {
+        if (!mountedRef.current) return;
+        setVideoGenProgress((prev) => {
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+          const currentStep = prev.serverStep ?? 'analyzing';
+          const now = Date.now();
+          if (!serverStepStallRef.current || serverStepStallRef.current.step !== currentStep) {
+            serverStepStallRef.current = { step: currentStep, since: now };
+            return prev;
+          }
+          const stalledFor = now - serverStepStallRef.current.since;
+          if (stalledFor < STEP_STALL_MS) return prev;
+
+          const idx = stepOrder.indexOf(currentStep as typeof stepOrder[number]);
+          if (idx < 0 || idx >= stepOrder.length - 1) return prev;
+          const nextStep = stepOrder[idx + 1];
+          const nextThreshold = stepThresholds[nextStep] ?? prev.progress;
+          serverStepStallRef.current = { step: nextStep, since: now };
+          const nextLabel: Record<string, string> = {
+            planning: '편집 플랜 구성 중...',
+            submitting: 'AI 렌더링 요청 중...',
+            rendering: '영상 렌더링 중...',
+            finalizing: '최종 자막 합성 중...',
+          };
+          return {
+            ...prev,
+            serverStep: nextStep,
+            progress: Math.max(prev.progress, nextThreshold),
+            message: nextLabel[nextStep] ?? prev.message,
+          };
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (stepAdvanceTimerRef.current) {
+        clearInterval(stepAdvanceTimerRef.current);
+        stepAdvanceTimerRef.current = null;
+      }
+    };
+  }, [isGeneratingVideo, videoGenProgress?.phase]);
+
+  // Local DB poll fallback: every 2 seconds while generating, read the
+  // video_jobs row directly for the current scan and update serverStep /
+  // progress. This keeps the UI in sync even when the Realtime websocket
+  // is dropped (common on native when backgrounded).
+  useEffect(() => {
+    if (!isGeneratingVideo || !scan) {
+      if (localPollTimerRef.current) {
+        clearInterval(localPollTimerRef.current);
+        localPollTimerRef.current = null;
+      }
+      return;
+    }
+    if (localPollTimerRef.current) return;
+
+    localPollTimerRef.current = setInterval(async () => {
+      if (!mountedRef.current || !scan) return;
+      try {
+        const { data, error } = await supabase
+          .from('video_jobs')
+          .select('status, step, video_url, error_message')
+          .eq('scan_id', scan.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error || !data) return;
+        const row = data as { status: string; step?: string | null; video_url?: string | null; error_message?: string | null };
+        if (row.status === 'SUCCESS' && row.video_url) return;
+        if (row.status === 'FAILED') return;
+        const sp = stepToProgress(row.step);
+        if (!sp) return;
+        setVideoGenProgress((prev) => {
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+          if (row.step && row.step !== prev.serverStep) {
+            serverStepStallRef.current = { step: row.step, since: Date.now() };
+          }
+          const stepLabel: Record<string, string> = {
+            analyzing: '다각도 컷 분석 중...',
+            hooking: '훅 문구 추출 중...',
+            planning: '편집 플랜 구성 중...',
+            submitting: 'AI 렌더링 요청 중...',
+            rendering: '영상 렌더링 중...',
+            finalizing: '최종 자막 합성 중...',
+          };
+          const label = row.step ? (stepLabel[row.step] ?? prev.message) : prev.message;
+          return {
+            ...prev,
+            serverStep: row.step ?? prev.serverStep,
+            progress: Math.max(prev.progress, sp),
+            message: label,
+          };
+        });
+      } catch {
+        // non-fatal — Realtime + step guard still work
+      }
+    }, 2000);
+
+    return () => {
+      if (localPollTimerRef.current) {
+        clearInterval(localPollTimerRef.current);
+        localPollTimerRef.current = null;
+      }
+    };
+  }, [isGeneratingVideo, scan]);
 
   const applyCombinedPreset = useCallback((platform: TargetPlatformKey, purpose: ContentPurpose) => {
     const pp = TARGET_PLATFORM_PRESETS[platform];
@@ -860,6 +996,9 @@ export default function ResultScreen() {
           hdUpscale,
           draft: true,
           selectedMode: videoGenMode === 'auto' ? 'auto_3d' : 'manual',
+          enableOrbit360: videoGenMode === 'auto' || isCleanVideoMode,
+          orbitSpeed: 1.0,
+          enableFabricPhysics: isCleanVideoMode,
           memeFormat: isCleanVideoMode ? undefined : (contentPurpose === 'monetization' ? 'relatable-agony' : 'reverse-psychology'),
           memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || ''),
         },
@@ -915,6 +1054,32 @@ export default function ResultScreen() {
         if (!mountedRef.current) return;
         try {
         clearDraftProgress();
+        if (result.status !== 'SUCCESS' && result.status !== 'FAILED') {
+          if (result.step || result.progress != null) {
+            setVideoGenProgress((prev) => {
+              if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+              const serverProgress = typeof result.progress === 'number' && Number.isFinite(result.progress)
+                ? Math.max(0, Math.min(0.95, result.progress))
+                : prev.progress;
+              const stepLabel = result.step === 'hooking'
+                ? '훅 문구 추출 중...'
+                : result.step === 'planning'
+                  ? '편집 플랜 구성 중...'
+                  : result.step === 'submitting'
+                    ? 'AI 렌더링 요청 중...'
+                    : result.step === 'rendering'
+                      ? '영상 렌더링 중...'
+                      : prev.message;
+              return {
+                ...prev,
+                progress: Math.max(prev.progress, serverProgress),
+                serverStep: result.step ?? prev.serverStep,
+                message: stepLabel,
+              };
+            });
+          }
+          return;
+        }
         if (result.status === 'SUCCESS' && result.videoUrl) {
           setDraftVideoUrl(result.videoUrl);
           setGeneratedVideoUrl(result.videoUrl);
@@ -952,6 +1117,9 @@ export default function ResultScreen() {
             detailRestoration: targetMediaType === 'image' ? detailRestoration : undefined,
             hdUpscale: true,
             selectedMode: videoGenMode === 'auto' ? 'auto_3d' : 'manual',
+            enableOrbit360: videoGenMode === 'auto' || isCleanVideoMode,
+            orbitSpeed: 1.0,
+            enableFabricPhysics: isCleanVideoMode,
             memeFormat: isCleanVideoMode ? undefined : (contentPurpose === 'monetization' ? 'relatable-agony' : 'reverse-psychology'),
             memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || ''),
           }).then(({ hdJobId }) => {

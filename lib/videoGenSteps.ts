@@ -118,9 +118,9 @@ export function resolveVideoGenSteps(progress: VideoGenProgress | null): VideoGe
   // force-jump to match the server's actual position.
   const serverStepProgress = stepToProgress(progress.serverStep);
   if (serverStepProgress !== null && serverStepProgress > 0) {
-    // Use the higher of (creep percentage, server step progress) so the
-    // bar never goes backward, but the step icons bind to the server.
-    const effectiveProgress = Math.max(p, serverStepProgress);
+    // The progress bar may continue its visual creep, but the step icons must
+    // follow the authoritative server stage instead of a stale local percentage.
+    const effectiveProgress = serverStepProgress;
     let activeFound = false;
 
     return VIDEO_GEN_STEPS.map((s) => {

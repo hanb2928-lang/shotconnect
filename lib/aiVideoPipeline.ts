@@ -1153,7 +1153,13 @@ export async function submitVideoJobAsync(
   };
 }
 
-export type VideoJobCallback = (result: { status: 'SUCCESS' | 'FAILED'; videoUrl?: string; error?: string }) => void;
+export type VideoJobCallback = (result: {
+  status: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
+  step?: string | null;
+  progress?: number | null;
+  videoUrl?: string;
+  error?: string;
+}) => void;
 
 /**
  * Subscribe to a video job via Supabase Realtime on the video_jobs table.
@@ -1182,7 +1188,7 @@ export function subscribeVideoJob(
     try {
       let query = supabase
         .from('video_jobs')
-        .select('status, video_url, error_message')
+        .select('status, step, video_url, error_message')
         .eq('scan_id', scanId);
       // For soft-fallback task IDs, no real DB row has that ID — look up
       // by scan_id only and take the most recent row.
@@ -1199,11 +1205,18 @@ export function subscribeVideoJob(
       if (row.status === 'SUCCESS' && row.video_url) {
         settled = true;
         cleanup();
-        callback({ status: 'SUCCESS', videoUrl: row.video_url });
+        callback({ status: 'SUCCESS', step: row.step, progress: 1, videoUrl: row.video_url });
       } else if (row.status === 'FAILED') {
         settled = true;
         cleanup();
-        callback({ status: 'FAILED', error: row.error_message ?? '비디오 생성에 실패했습니다.' });
+        callback({ status: 'FAILED', step: row.step, progress: 0, error: row.error_message ?? '비디오 생성에 실패했습니다.' });
+      } else {
+        const stepProgress = stepToProgress(row.step);
+        callback({
+          status: row.status === 'PROCESSING' ? 'PROCESSING' : 'PENDING',
+          step: row.step,
+          progress: stepProgress,
+        });
       }
     } catch (err) {
       consecutivePollFailures++;
@@ -1277,12 +1290,19 @@ export function subscribeVideoJob(
               if (settled) return;
               settled = true;
               cleanup();
-              callback({ status: 'SUCCESS', videoUrl: row.video_url });
+              callback({ status: 'SUCCESS', step: row.step, progress: 1, videoUrl: row.video_url });
             } else if (row.status === 'FAILED') {
               if (settled) return;
               settled = true;
               cleanup();
-              callback({ status: 'FAILED', error: row.error_message ?? '비디오 생성에 실패했습니다.' });
+              callback({ status: 'FAILED', step: row.step, progress: 0, error: row.error_message ?? '비디오 생성에 실패했습니다.' });
+            } else {
+              const stepProgress = stepToProgress(row.step);
+              callback({
+                status: row.status === 'PROCESSING' ? 'PROCESSING' : 'PENDING',
+                step: row.step,
+                progress: stepProgress,
+              });
             }
           } catch (err) {
             addBreadcrumb('realtime', 'Realtime callback error', 'warning');
