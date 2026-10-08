@@ -33,6 +33,7 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 
 interface ProjectStudioViewProps {
   jobId: string | null;
+  scanId?: string | null;
   onRetry?: () => void;
   onBack?: () => void;
 }
@@ -47,8 +48,8 @@ const STEP_META: Record<ProjectStep, { label: string; icon: typeof Film; color: 
 
 const STEP_ORDER: ProjectStep[] = ['uploading', 'rendering', 'completed'];
 
-export function ProjectStudioView({ jobId, onRetry, onBack }: ProjectStudioViewProps) {
-  const { step, data } = useProjectPhase(jobId);
+export function ProjectStudioView({ jobId, scanId, onRetry, onBack }: ProjectStudioViewProps) {
+  const { step, data } = useProjectPhase(jobId, { scanId });
 
   switch (step) {
     case 'idle':

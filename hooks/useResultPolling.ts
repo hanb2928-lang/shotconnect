@@ -92,6 +92,8 @@ export function useResultPolling(
     let pollAbort: AbortController | null = null;
     let forceSyncAbort: AbortController | null = null;
     let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    // Hoisted early so cleanup() can reference it without TDZ issues.
+    let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
     const pollErrorWindow: number[] = [];
     let pollAttempt = 0;
 
@@ -363,14 +365,15 @@ export function useResultPolling(
     const RESUME_BURST_INTERVAL_MS = 1500;
     const RESUME_BURST_COUNT = 3;
     let resumeBurstCount = 0;
-    let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
     const runResumeBurst = async () => {
       if (cancelled || settledRef.current || resumeBurstCount >= RESUME_BURST_COUNT) {
         resumeBurstTimer = null;
         return;
       }
       resumeBurstCount++;
-      if (resumeBurstCount === 1) await ensureFreshSession();
+      if (resumeBurstCount === 1) {
+        try { await ensureFreshSession(); } catch { /* non-fatal */ }
+      }
       pollOnce();
       resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
     };

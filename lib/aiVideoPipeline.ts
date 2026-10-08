@@ -592,6 +592,16 @@ function waitForVideoCompletion(
     let reconnectAttempts = 0;
     let pollBackoffAttempt = 0;
 
+    // All timers declared early so cleanup/fullCleanup/finish can reference them
+    // without hitting a temporal dead zone (TDZ).
+    let softWarnTimer: ReturnType<typeof setTimeout> | null = null;
+    let runwayPollTimer: ReturnType<typeof setTimeout> | null = null;
+    let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+    let bgTimer: ReturnType<typeof setTimeout> | null = null;
+    let runwayFallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
+    let isBackgrounded = false;
+    let appSub: { remove: () => void } | null = null;
+
     const cleanup = () => {
       if (channel) supabase.removeChannel(channel);
       if (pollTimer) clearTimeout(pollTimer);
@@ -600,12 +610,6 @@ function waitForVideoCompletion(
       if (runwayPollTimer) clearTimeout(runwayPollTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };
-
-    // Background pause state — declared early so cleanup/finish can reference them
-    let bgTimer: ReturnType<typeof setTimeout> | null = null;
-    let runwayFallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
-    let isBackgrounded = false;
-    let appSub: { remove: () => void } | null = null;
 
     const fullCleanup = () => {
       cleanup();
@@ -831,7 +835,7 @@ function waitForVideoCompletion(
     // Runway API direct-poll fallback: after 15s, if DB still shows no result,
     // poll the Runway API directly every 15s as a second safety net.
     // This catches cases where the webhook fails but Runway has the video ready.
-    let runwayPollTimer: ReturnType<typeof setTimeout> | null = null;
+    // (runwayPollTimer declared early above for TDZ safety)
     const startRunwayPollFallback = () => {
       if (settled || runwayPollTimer) return;
       // Skip Runway API direct poll when the task ID is a soft-fallback
@@ -898,7 +902,8 @@ function waitForVideoCompletion(
     runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
 
     // Soft warning at 120s — don't reject, just inform the user
-    let softWarnTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+    // (softWarnTimer declared early above for TDZ safety)
+    softWarnTimer = setTimeout(() => {
       if (settled) return;
       const elapsedSec = monotonicElapsedSec(startTime);
       report('generating', 0.85, `렌더링이 조금 오래 걸리고 있어요 (${elapsedSec}초). 백그라운드에서 계속 진행 중입니다...`);
@@ -940,14 +945,16 @@ function waitForVideoCompletion(
     const RESUME_BURST_INTERVAL_MS = 1500;
     const RESUME_BURST_COUNT = 3;
     let resumeBurstCount = 0;
-    let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+    // (resumeBurstTimer declared early above for TDZ safety)
     const runResumeBurst = async () => {
       if (settled || resumeBurstCount >= RESUME_BURST_COUNT) {
         resumeBurstTimer = null;
         return;
       }
       resumeBurstCount++;
-      if (resumeBurstCount === 1) await ensureFreshSession();
+      if (resumeBurstCount === 1) {
+        try { await ensureFreshSession(); } catch { /* non-fatal */ }
+      }
       checkDb();
       checkScanVideoUrl();
       resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
@@ -1222,7 +1229,9 @@ export function subscribeVideoJob(
       return;
     }
     resumeBurstCount++;
-    if (resumeBurstCount === 1) await ensureFreshSession();
+    if (resumeBurstCount === 1) {
+      try { await ensureFreshSession(); } catch { /* non-fatal */ }
+    }
     checkAndNotify();
     resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
   };
@@ -1532,7 +1541,9 @@ export function subscribeHdUpgrade(
       return;
     }
     resumeBurstCount++;
-    if (resumeBurstCount === 1) await ensureFreshSession();
+    if (resumeBurstCount === 1) {
+      try { await ensureFreshSession(); } catch { /* non-fatal */ }
+    }
     checkAndNotify();
     resumeBurstTimer = setTimeout(runResumeBurst, 1500);
   };

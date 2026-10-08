@@ -12,7 +12,12 @@ interface VideoJobRow {
   [key: string]: unknown;
 }
 
-export function useProjectPhase(jobId: string | null) {
+interface UseProjectPhaseOptions {
+  scanId?: string | null;
+}
+
+export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOptions = {}) {
+  const { scanId } = options;
   const [step, setStep] = useState<ProjectStep>('idle');
   const [data, setData] = useState<VideoJobRow | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -22,14 +27,16 @@ export function useProjectPhase(jobId: string | null) {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
+    const isSoft = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
+    const useScanId = isSoft && scanId;
+
     (async () => {
       if (cancelled) return;
 
-      const queryPromise = supabase
-        .from('video_jobs')
-        .select('*')
-        .eq('id', jobId)
-        .maybeSingle();
+      let query = supabase.from('video_jobs').select('*');
+      const queryPromise = useScanId
+        ? query.eq('scan_id', scanId!).order('created_at', { ascending: false }).limit(1).maybeSingle()
+        : query.eq('task_id', jobId).maybeSingle();
 
       timeoutId = setTimeout(() => {
         if (!cancelled) {
@@ -59,7 +66,7 @@ export function useProjectPhase(jobId: string | null) {
             event: 'UPDATE',
             schema: 'public',
             table: 'video_jobs',
-            filter: `id=eq.${jobId}`,
+            filter: useScanId ? `scan_id=eq.${scanId}` : `task_id=eq.${jobId}`,
           },
           (payload) => {
             if (cancelled) return;
@@ -81,7 +88,7 @@ export function useProjectPhase(jobId: string | null) {
         channelRef.current = null;
       }
     };
-  }, [jobId]);
+  }, [jobId, scanId]);
 
   return { step, data };
 }

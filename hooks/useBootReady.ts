@@ -62,6 +62,9 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
     initStartedRef.current = true;
 
     let cancelled = false;
+    let storageTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let hardTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let pollId: ReturnType<typeof setInterval> | null = null;
 
     const resourcePromise = (async () => {
       // Storage was kicked off at module scope in _layout. Await it
@@ -69,13 +72,15 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
       // block boot forever.
       await Promise.race([
         initStorage(),
-        new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+        new Promise<void>((resolve) => {
+          storageTimeoutId = setTimeout(resolve, 1000);
+        }),
       ]);
     })();
 
-    const hardTimeout = new Promise<void>((resolve) =>
-      setTimeout(resolve, BOOT_READY_TIMEOUT_MS),
-    );
+    const hardTimeout = new Promise<void>((resolve) => {
+      hardTimeoutId = setTimeout(resolve, BOOT_READY_TIMEOUT_MS);
+    });
 
     Promise.race([resourcePromise, hardTimeout]).then(() => {
       if (cancelled) return;
@@ -88,20 +93,29 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
       } else {
         // Poll for font readiness up to 1 more second.
         const pollEnd = Date.now() + 1000;
-        const pollId = setInterval(() => {
-          if (cancelled) { clearInterval(pollId); return; }
+        pollId = setInterval(() => {
+          if (cancelled) { if (pollId) clearInterval(pollId); return; }
           if (checkReady() || Date.now() > pollEnd) {
-            clearInterval(pollId);
+            if (pollId) clearInterval(pollId);
             // Force-ready after timeout: better to show the app with
             // system fonts than to hang on the splash forever.
             setIsBootReady(true);
           }
         }, 50);
       }
+    }).catch(() => {
+      if (cancelled) return;
+      // If resourcePromise rejects (e.g. initStorage throws before
+      // the timeout fallback resolves), still proceed to boot — the
+      // hard timeout would have done the same.
+      setIsBootReady(true);
     });
 
     return () => {
       cancelled = true;
+      if (storageTimeoutId) clearTimeout(storageTimeoutId);
+      if (hardTimeoutId) clearTimeout(hardTimeoutId);
+      if (pollId) clearInterval(pollId);
     };
   }, [bootPhase, fontsReady, checkReady]);
 

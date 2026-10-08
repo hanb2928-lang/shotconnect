@@ -48,7 +48,7 @@ async function forceTrackedNativeUpload<T>(
   console.error(`[NATIVE UPLOAD] ${contextName} - attempt #${currentCount}`);
   try {
     const result = await uploadFn();
-    console.log(`[NATIVE UPLOAD OK] ${contextName} (succeeded on attempt #${currentCount})`);
+    console.warn(`[NATIVE UPLOAD OK] ${contextName} (succeeded on attempt #${currentCount})`);
     return result;
   } catch (err: unknown) {
     const errAny = err as Record<string, unknown> | undefined;
