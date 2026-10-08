@@ -860,6 +860,8 @@ export default function ResultScreen() {
           hdUpscale,
           draft: true,
           selectedMode: videoGenMode === 'auto' ? 'auto_3d' : 'manual',
+          memeFormat: isCleanVideoMode ? undefined : (contentPurpose === 'monetization' ? 'relatable-agony' : 'reverse-psychology'),
+          memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || ''),
         },
       );
 
@@ -950,6 +952,8 @@ export default function ResultScreen() {
             detailRestoration: targetMediaType === 'image' ? detailRestoration : undefined,
             hdUpscale: true,
             selectedMode: videoGenMode === 'auto' ? 'auto_3d' : 'manual',
+            memeFormat: isCleanVideoMode ? undefined : (contentPurpose === 'monetization' ? 'relatable-agony' : 'reverse-psychology'),
+            memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || ''),
           }).then(({ hdJobId }) => {
             if (!mountedRef.current) return;
             hdUnsubRef.current = subscribeHdUpgrade(scan.id, submitResult.taskId, (hdResult) => {
@@ -1027,7 +1031,7 @@ export default function ResultScreen() {
         draftProgressTimerRef.current = null;
       }
     }
-  }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage]);
+  }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage, contentPurpose]);
 
   const imageGenLockRef = useRef(false);
   const handleAiImageGenerate = useCallback(async () => {
@@ -2685,7 +2689,7 @@ export default function ResultScreen() {
         featureCopy: productVision.visualFeatures.slice(0, 3).join(' · ') || secondary,
         ctaCopy: tertiary,
         subtitleCopy: secondary,
-      });
+      }, Math.max(3, selectedDurationMs / 1000));
     }
     const hookText = activeHook || activeOneLiner || sanitizeVideoText(scan?.summary) || sanitizeVideoProductName(scan?.product_name) || sanitizeVideoText(scan?.one_liner) || '시선 집중! 지금 바로 확인하세요';
     const ctaText = shortUrl ? `자세히 보기 ${shortUrl}` : '지금 확인하세요';
@@ -2697,8 +2701,8 @@ export default function ResultScreen() {
       featureCopy: featureText,
       ctaCopy: ctaText,
       subtitleCopy: featureText,
-    });
-  }, [productVision, isCleanVideoMode, activeHook, activeOneLiner, scan?.summary, scan?.product_name, scan?.one_liner, activeCaption, inlineEdit.captionText, shortUrl]);
+    }, Math.max(3, selectedDurationMs / 1000));
+  }, [productVision, isCleanVideoMode, activeHook, activeOneLiner, scan?.summary, scan?.product_name, scan?.one_liner, activeCaption, inlineEdit.captionText, shortUrl, selectedDurationMs]);
 
   const trendingSuggestions = getTrendingSuggestions(trendingHashtags, [...activeHashtags, ...addedHashtags]);
 
@@ -3237,7 +3241,7 @@ export default function ResultScreen() {
               productName={activeProductName || scan?.product_name || ''}
               caption={activeCaption}
               hashtags={allDisplayHashtags}
-              videoDurationSec={15}
+              videoDurationSec={Math.max(3, Math.round(selectedDurationMs / 1000))}
             />
           ),
         },

@@ -128,8 +128,13 @@ function detectMood(productCategory: string, customPrompt: string): string {
 }
 
 function pickTemplate(templates: string[], productName: string): string {
-  const idx = Math.floor(Math.random() * templates.length);
-  return templates[idx].replace('이거', productName).replace('이 제품', productName);
+  let hash = 2166136261;
+  for (let index = 0; index < productName.length; index += 1) {
+    hash ^= productName.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const idx = (hash >>> 0) % templates.length;
+  return templates[idx].replaceAll('이거', productName).replaceAll('이 제품', productName);
 }
 
 function generateHookCandidate(
@@ -188,15 +193,14 @@ export async function autoSelectHookCached(input: ProductAnalysisInput): Promise
 
 function computeAutoHook(input: ProductAnalysisInput): AutoHookResult {
   const productName = input.productName?.trim() || '이 제품';
-  const nameShort = productName.length > 10 ? productName.slice(0, 10) + '...' : productName;
   const category = detectCategory(input.productCategory || '', productName, input.customPrompt || '');
   const audience = detectAudience(input.productCategory || '', input.customPrompt || '');
   const mood = detectMood(input.productCategory || '', input.customPrompt || '');
 
   const candidates: HookCandidate[] = [
-    generateHookCandidate('stimulus', STIMULUS_TEMPLATES, nameShort, 'shock', '손실 회피 역전'),
-    generateHookCandidate('curiosity', CURIOSITY_TEMPLATES, nameShort, 'curiosity', '정보 갭 자극'),
-    generateHookCandidate('benefit', BENEFIT_TEMPLATES, nameShort, 'desire', '즉각적 보상 추구'),
+    generateHookCandidate('stimulus', STIMULUS_TEMPLATES, productName, 'shock', '손실 회피 역전'),
+    generateHookCandidate('curiosity', CURIOSITY_TEMPLATES, productName, 'curiosity', '정보 갭 자극'),
+    generateHookCandidate('benefit', BENEFIT_TEMPLATES, productName, 'desire', '즉각적 보상 추구'),
   ];
 
   const catWeights = CATEGORY_HOOK_WEIGHTS[category] ?? CATEGORY_HOOK_WEIGHTS.default;

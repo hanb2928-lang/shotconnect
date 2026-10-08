@@ -46,6 +46,8 @@ interface RenderPlanResponse {
   title: string;
   hashtags: string[];
   shortUrl: string;
+  memeFormat?: string;
+  memeText?: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -188,6 +190,23 @@ Deno.serve(async (req: Request) => {
       fontWeight: "400",
     });
 
+    // Scene 9: Meme overlay (10% - 60%) — burn-in meme caption
+    const memeFormat = (payload.memeFormat as string) ?? "";
+    const memeText = (payload.memeText as string) ?? "";
+    if (memeText) {
+      scenes.push({
+        type: "text",
+        text: memeText,
+        startTime: duration * 0.10,
+        endTime: duration * 0.60,
+        easing: "ease-in-out",
+        color: "#ffffff",
+        fontSize: Math.round(targetHeight * 0.05),
+        fontWeight: "800",
+        position: { x: targetWidth / 2, y: Math.round(targetHeight * 0.75) },
+      });
+    }
+
     const result: RenderPlanResponse = {
       status: "ok",
       quality,
@@ -213,6 +232,8 @@ Deno.serve(async (req: Request) => {
       title,
       hashtags,
       shortUrl,
+      memeFormat,
+      memeText,
     };
 
     return new Response(JSON.stringify(result), {

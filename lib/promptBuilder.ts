@@ -135,13 +135,26 @@ export interface CopyOverlayTimeline {
   style: 'title' | 'feature' | 'cta';
 }
 
-export function buildCopyOverlayTimeline(copySet: MarketingCopySet): CopyOverlayTimeline[] {
-  return [
-    { startSec: 0, endSec: 3.5, text: copySet.hookCopy, position: 'top', style: 'title' },
-    { startSec: 3.5, endSec: 7.5, text: copySet.title, position: 'center', style: 'title' },
-    { startSec: 7.5, endSec: 11.5, text: copySet.featureCopy, position: 'bottom', style: 'feature' },
-    { startSec: 11.5, endSec: 15, text: copySet.ctaCopy, position: 'bottom', style: 'cta' },
+export function buildCopyOverlayTimeline(copySet: MarketingCopySet, durationSec = 15): CopyOverlayTimeline[] {
+  const duration = Math.max(2, durationSec);
+  const segments = [
+    { text: copySet.hookCopy, position: 'top' as const, style: 'title' as const, share: 0.22 },
+    { text: copySet.title, position: 'center' as const, style: 'title' as const, share: 0.23 },
+    { text: copySet.featureCopy, position: 'bottom' as const, style: 'feature' as const, share: 0.23 },
+    { text: copySet.subtitleCopy, position: 'center' as const, style: 'feature' as const, share: 0.12 },
+    { text: copySet.ctaCopy, position: 'bottom' as const, style: 'cta' as const, share: 0.20 },
   ];
+  let cursor = 0;
+  return segments
+    .filter((segment) => segment.text.trim().length > 0)
+    .map((segment, index, visibleSegments) => {
+      const startSec = cursor;
+      const endSec = index === visibleSegments.length - 1
+        ? duration
+        : Math.min(duration, cursor + duration * segment.share);
+      cursor = endSec;
+      return { startSec, endSec, text: segment.text, position: segment.position, style: segment.style };
+    });
 }
 
 export function getActiveCopyOverlay(timeline: CopyOverlayTimeline[], currentSec: number): CopyOverlayTimeline | null {

@@ -42,6 +42,8 @@ interface GenerateAiVideoOptions {
   captionText?: string;
   platform?: string;
   hookCategory?: string;
+  memeFormat?: string;
+  memeText?: string;
   cutCount?: number;
   productVision?: ProductVisionResult | null;
   draft?: boolean;
@@ -373,6 +375,8 @@ export async function generateAiVideo(
           captionText: options.captionText,
           platform: options.platform ?? 'shorts',
           hookCategory: options.hookCategory ?? 'curiosity',
+          memeFormat: options.memeFormat,
+          memeText: options.memeText,
           cutCount: options.cutCount,
           productVision: options.productVision,
           draft: isDraft,
@@ -1032,6 +1036,8 @@ export async function submitVideoJobAsync(
     captionText: options.captionText,
     platform: options.platform ?? 'shorts',
     hookCategory: options.hookCategory ?? 'curiosity',
+    memeFormat: options.memeFormat,
+    memeText: options.memeText,
     cutCount: options.cutCount,
     productVision: options.productVision,
     draft: options.draft,
@@ -1381,6 +1387,8 @@ export async function upgradeVideoToHd(
     captionText: options.captionText,
     platform: options.platform ?? 'shorts',
     hookCategory: options.hookCategory ?? 'curiosity',
+    memeFormat: options.memeFormat,
+    memeText: options.memeText,
     cutCount: options.cutCount,
     productVision: options.productVision,
     draft: false,

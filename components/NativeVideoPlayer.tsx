@@ -5,12 +5,13 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 interface NativeVideoPlayerProps {
   videoUri: string;
   isPlaying: boolean;
+  ttsUrl?: string | null;
   onLoad?: () => void;
   onError?: () => void;
   style?: object;
 }
 
-export function NativeVideoPlayer({ videoUri, isPlaying, onLoad, onError, style }: NativeVideoPlayerProps) {
+export function NativeVideoPlayer({ videoUri, isPlaying, ttsUrl, onLoad, onError, style }: NativeVideoPlayerProps) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const onLoadRef = useRef(onLoad);
   const onErrorRef = useRef(onError);
@@ -20,6 +21,11 @@ export function NativeVideoPlayer({ videoUri, isPlaying, onLoad, onError, style 
   const player = useVideoPlayer(videoUri, (p) => {
     p.loop = true;
     p.muted = true;
+  });
+
+  const ttsPlayer = useVideoPlayer(ttsUrl ?? '', (p) => {
+    p.loop = true;
+    p.muted = false;
   });
 
   useEffect(() => {
@@ -38,10 +44,20 @@ export function NativeVideoPlayer({ videoUri, isPlaying, onLoad, onError, style 
   useEffect(() => {
     if (isPlaying) {
       player.play();
+      if (ttsUrl) {
+        ttsPlayer.play();
+      }
     } else {
       player.pause();
+      if (ttsUrl) {
+        ttsPlayer.pause();
+      }
     }
-  }, [isPlaying, player]);
+  }, [isPlaying, player, ttsPlayer, ttsUrl]);
+
+  if (Platform.OS === 'web') {
+    return null;
+  }
 
   return (
     <View style={[styles.container, style]}>

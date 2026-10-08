@@ -63,6 +63,8 @@ interface GenerateVideoRequest {
   enableFabricPhysics?: boolean;
   orbitSpeed?: number;
   mainImageUrl?: string;
+  memeFormat?: string;
+  memeText?: string;
   // webhook fields (sent by Runway callback)
   status?: string;
   output?: string[] | { url?: string } | string;
@@ -291,7 +293,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
 
   let effectivePrompt = body.prompt ?? "";
   if (effectivePrompt.trim().length === 0) {
-    effectivePrompt = buildAutoPrompt(sanitizedProductName, body.productVision, sanitizedCaptionText, body.isCleanVideoMode === true, requestedDuration, body.enableOrbit360 === true, typeof body.orbitSpeed === 'number' ? body.orbitSpeed : undefined, body.enableFabricPhysics === true);
+    effectivePrompt = buildAutoPrompt(sanitizedProductName, body.productVision, sanitizedCaptionText, body.isCleanVideoMode === true, requestedDuration, body.enableOrbit360 === true, typeof body.orbitSpeed === 'number' ? body.orbitSpeed : undefined, body.enableFabricPhysics === true, body.memeFormat, body.memeText);
   }
   const aspectRatio = body.aspectRatio ?? "9:16";
   const variationSeed = body.variationSeed ?? 0;
@@ -333,6 +335,8 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
     enableVirtualFitting: body.enableVirtualFitting,
     enableFabricPhysics: body.enableFabricPhysics,
     isDraft,
+    memeFormat: body.memeFormat,
+    memeText: body.memeText,
   });
   console.log("[generate-video] Prompt length:", runwayPrompt.length, "| tokens:", modeTokens.length);
 
@@ -1380,6 +1384,8 @@ function buildAutoPrompt(
   enableOrbit360?: boolean,
   orbitSpeed?: number,
   enableFabricPhysics?: boolean,
+  memeFormat?: string,
+  memeText?: string,
 ): string {
   const parts: string[] = [];
 
@@ -1421,6 +1427,11 @@ function buildAutoPrompt(
   }
 
   parts.push(buildOpeningHookSequenceTag(false, vision));
+  if (memeFormat && memeText) {
+    parts.push(`meme_overlay: format=${memeFormat}, text="${safeSlice(memeText, 80)}", burn-in meme caption with B-grade energy, ironic Korean colloquial speech`);
+  } else if (memeFormat) {
+    parts.push(`meme_overlay: format=${memeFormat}, B-grade meme energy, ironic Korean colloquial speech`);
+  }
   parts.push(`${durationSec}-second vertical short-form, raw unboxing aesthetic, handheld phone camera, imperfect framing, natural room lighting, no studio setup, loss-aversion hook, before/after problem-solution contrast, social-proof urgency CTA`);
 
   return parts.join(". ");
@@ -1454,6 +1465,8 @@ type CompactPromptParams = {
   enableVirtualFitting?: boolean;
   enableFabricPhysics?: boolean;
   isDraft?: boolean;
+  memeFormat?: string;
+  memeText?: string;
 };
 
 const PLATFORM_STYLE: Record<string, { camera: string; lighting: string; grade: string }> = {
@@ -2016,6 +2029,11 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   for (const mt of modeTokens) tokens.push(mt);
   if (negTag) tokens.push(negTag);
 
+  if (p.memeFormat && p.memeText) {
+    tokens.push(`meme_overlay=format:${p.memeFormat}, text:"${safeSlice(p.memeText, 60)}", burn-in meme caption, B-grade meme energy, ironic colloquial Korean speech`);
+  } else if (p.memeFormat) {
+    tokens.push(`meme_overlay=format:${p.memeFormat}, B-grade meme energy, ironic colloquial Korean speech`);
+  }
   tokens.push("3phase_conversion:phase1(0-2s HARD HOOK — loss_aversion OR raw_honesty OR social_proof, scroll-stopping jarring visual, B-grade meme energy, zero corporate tone, before-after contrast or shocking confession), phase2(2-7s PROBLEM AGITATION — pain point sniping, relatable frustration, fast cuts synced to beat, raw handheld aesthetic), phase3(7-end CTA LOOP — insider tip framing not corporate command, urgency without desperation, first-last frame matched for infinite loop replay)");
   tokens.push("trigger_mandate:at least ONE of [loss_aversion('이거 모르면 돈 버림'), raw_honesty('광고 아님 진짜임'), social_proof('나만 몰랐던 치트키')] must dominate first 2 seconds");
   tokens.push("banned:corporate jargon, '놓치면 후회', '강력 추천', '혁신적인', '최고의', '완벽한', polished studio tone, spec listing, excessive exclamation, mechanical '~하세요' CTA — use native Korean colloquial meme speech only");

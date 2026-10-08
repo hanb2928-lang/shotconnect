@@ -595,6 +595,7 @@ useEffect(() => {
               <NativeVideoPlayer
                 videoUri={videoSrc!}
                 isPlaying={isPlaying}
+                ttsUrl={ttsUrl}
                 onLoad={() => {
                   setVideoLoaded(true);
                   if (videoTimeoutRef.current) {
