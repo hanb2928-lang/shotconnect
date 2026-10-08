@@ -617,7 +617,7 @@ export default function ResultScreen() {
         stepAdvanceTimerRef.current = null;
       }
     };
-  }, [isGeneratingVideo, videoGenProgress?.phase]);
+  }, [isGeneratingVideo]);
 
   // Local DB poll fallback: every 2 seconds while generating, read the
   // video_jobs row directly for the current scan and update serverStep /
