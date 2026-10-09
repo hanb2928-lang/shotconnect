@@ -151,6 +151,20 @@ export async function mergeClipsSequentially(
   progressCallback ??= onProgress ?? null;
   completedResults = [];
 
+  // Safety: if the queue somehow hangs (uncaught error in a clip that
+  // doesn't reach the finally block), force-reset after 10 minutes so
+  // the state doesn't stay "running" forever, blocking all future merges.
+  const QUEUE_FAILSAFE_MS = 600_000;
+  const failsafeTimer = setTimeout(() => {
+    if (queueState === 'running') {
+      queueState = 'idle';
+      progressCallback = null;
+      currentAbort?.abort();
+      currentAbort = null;
+      flushPostSynthesisMemory().catch(() => {});
+    }
+  }, QUEUE_FAILSAFE_MS);
+
   const results: ClipMergeResult[] = [];
 
   for (let i = 0; i < clips.length; i++) {
@@ -276,6 +290,7 @@ export async function mergeClipsSequentially(
   queueState = 'idle';
   progressCallback = null;
   completedResults = [];
+  clearTimeout(failsafeTimer);
 
   return results;
 }

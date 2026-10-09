@@ -459,5 +459,51 @@ export function useResultPolling(
     };
   }, [jobId, scanId, settle]);
 
+  // 95% stall guard: when server-reported progress reaches 95%+ while still
+  // polling, start a 25-second timer. If no terminal status arrives, do a
+  // final DB force-sync — complete if the video is ready, otherwise escalate
+  // to a timeout error so the UI never freezes at 95% indefinitely.
+  useEffect(() => {
+    if (jobState !== 'polling' || serverProgress === null || serverProgress < 0.95) return;
+    if (!jobId) return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let aborted = false;
+
+    timer = setTimeout(async () => {
+      if (aborted || settledRef.current) return;
+      try {
+        await ensureFreshSession();
+        const isSoft = jobId.startsWith('soft-');
+        let query = supabase.from('video_jobs').select('status, video_url, error_message');
+        const { data, error: dbErr } = isSoft && scanId
+          ? await query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+          : await query.eq('task_id', jobId).maybeSingle();
+        if (aborted || settledRef.current) return;
+        if (dbErr || !data) {
+          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+          return;
+        }
+        const row = data as { status: string; video_url: string | null; error_message: string | null };
+        if (row.status === 'SUCCESS' && row.video_url) {
+          settle('completed', undefined, row.video_url);
+        } else if (row.status === 'FAILED') {
+          settle('failed', row.error_message ?? '영상 생성에 실패했습니다.');
+        } else {
+          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+        }
+      } catch {
+        if (!aborted && !settledRef.current) {
+          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+        }
+      }
+    }, 25_000);
+
+    return () => {
+      aborted = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [serverProgress, jobState, jobId, scanId, settle]);
+
   return { jobState, progressMessage, serverProgress, serverStep, isTimeout, error };
 }

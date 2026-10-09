@@ -59,7 +59,10 @@ Deno.serve(async (req: Request) => {
     const videoBlob = await videoResp.blob();
     const audioBlob = await audioResp.blob();
 
-    // Use ffmpeg.wasm to mux video + audio into a single MP4
+    // Use ffmpeg.wasm to mux video + audio into a single MP4.
+    // All FFmpeg operations are wrapped in try-catch with guaranteed
+    // virtual FS cleanup and process termination to prevent zombie
+    // processes and memory leaks on OOM or font path errors.
     const { FFmpeg } = await import("npm:@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
     const { fetchFile, toBlobURL } = await import("npm:@ffmpeg/util@0.12.1/dist/esm/index.js");
 
@@ -74,82 +77,109 @@ Deno.serve(async (req: Request) => {
     );
     await ffmpeg.load({ coreURL, wasmURL });
 
-    await ffmpeg.writeFile("input_video.mp4", await fetchFile(videoBlob));
-    await ffmpeg.writeFile("input_audio.mp3", await fetchFile(audioBlob));
+    // Timeout guard: if FFmpeg exec hangs (OOM, missing font, corrupt
+    // input), terminate after 120s instead of blocking the worker forever.
+    const FFMPEG_EXEC_TIMEOUT_MS = 120_000;
+    let execTimedOut = false;
+    const execTimeout = setTimeout(() => {
+      execTimedOut = true;
+      try { ffmpeg.terminate(); } catch { /* already terminated */ }
+    }, FFMPEG_EXEC_TIMEOUT_MS);
 
-    // Merge: copy video stream, encode audio as AAC, output MP4
-    await ffmpeg.exec([
-      "-i", "input_video.mp4",
-      "-i", "input_audio.mp3",
-      "-c:v", "copy",
-      "-c:a", "aac",
-      "-shortest",
-      "-movflags", "+faststart",
-      "output.mp4",
-    ]);
-
-    const output = await ffmpeg.readFile("output.mp4");
-    const outputBlob = new Blob([output], { type: "video/mp4" });
-
-    // Clean up virtual FS
-    await ffmpeg.deleteFile("input_video.mp4");
-    await ffmpeg.deleteFile("input_audio.mp3");
-    await ffmpeg.deleteFile("output.mp4");
-
-    // Upload to Supabase Storage
-    if (!supabaseUrl || !serviceRoleKey) {
-      return new Response(
-        JSON.stringify({ error: "스토리지 설정이 누락되었습니다." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const fileName = `${scanId ?? "unknown"}/${Date.now()}_muxed.mp4`;
-    const uploadPath = `videos/${fileName}`;
-    const uploadUrl = `${supabaseUrl}/storage/v1/object/${uploadPath}`;
-
-    const uploadResp = await fetch(uploadUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${serviceRoleKey}`,
-        "Content-Type": "video/mp4",
-        "x-upsert": "true",
-      },
-      body: outputBlob,
-    });
-
-    if (!uploadResp.ok) {
-      const uploadErr = await uploadResp.text();
-      return new Response(
-        JSON.stringify({ error: `스토리지 업로드 실패: ${uploadErr}` }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${uploadPath}`;
-
-    // Update scans row with muxed_video_url if scanId is provided
-    if (scanId) {
-      try {
-        await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
-          method: "PATCH",
-          headers: {
-            "Authorization": `Bearer ${serviceRoleKey}`,
-            "apikey": serviceRoleKey,
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-          },
-          body: JSON.stringify({ muxed_video_url: publicUrl }),
-        });
-      } catch {
-        // Non-fatal — the muxed video is still in storage
+    const cleanupFfmpeg = async () => {
+      clearTimeout(execTimeout);
+      for (const f of ["input_video.mp4", "input_audio.mp3", "output.mp4"]) {
+        try { await ffmpeg.deleteFile(f); } catch { /* already removed */ }
       }
-    }
+    };
 
-    return new Response(
-      JSON.stringify({ success: true, muxedUrl: publicUrl }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    try {
+      await ffmpeg.writeFile("input_video.mp4", await fetchFile(videoBlob));
+      await ffmpeg.writeFile("input_audio.mp3", await fetchFile(audioBlob));
+
+      // Merge: copy video stream, encode audio as AAC, output MP4
+      await ffmpeg.exec([
+        "-i", "input_video.mp4",
+        "-i", "input_audio.mp3",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-shortest",
+        "-movflags", "+faststart",
+        "output.mp4",
+      ]);
+
+      if (execTimedOut) {
+        throw new Error("FFmpeg 실행 시간이 초과되었습니다 (OOM 또는 폰트 로딩 실패 가능).");
+      }
+
+      const output = await ffmpeg.readFile("output.mp4");
+      const outputBlob = new Blob([output], { type: "video/mp4" });
+
+      // Clean up virtual FS
+      await cleanupFfmpeg();
+
+      // Upload to Supabase Storage
+      if (!supabaseUrl || !serviceRoleKey) {
+        return new Response(
+          JSON.stringify({ error: "스토리지 설정이 누락되었습니다." }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const fileName = `${scanId ?? "unknown"}/${Date.now()}_muxed.mp4`;
+      const uploadPath = `videos/${fileName}`;
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/${uploadPath}`;
+
+      const uploadResp = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "Content-Type": "video/mp4",
+          "x-upsert": "true",
+        },
+        body: outputBlob,
+      });
+
+      if (!uploadResp.ok) {
+        const uploadErr = await uploadResp.text();
+        return new Response(
+          JSON.stringify({ error: `스토리지 업로드 실패: ${uploadErr}` }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const publicUrl = `${supabaseUrl}/storage/v1/object/public/${uploadPath}`;
+
+      // Update scans row with muxed_video_url if scanId is provided
+      if (scanId) {
+        try {
+          await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
+            method: "PATCH",
+            headers: {
+              "Authorization": `Bearer ${serviceRoleKey}`,
+              "apikey": serviceRoleKey,
+              "Content-Type": "application/json",
+              "Prefer": "return=minimal",
+            },
+            body: JSON.stringify({ muxed_video_url: publicUrl }),
+          });
+        } catch {
+          // Non-fatal — the muxed video is still in storage
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, muxedUrl: publicUrl }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    } catch (ffmpegErr) {
+      // FFmpeg exec failure (OOM, font path missing, corrupt input):
+      // guarantee virtual FS cleanup and process termination to prevent
+      // zombie processes and memory leaks.
+      await cleanupFfmpeg();
+      try { ffmpeg.terminate(); } catch { /* already terminated */ }
+      throw ffmpegErr;
+    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "알 수 없는 오류";
     return new Response(

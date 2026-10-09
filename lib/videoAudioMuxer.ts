@@ -309,6 +309,10 @@ export async function muxVideoWithAudio(
     let settled = false;
     let outputUrl: string | null = null;
     let onAbort: (() => void) | null = null;
+    let lastFrameTime = 0;
+    let stalledFrameCount = 0;
+    const FRAME_STALL_THRESHOLD_MS = 5000;
+    const MAX_STALLED_FRAMES = 3;
 
     const cleanup = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
@@ -421,6 +425,29 @@ export async function muxVideoWithAudio(
     startTime = performance.now();
 
     const drawFrame = async () => {
+      // OOM / zombie-process guard: if consecutive frames take >5s each
+      // (memory pressure, GPU context loss, or font loading hang),
+      // abort the mux instead of freezing the UI indefinitely.
+      const now = performance.now();
+      if (lastFrameTime > 0) {
+        const frameDelta = now - lastFrameTime;
+        if (frameDelta > FRAME_STALL_THRESHOLD_MS) {
+          stalledFrameCount++;
+          if (stalledFrameCount >= MAX_STALLED_FRAMES) {
+            if (recorder.state !== 'inactive') {
+              try { recorder.stop(); } catch {}
+            }
+            if (!settled) {
+              settled = true;
+              cleanup();
+              flushPostSynthesisMemory().finally(() => resolve(null));
+            }
+            return;
+          }
+        }
+      }
+      lastFrameTime = now;
+
       if (useOffscreenDraw && offscreenWorker) {
         // Offscreen path: transfer the video frame as an ImageBitmap
         // to the worker, which draws it to the OffscreenCanvas. This
@@ -444,6 +471,25 @@ export async function muxVideoWithAudio(
           phase: 'rendering',
           progress: Math.min(elapsed / durationSec, 0.99),
         });
+      }
+
+      // Memory pressure detection (Chromium): if JS heap usage exceeds
+      // 90% of the limit, abort the mux to prevent an OOM crash that
+      // would leave zombie workers and leaked Blob URLs.
+      const perfMem = (performance as unknown as { memory?: { jsHeapSizeLimit: number; usedJSHeapSize: number } }).memory;
+      if (perfMem && perfMem.jsHeapSizeLimit > 0) {
+        const usageRatio = perfMem.usedJSHeapSize / perfMem.jsHeapSizeLimit;
+        if (usageRatio > 0.9) {
+          if (recorder.state !== 'inactive') {
+            try { recorder.stop(); } catch {}
+          }
+          if (!settled) {
+            settled = true;
+            cleanup();
+            flushPostSynthesisMemory().finally(() => resolve(null));
+          }
+          return;
+        }
       }
 
       if (!video.ended) {
