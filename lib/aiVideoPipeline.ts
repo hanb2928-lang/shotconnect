@@ -1189,6 +1189,7 @@ export function subscribeVideoJob(
   let consecutivePollFailures = 0;
 
   const isSoftTaskId = taskId.startsWith('soft-') || taskId.startsWith('hd-soft-');
+  const pollStartTime = Date.now();
 
   const checkAndNotify = async () => {
     if (settled) return;
@@ -1206,25 +1207,68 @@ export function subscribeVideoJob(
       }
       const { data, error } = await query.maybeSingle();
       if (error) throw new Error(error.message);
-      if (!data) return;
+      if (!data) {
+        // No job row found — try scans.video_url as a fallback (webhook may
+        // have completed without the video_jobs row being visible yet).
+        try {
+          const { data: scanData } = await supabase
+            .from('scans')
+            .select('video_url')
+            .eq('id', scanId)
+            .maybeSingle();
+          if (scanData?.video_url) {
+            settled = true;
+            cleanup();
+            callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanData.video_url });
+            return;
+          }
+        } catch { /* ignore — no fallback URL */ }
+        return;
+      }
       consecutivePollFailures = 0;
       const row = data as VideoJobRow;
       if (row.status === 'SUCCESS' && row.video_url) {
         settled = true;
         cleanup();
         callback({ status: 'SUCCESS', step: row.step, progress: 1, videoUrl: row.video_url });
-      } else if (row.status === 'FAILED') {
+        return;
+      }
+      if (row.status === 'FAILED') {
         settled = true;
         cleanup();
         callback({ status: 'FAILED', step: row.step, progress: 0, error: row.error_message ?? '비디오 생성에 실패했습니다.' });
-      } else {
-        const stepProgress = stepToProgress(row.step);
-        callback({
-          status: row.status === 'PROCESSING' ? 'PROCESSING' : 'PENDING',
-          step: row.step,
-          progress: stepProgress,
-        });
+        return;
       }
+      // Non-terminal: also check scans.video_url — the webhook may have
+      // written the result to scans but the video_jobs PATCH hasn't
+      // landed yet (race between webhook and server-poll).
+      try {
+        const { data: scanData } = await supabase
+          .from('scans')
+          .select('video_url')
+          .eq('id', scanId)
+          .maybeSingle();
+        if (scanData?.video_url) {
+          settled = true;
+          cleanup();
+          callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanData.video_url });
+          return;
+        }
+      } catch { /* ignore */ }
+
+      // Report progress using the higher of server-step mapping and
+      // time-based creep, so the UI never freezes at a stale percentage.
+      const stepProgress = stepToProgress(row.step);
+      const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
+      const timeProgress = Math.min(0.15 + (elapsedSec / 180) * 0.8, 0.95);
+      const effectiveProgress = stepProgress != null
+        ? Math.max(stepProgress, timeProgress)
+        : timeProgress;
+      callback({
+        status: row.status === 'PROCESSING' ? 'PROCESSING' : 'PENDING',
+        step: row.step,
+        progress: effectiveProgress,
+      });
     } catch (err) {
       consecutivePollFailures++;
       logError(err, { component: 'aiVideoPipeline', action: 'subscribeVideoJob.checkAndNotify', extra: { consecutivePollFailures } });
@@ -1257,6 +1301,7 @@ export function subscribeVideoJob(
     if (channel) supabase.removeChannel(channel);
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (runwayPollTimer) clearTimeout(runwayPollTimer);
     if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
   };
 
@@ -1305,10 +1350,15 @@ export function subscribeVideoJob(
               callback({ status: 'FAILED', step: row.step, progress: 0, error: row.error_message ?? '비디오 생성에 실패했습니다.' });
             } else {
               const stepProgress = stepToProgress(row.step);
+              const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
+              const timeProgress = Math.min(0.15 + (elapsedSec / 180) * 0.8, 0.95);
+              const effectiveProgress = stepProgress != null
+                ? Math.max(stepProgress, timeProgress)
+                : timeProgress;
               callback({
                 status: row.status === 'PROCESSING' ? 'PROCESSING' : 'PENDING',
                 step: row.step,
-                progress: stepProgress,
+                progress: effectiveProgress,
               });
             }
           } catch (err) {
@@ -1329,7 +1379,53 @@ export function subscribeVideoJob(
       });
   };
 
-  const pollStartTime = Date.now();
+  let runwayPollTimer: ReturnType<typeof setTimeout> | null = null;
+  let runwayFallbackStarted = false;
+
+  const startRunwayPollFallback = () => {
+    if (settled || runwayFallbackStarted || isSoftTaskId) return;
+    runwayFallbackStarted = true;
+    const runwayPoll = async () => {
+      if (settled) return;
+      try {
+        const pollController = new AbortController();
+        const pollTimeoutId = setTimeout(() => pollController.abort(), INVOKE_TIMEOUT_MS);
+        const { data, error } = await supabase.functions.invoke('generate-video', {
+          body: { mode: 'poll', taskId, scanId },
+          signal: pollController.signal,
+        }).finally(() => clearTimeout(pollTimeoutId));
+        if (error) {
+          const errStatus = (error as { status?: number }).status;
+          if (errStatus === 401 || errStatus === 403) {
+            settled = true;
+            cleanup();
+            callback({ status: 'FAILED', error: '인증 세션이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.' });
+            return;
+          }
+        } else {
+          const resp = data as { status?: string; videoUrl?: string; error?: string };
+          if (resp.status === 'SUCCESS' && resp.videoUrl) {
+            settled = true;
+            cleanup();
+            callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: resp.videoUrl });
+            return;
+          }
+          if (resp.status === 'FAILED') {
+            settled = true;
+            cleanup();
+            callback({ status: 'FAILED', error: resp.error ?? '비디오 생성에 실패했습니다.' });
+            return;
+          }
+        }
+      } catch {
+        // non-fatal — DB poll will catch the result
+      }
+      if (!settled) {
+        runwayPollTimer = setTimeout(runwayPoll, RUNWAY_POLL_FALLBACK_INTERVAL_MS);
+      }
+    };
+    runwayPollTimer = setTimeout(runwayPoll, RUNWAY_POLL_FALLBACK_START_MS);
+  };
 
   const scheduleNextPoll = () => {
     if (settled) return;
@@ -1352,12 +1448,14 @@ export function subscribeVideoJob(
   setupChannel();
   scheduleNextPoll();
   checkAndNotify();
+  startRunwayPollFallback();
 
   const removeBgPause = installBackgroundPause({
     isSettled: () => settled,
     pause: () => {
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
         channel = null;
@@ -1369,6 +1467,7 @@ export function subscribeVideoJob(
       setupChannel();
       scheduleNextPoll();
       checkAndNotify();
+      startRunwayPollFallback();
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
       resumeBurstCount = 0;
       runResumeBurst();
@@ -1542,11 +1641,28 @@ export function subscribeHdUpgrade(
         settled = true;
         cleanup();
         callback({ status: 'SUCCESS', videoUrl: row.hd_video_url });
-      } else if (row.hd_status === 'FAILED') {
+        return;
+      }
+      if (row.hd_status === 'FAILED') {
         settled = true;
         cleanup();
         callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
+        return;
       }
+      // Fallback: check scans.video_url — if the draft or HD result was
+      // written to scans but the video_jobs row hasn't updated yet.
+      try {
+        const { data: scanData } = await supabase
+          .from('scans')
+          .select('video_url')
+          .eq('id', scanId)
+          .maybeSingle();
+        if (scanData?.video_url) {
+          settled = true;
+          cleanup();
+          callback({ status: 'SUCCESS', videoUrl: scanData.video_url });
+        }
+      } catch { /* ignore */ }
     } catch (err) {
       consecutivePollFailures++;
       logError(err, { component: 'aiVideoPipeline', action: 'subscribeHdUpgrade.checkAndNotify', extra: { consecutivePollFailures } });
