@@ -23,7 +23,7 @@ export async function getUserSettings(): Promise<UserSettings | null> {
   settingsPromise = (async () => {
     try {
       const queryPromise = supabase
-        .from('user_settings')
+        .from('user_settings_public')
         .select('id, coupang_partners_id, naver_shopping_id, toss_share_id, logo_url, default_video_duration, default_tts_voice, tts_speed, tts_pitch, progress_style, auto_disclosure, brand_persona, mascot_enabled, mascot_style, capture_guide_mode, ui_performance, theme_mode, display_density, theme_preset, app_language, default_caption_tone, fixed_hook_phrase, affiliate_priority_mapping, auto_publish_reels, auto_publish_tiktok, auto_publish_shorts, auto_publish_sandbox_mode, clean_footage_enabled, updated_at')
         .eq('id', SINGLETON_ID)
         .maybeSingle();

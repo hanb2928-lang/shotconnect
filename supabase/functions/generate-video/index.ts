@@ -351,29 +351,21 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   // Fire-and-forget: self-invoke runway-submit mode to call Runway API asynchronously
   if (supabaseUrl && serviceRoleKey) {
     const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
-    fetch(selfUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
-      },
-      body: JSON.stringify({
-        mode: "runway-submit",
-        taskId: internalJobId,
-        scanId: body.scanId,
-        runwayPrompt,
-        durationSec,
-        aspectRatio,
-        isDraft,
-        hdUpscale,
-        resolution,
-        fps,
-        mainImageUrl: body.mainImageUrl,
-      }),
-    }).catch(async (err) => {
+    const submitPayload = {
+      mode: "runway-submit",
+      taskId: internalJobId,
+      scanId: body.scanId,
+      runwayPrompt,
+      durationSec,
+      aspectRatio,
+      isDraft,
+      hdUpscale,
+      resolution,
+      fps,
+      mainImageUrl: body.mainImageUrl,
+    };
+    void invokeRunwaySubmitWithRetry(selfUrl, submitPayload).catch(async (err) => {
       console.error("[generate-video] Failed to self-invoke runway-submit:", err);
-      // Mark job as FAILED if we can't even start the Runway submission
       if (body.scanId) {
         await markVideoJobFailed(body.scanId, internalJobId, "Runway API 호출 시작에 실패했습니다.");
       }
@@ -546,9 +538,21 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
       );
     }
 
-    // Resolve runway_task_id — the client may poll with the internal job ID
-    // before the async Runway submission has completed. If runway_task_id is
-    // not yet set, the job is still being submitted to Runway.
+    // The client starts with the internal job ID. Until the async submission
+    // stores the real Runway task ID, there is no external task to poll.
+    if (jobStatus && !jobStatus.runwayTaskId) {
+      return new Response(
+        JSON.stringify({
+          mode: "poll",
+          status: "PROCESSING",
+          progress: "Runway 작업 등록 중...",
+          taskId,
+          provider: "runway",
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const runwayTaskId = jobStatus?.runwayTaskId ?? taskId;
     const pollStatus = await pollRunwayTask(runwayTaskId, runwayKey);
 
@@ -670,21 +674,23 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     );
   }
 
-  // Check if the job was already marked FAILED or SUCCESS — look up by runway_task_id
+  // Check if the job was already marked FAILED or SUCCESS — look up by runway_task_id.
+  // If that column was not persisted, recover the internal ID by scan_id.
   const jobInfo = await findJobByRunwayTaskId(scanId, taskId);
-  if (jobInfo?.status === "FAILED") {
+  const resolvedJob = jobInfo ?? await findLatestJobByScanId(scanId);
+  if (resolvedJob?.status === "FAILED") {
     return new Response(
-      JSON.stringify({ mode: "server-poll", status: "FAILED", error: jobInfo.error, taskId }),
+      JSON.stringify({ mode: "server-poll", status: "FAILED", error: resolvedJob.error, taskId }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
-  if (jobInfo?.status === "SUCCESS" && jobInfo.videoUrl) {
+  if (resolvedJob?.status === "SUCCESS" && resolvedJob.videoUrl) {
     return new Response(
-      JSON.stringify({ mode: "server-poll", status: "SUCCESS", videoUrl: jobInfo.videoUrl, taskId, persisted: true }),
+      JSON.stringify({ mode: "server-poll", status: "SUCCESS", videoUrl: resolvedJob.videoUrl, taskId, persisted: true }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
-  const internalJobId = jobInfo?.internalJobId ?? taskId;
+  const internalJobId = resolvedJob?.internalJobId ?? taskId;
 
   if (attempt >= SERVER_POLL_MAX_ATTEMPTS) {
     await markVideoJobFailed(scanId, internalJobId, "서버 폴링이 최대 횟수에 도달했습니다. 좀비 작업으로 분류됩니다.");
@@ -827,14 +833,15 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
 
     // Check if server-poll already completed this job — look up by runway_task_id
     const existing = await findJobByRunwayTaskId(scanId, taskId);
-    if (existing?.status === "SUCCESS" && existing.videoUrl) {
+    const fallbackJob = existing ?? await findLatestJobByScanId(scanId);
+    if (fallbackJob?.status === "SUCCESS" && fallbackJob.videoUrl) {
       console.log("[generate-video] Webhook: job already completed by server-poll, skipping");
       return new Response(
         JSON.stringify({ mode: "webhook", status: "SUCCESS", scanId, persisted: true, alreadyCompleted: true }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    const internalJobId = existing?.internalJobId ?? taskId;
+    const internalJobId = fallbackJob?.internalJobId ?? taskId;
 
     if (supabaseUrl && serviceRoleKey) {
       await markVideoJobComplete(scanId, internalJobId, videoUrl);
@@ -853,7 +860,8 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
     const errMsg = body.failure ?? body.error ?? "Runway 생성 실패";
     if (supabaseUrl && serviceRoleKey) {
       const jobInfo = await findJobByRunwayTaskId(scanId, taskId);
-      const internalJobId = jobInfo?.internalJobId ?? taskId;
+      const fallbackJob = jobInfo ?? await findLatestJobByScanId(scanId);
+      const internalJobId = fallbackJob?.internalJobId ?? taskId;
       await markVideoJobFailed(scanId, internalJobId, errMsg);
     }
     return new Response(
@@ -984,6 +992,34 @@ async function updateRunwayTaskId(scanId: string, internalJobId: string, runwayT
     clearTimeout(timeoutId);
   } catch {
     // non-fatal — server-poll can still find the job via task_id
+  }
+}
+
+async function findLatestJobByScanId(scanId: string): Promise<{ status: string; error?: string; videoUrl?: string; internalJobId?: string } | null> {
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&select=status,error_message,video_url,task_id,created_at&order=created_at.desc&limit=1`,
+      {
+        headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+        signal: controller.signal,
+      },
+    );
+    clearTimeout(timeoutId);
+    if (!resp.ok) return null;
+    const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string }>;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      status: row.status,
+      error: row.error_message ?? undefined,
+      videoUrl: row.video_url ?? undefined,
+      internalJobId: row.task_id,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -1316,6 +1352,10 @@ async function pollRunwayTask(
           continue;
         }
 
+        if (resp.status === 404) {
+          return { status: "PROCESSING", progress: `Runway 작업이 아직 조회되지 않습니다: ${taskId}` };
+        }
+
         return { status: "FAILED", error: `Runway 폴링 실패 (HTTP ${resp.status}): ${errDetail}` };
       }
 
@@ -1397,6 +1437,35 @@ async function pollRunwayTask(
 }
 
 // === Shared helpers ===
+
+async function invokeRunwaySubmitWithRetry(url: string, payload: Record<string, unknown>): Promise<void> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+          apikey: serviceRoleKey ?? "",
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (response.ok) return;
+      const detail = (await response.text().catch(() => "")).slice(0, 300);
+      lastError = new Error(`runway-submit self-invoke failed (${response.status}): ${detail}`);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("runway-submit self-invoke failed");
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    if (attempt < 2) await delay(1000 * (attempt + 1));
+  }
+  throw lastError ?? new Error("runway-submit self-invoke failed");
+}
 
 function buildAutoPrompt(
   productName: string | undefined,

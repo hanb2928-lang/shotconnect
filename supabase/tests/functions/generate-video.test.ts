@@ -102,6 +102,43 @@ describe('generate-video edge function', () => {
       expect(body.error).toContain('taskId');
     });
 
+    it('does not poll Runway with the internal job ID before submission stores the real task ID', async () => {
+      let runwayPollCalls = 0;
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/rest/v1/user_settings')) {
+          return Promise.resolve(jsonResponse([{ runway_api_key: 'user-key' }]));
+        }
+        if (url.includes('/rest/v1/scans?select=video_url')) {
+          return Promise.resolve(jsonResponse([{ video_url: null }]));
+        }
+        if (url.includes('/rest/v1/video_jobs')) {
+          return Promise.resolve(jsonResponse([{
+            status: 'PENDING',
+            error_message: null,
+            video_url: null,
+            created_at: new Date().toISOString(),
+            runway_task_id: null,
+          }]));
+        }
+        if (url.includes('api.dev.runwayml.com/v1/tasks/')) {
+          runwayPollCalls++;
+          return Promise.resolve(jsonResponse({ status: 'SUCCEEDED' }));
+        }
+        return Promise.resolve(jsonResponse({}, 404));
+      });
+
+      const req = new Request('https://test.supabase.co/functions/v1/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'poll', taskId: 'internal-job-uuid', scanId: 'scan-456' }),
+      });
+      const resp = await handler(req);
+      const body = await resp.json();
+      expect(resp.status).toBe(200);
+      expect(body.status).toBe('PROCESSING');
+      expect(runwayPollCalls).toBe(0);
+    });
+
     it('returns SUCCESS when Runway poll succeeds', async () => {
       // Mock: resolveRunwayKey fetch (user_settings), checkWebhookResult, checkVideoJobStatus, pollRunwayTask
       mockFetch.mockImplementation((url: string) => {
