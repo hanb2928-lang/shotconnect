@@ -1194,11 +1194,13 @@ export default function ResultScreen() {
                 setHdUpgradeProgress(null);
                 setIsGeneratingVideo(false);
                 setVideoGenProgress(null);
+                setBgJobNotice(null);
               } else if (hdResult.status === 'FAILED') {
                 setVideoStage('draft_ready');
                 setHdUpgradeProgress(null);
                 setIsGeneratingVideo(false);
                 setVideoGenProgress(null);
+                setBgJobNotice(null);
                 setVideoGenError(prev => prev ? `${prev}\n고화질 업그레이드 실패 (초안 유지)` : '고화질 업그레이드 실패 (초안 유지)');
               }
               } catch {
@@ -1224,6 +1226,7 @@ export default function ResultScreen() {
           setVideoStage('failed');
           setIsGeneratingVideo(false);
           setVideoGenProgress(null);
+          setBgJobNotice(null);
         }
         } catch {
           if (mountedRef.current) {
@@ -1254,10 +1257,6 @@ export default function ResultScreen() {
       }
     } finally {
       videoGenLockRef.current = false;
-      if (draftProgressTimerRef.current) {
-        clearInterval(draftProgressTimerRef.current);
-        draftProgressTimerRef.current = null;
-      }
     }
   }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage, contentPurpose]);
 
@@ -1637,7 +1636,7 @@ export default function ResultScreen() {
 
           if (fullJob?.created_at) {
             const jobAgeMs = Date.now() - new Date(fullJob.created_at).getTime();
-            if (jobAgeMs > 300000) {
+            if (jobAgeMs > 1800000) {
               if (mountedRef.current) {
                 setVideoGenError('이전 영상 생성 작업이 시간 초과로 실패했습니다. 다시 시도해주세요.');
                 setVideoStage('failed');
@@ -1653,7 +1652,7 @@ export default function ResultScreen() {
           const startTime = Date.now();
           let consecutiveErrors = 0;
           const MAX_CONSECUTIVE_ERRORS = 8;
-          const POLL_TIMEOUT_MS = 300000;
+          const POLL_TIMEOUT_MS = 1800000;
 
           const pollOnce = async () => {
             if (cancelled) return;
@@ -1755,7 +1754,7 @@ export default function ResultScreen() {
       pollAbort?.abort();
       if (intervalId) clearTimeout(intervalId);
     };
-  }, [scan, generatedVideoUrl, isGeneratingVideo]);
+  }, [scan, generatedVideoUrl]);
 
   // Background realtime subscription: watch video_jobs for this scan so that
   // even if the user navigated away and came back, the completed video is
@@ -1765,6 +1764,7 @@ export default function ResultScreen() {
 
     const autoSaveVideoToAssets = async (videoUrl: string) => {
       if (autoSavedVideoRef.current === videoUrl) return;
+      autoSavedVideoRef.current = videoUrl;
       try {
         const fileName = `shotconnect-video-${scan.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
         let cloudUrl: string | null = null;
@@ -1787,7 +1787,6 @@ export default function ResultScreen() {
             mime_type: 'video/mp4',
             platform: activePlatform,
           });
-          if (saved) autoSavedVideoRef.current = videoUrl;
         }
       } catch {
         // Auto-save is best-effort; user can still manually save
@@ -1818,6 +1817,12 @@ export default function ResultScreen() {
           setBgJobNotice(null);
           autoSaveVideoToAssets(row.video_url);
         }
+      } else if (row.status === 'FAILED') {
+        setIsGeneratingVideo(false);
+        setVideoGenProgress(null);
+        setBgJobNotice(null);
+        setVideoGenError('영상 생성에 실패했습니다. 다시 시도해주세요.');
+        setVideoStage('failed');
       }
     };
 
