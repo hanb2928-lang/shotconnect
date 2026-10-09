@@ -507,9 +507,14 @@ useEffect(() => {
 
   // Release heavy resources when the app goes to background to prevent
   // OOM kills on native. Pauses video/BGM/audio and clears all intervals.
+  // On foreground return, defer reactivation by one frame so native views
+  // re-attach before play() is called — this prevents the native crash
+  // where a zombie media player receives play() after OS resource reclaim.
+  const wasPlayingBeforeBgRef = useRef(false);
   useEffect(() => {
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'background' || nextState === 'inactive') {
+        wasPlayingBeforeBgRef.current = isPlaying;
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
@@ -522,11 +527,20 @@ useEffect(() => {
         if (narrationAudioRef.current) narrationAudioRef.current.pause();
         if (Platform.OS === 'web' && webVideoRef.current) webVideoRef.current.pause();
         setIsPlaying(false);
+      } else if (nextState === 'active') {
+        // Defer reactivation to the next frame so the native view hierarchy
+        // has re-attached. Calling play() synchronously in the AppState
+        // callback can trigger a crash on some native bridges.
+        requestAnimationFrame(() => {
+          if (wasPlayingBeforeBgRef.current && hasGeneratedVideo) {
+            setIsPlaying(true);
+          }
+        });
       }
     };
     const sub = AppState.addEventListener('change', handleAppState);
     return () => sub.remove();
-  }, []);
+  }, [hasGeneratedVideo, isPlaying]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;

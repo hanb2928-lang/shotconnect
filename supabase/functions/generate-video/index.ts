@@ -553,25 +553,19 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
     const pollStatus = await pollRunwayTask(runwayTaskId, runwayKey);
 
     if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
-      let persistedUrl: string | null = null;
+      const originalUrl = pollStatus.videoUrl;
       if (supabaseUrl && serviceRoleKey) {
-        await updateVideoJobStep(body.scanId, taskId, "finalizing");
-        persistedUrl = await uploadToStorage(pollStatus.videoUrl, body.scanId);
-        if (persistedUrl) {
-          await updateScanWithVideo(body.scanId, persistedUrl);
-        }
-        await markVideoJobComplete(body.scanId, taskId, persistedUrl ?? pollStatus.videoUrl);
+        await markVideoJobComplete(body.scanId, taskId, originalUrl);
       }
-      const finalUrl = persistedUrl ?? pollStatus.videoUrl;
+      persistVideoInBackground(originalUrl, body.scanId, taskId);
       return new Response(
         JSON.stringify({
           mode: "poll",
           status: "SUCCESS",
-          videoUrl: finalUrl,
-          originalVideoUrl: pollStatus.videoUrl !== finalUrl ? pollStatus.videoUrl : undefined,
+          videoUrl: originalUrl,
           taskId,
           provider: "runway",
-          persisted: !!persistedUrl,
+          persisted: false,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -608,23 +602,21 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
   const status = await pollRunwayTask(taskId, runwayKey);
 
   if (status.status === "SUCCESS" && status.videoUrl) {
-    let persistedUrl: string | null = null;
+    const originalUrl = status.videoUrl;
     if (body.scanId && supabaseUrl && serviceRoleKey) {
-      persistedUrl = await uploadToStorage(status.videoUrl, body.scanId);
-      if (persistedUrl) {
-        await updateScanWithVideo(body.scanId, persistedUrl);
-      }
+      await markVideoJobComplete(body.scanId, taskId, originalUrl);
     }
-    const finalUrl = persistedUrl ?? status.videoUrl;
+    if (body.scanId) {
+      persistVideoInBackground(originalUrl, body.scanId, taskId);
+    }
     return new Response(
       JSON.stringify({
         mode: "poll",
         status: "SUCCESS",
-        videoUrl: finalUrl,
-        originalVideoUrl: status.videoUrl !== finalUrl ? status.videoUrl : undefined,
+        videoUrl: originalUrl,
         taskId,
         provider: "runway",
-        persisted: !!persistedUrl,
+        persisted: false,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
@@ -715,23 +707,19 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
       );
     }
 
-    let persistedUrl: string | null = null;
+    const originalUrl = status.videoUrl;
     if (supabaseUrl && serviceRoleKey) {
-      await updateVideoJobStep(scanId, internalJobId, "finalizing");
-      persistedUrl = await uploadToStorage(status.videoUrl, scanId);
-      if (persistedUrl) {
-        await updateScanWithVideo(scanId, persistedUrl);
-      }
-      await markVideoJobComplete(scanId, internalJobId, persistedUrl ?? status.videoUrl);
+      await markVideoJobComplete(scanId, internalJobId, originalUrl);
     }
+    persistVideoInBackground(originalUrl, scanId, internalJobId);
     await sendVideoCompletePush(scanId);
     return new Response(
       JSON.stringify({
         mode: "server-poll",
         status: "SUCCESS",
-        videoUrl: persistedUrl ?? status.videoUrl,
+        videoUrl: originalUrl,
         taskId,
-        persisted: !!persistedUrl,
+        persisted: false,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
@@ -848,20 +836,15 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
     }
     const internalJobId = existing?.internalJobId ?? taskId;
 
-    let persistedUrl: string | null = null;
     if (supabaseUrl && serviceRoleKey) {
-      await updateVideoJobStep(scanId, internalJobId, "finalizing");
-      persistedUrl = await uploadToStorage(videoUrl, scanId);
-      if (persistedUrl) {
-        await updateScanWithVideo(scanId, persistedUrl);
-      }
-      await markVideoJobComplete(scanId, internalJobId, persistedUrl ?? videoUrl);
+      await markVideoJobComplete(scanId, internalJobId, videoUrl);
     }
+    persistVideoInBackground(videoUrl, scanId, internalJobId);
     await sendVideoCompletePush(scanId);
 
     console.log("[generate-video] Webhook: video persisted for scan", scanId);
     return new Response(
-      JSON.stringify({ mode: "webhook", status: "SUCCESS", scanId, persisted: !!persistedUrl }),
+      JSON.stringify({ mode: "webhook", status: "SUCCESS", scanId, persisted: false }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
@@ -1044,9 +1027,31 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
   return null;
 }
 
+async function persistVideoInBackground(originalUrl: string, scanId: string, taskId: string): Promise<void> {
+  if (!supabaseUrl || !serviceRoleKey) return;
+  try {
+    const persistedUrl = await uploadToStorage(originalUrl, scanId);
+    if (persistedUrl) {
+      await updateScanWithVideo(scanId, persistedUrl);
+      await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+        method: "PATCH",
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ video_url: persistedUrl }),
+      });
+    }
+  } catch {
+    // Background upload failed — the original Runway URL is already stored
+    // in video_jobs.video_url, so the user can still view the video.
+  }
+}
+
 async function markVideoJobComplete(scanId: string, taskId: string, videoUrl: string): Promise<void> {
   if (!supabaseUrl || !serviceRoleKey) return;
-  await updateVideoJobStep(scanId, taskId, "finalizing");
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -2097,10 +2102,13 @@ async function uploadToStorage(videoUrl: string, scanId: string): Promise<string
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
     const resp = await fetch(videoUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      clearTimeout(timeoutId);
+      return null;
+    }
 
     const videoBlob = await resp.blob();
+    clearTimeout(timeoutId);
     const fileName = `${scanId}/${Date.now()}_ai_video.mp4`;
     const uploadUrl = `${supabaseUrl}/storage/v1/object/videos/${fileName}`;
 

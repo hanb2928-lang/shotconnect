@@ -87,6 +87,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const ninetyFivePctSinceRef = useRef<number | null>(null);
   const completionFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appStateActiveRef = useRef(true);
+  const foregroundSyncRef = useRef<Promise<void> | null>(null);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -126,13 +127,15 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       const active = await getActiveVideoJob();
       if (cancelled || !active || !active.jobId) return;
       try {
+        await ensureFreshSession();
         const isSoft = active.jobId.startsWith('soft-') || active.jobId.startsWith('hd-soft-');
         let query = supabase.from('video_jobs').select('status');
         const { data, error: dbError } = isSoft && active.scanId
           ? await query.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
           : await query.eq('task_id', active.jobId).maybeSingle();
         if (cancelled) return;
-        if (dbError || !data) {
+        if (dbError) return;
+        if (!data) {
           clearActiveVideoJob();
           return;
         }
@@ -159,9 +162,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     if (!jobId) return;
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
+        if (foregroundSyncRef.current) return;
         // Foreground return: resync job status from DB. Use task_id (not id)
         // since jobId is the Runway/internal task identifier.
-        (async () => {
+        const sync = (async () => {
           try {
             await ensureFreshSession();
             const isSoft = jobId.startsWith('soft-');
@@ -215,6 +219,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             // ignore — polling will catch up
           }
         })();
+        foregroundSyncRef.current = sync;
+        sync.finally(() => {
+          if (foregroundSyncRef.current === sync) foregroundSyncRef.current = null;
+        });
       }
     };
     const sub = AppState.addEventListener('change', handleAppState);

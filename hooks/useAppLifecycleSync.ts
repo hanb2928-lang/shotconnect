@@ -14,19 +14,29 @@ export function useAppLifecycleSync(onForegroundSync?: () => void | Promise<void
 
   useEffect(() => {
     let mounted = true;
+    let foregroundRun: Promise<void> | null = null;
+    let lastForegroundAt = 0;
 
     const handleForeground = async () => {
       if (!mounted) return;
-      try {
-        await ensureFreshSession();
-      } catch {
-        // Token refresh failure is non-fatal — callers retry on their own.
-      }
-      try {
-        await callbackRef.current?.();
-      } catch {
-        // Caller errors must not crash the lifecycle listener.
-      }
+      const now = Date.now();
+      if (foregroundRun || now - lastForegroundAt < 1000) return;
+      lastForegroundAt = now;
+      const run = (async () => {
+        try {
+          await ensureFreshSession();
+        } catch {
+          // Token refresh failure is non-fatal — callers retry on their own.
+        }
+        try {
+          await callbackRef.current?.();
+        } catch {
+          // Caller errors must not crash the lifecycle listener.
+        }
+      })();
+      foregroundRun = run;
+      await run;
+      if (foregroundRun === run) foregroundRun = null;
     };
 
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
