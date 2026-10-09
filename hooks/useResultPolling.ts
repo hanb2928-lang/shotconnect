@@ -286,7 +286,7 @@ export function useResultPolling(
     const pollOnce = async () => {
       if (cancelled || settledRef.current) return;
 
-      // At 95%+, the 5-second forced completion guard is already running a
+      // At 85%+, the forced completion guard is already running a
       // DB force-sync. Skip redundant edge function polls to avoid lock
       // conflicts and wasted network requests on native.
       if (highestProgressSeen >= 0.85) {

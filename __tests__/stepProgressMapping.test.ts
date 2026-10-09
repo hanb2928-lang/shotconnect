@@ -2,7 +2,7 @@
  * Tests for step-to-progress mapping in videoGenSteps.ts
  *
  * Verifies that backend step values and Runway API status values
- * correctly map to the 6-step UI progress thresholds.
+ * correctly map to the 5-step UI progress thresholds.
  */
 
 import { stepToProgress } from '@/lib/videoGenSteps';

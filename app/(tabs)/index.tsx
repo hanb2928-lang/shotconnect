@@ -2008,12 +2008,16 @@ function StereoProgressLightweight({
               </RNAnimated.View>
               <Text style={styles.stereoLightTitle}>AI 입체컷 생성 중</Text>
               {currentStep && <Text style={styles.stereoLightStep}>{currentStep.label}</Text>}
-              <View style={styles.stereoLightBarWrap}>
-                <View style={styles.stereoLightBarTrack}>
-                  <View style={[styles.stereoLightBarFill, { width: `${pct}%` }]} />
+              {pct > 0 ? (
+                <View style={styles.stereoLightBarWrap}>
+                  <View style={styles.stereoLightBarTrack}>
+                    <View style={[styles.stereoLightBarFill, { width: `${pct}%` }]} />
+                  </View>
+                  <Text style={styles.stereoLightPct}>{pct}%</Text>
                 </View>
-                <Text style={styles.stereoLightPct}>{pct}%</Text>
-              </View>
+              ) : (
+                <Text style={styles.stereoLightPendingText}>AI가 안전하게 작업 중입니다...</Text>
+              )}
             </>
           )}
         </View>
@@ -2545,6 +2549,13 @@ const styles = StyleSheet.create({
     color: theme.colors.primary[300],
     minWidth: 36,
     textAlign: 'right',
+  },
+  stereoLightPendingText: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textDim,
+    textAlign: 'center',
+    marginTop: 6,
   },
   stereoLightBtn: {
     paddingVertical: 10,

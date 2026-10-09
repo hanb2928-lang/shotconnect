@@ -309,7 +309,7 @@ export function makeInitialProgress(): StereoPipelineProgress {
   return {
     steps: makeInitialSteps(),
     currentStep: -1,
-    overallProgress: 0,
+    overallProgress: 0.01,
     result: null,
     error: null,
   };

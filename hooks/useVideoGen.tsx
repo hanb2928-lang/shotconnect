@@ -84,7 +84,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const prefetchedHookRef = useRef<ReturnType<typeof autoSelectHook> | null>(null);
   const stepStallRef = useRef<{ step: string; since: number } | null>(null);
   const stepStallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const ninetyFivePctSinceRef = useRef<number | null>(null);
+  const renderStallSinceRef = useRef<number | null>(null);
   const completionFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appStateActiveRef = useRef(true);
   const foregroundSyncRef = useRef<Promise<void> | null>(null);
@@ -412,20 +412,20 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       completionWatchTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') {
-            ninetyFivePctSinceRef.current = null;
+            renderStallSinceRef.current = null;
             return prev;
           }
           if (prev.progress >= 0.85) {
-            if (ninetyFivePctSinceRef.current === null) {
-              ninetyFivePctSinceRef.current = Date.now();
-            } else if (Date.now() - ninetyFivePctSinceRef.current >= COMPLETION_FALLBACK_DELAY_MS) {
+            if (renderStallSinceRef.current === null) {
+              renderStallSinceRef.current = Date.now();
+            } else if (Date.now() - renderStallSinceRef.current >= COMPLETION_FALLBACK_DELAY_MS) {
               if (!completionFallbackRef.current) {
                 completionFallbackRef.current = setTimeout(checkCompletionFallback, 0);
               }
-              ninetyFivePctSinceRef.current = null;
+              renderStallSinceRef.current = null;
             }
           } else {
-            ninetyFivePctSinceRef.current = null;
+            renderStallSinceRef.current = null;
           }
           return prev;
         });
@@ -438,7 +438,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       if (hardGuardTimer) { clearInterval(hardGuardTimer); hardGuardTimer = null; }
       if (completionWatchTimer) { clearInterval(completionWatchTimer); completionWatchTimer = null; }
       if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
-      // Do NOT reset ninetyFivePctSinceRef here — backgrounding should
+      // Do NOT reset renderStallSinceRef here — backgrounding should
       // pause the countdown, not reset it. Otherwise a brief background
       // transition on native (e.g. notification banner) resets the
       // timer indefinitely and the fallback never fires.
@@ -875,7 +875,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       hookTimeoutRef.current = null;
     }
     stepStallRef.current = null;
-    ninetyFivePctSinceRef.current = null;
+    renderStallSinceRef.current = null;
     if (completionFallbackRef.current) {
       clearTimeout(completionFallbackRef.current);
       completionFallbackRef.current = null;

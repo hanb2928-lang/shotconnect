@@ -12,7 +12,7 @@ export interface VideoGenStep {
 
 /**
  * Maps a backend video_jobs.step value (or Runway API status) to a
- * frontend progress value that aligns with the 6-step UI thresholds.
+ * frontend progress value that aligns with the 5-step UI thresholds.
  *
  * Backend step values are written by the generate-video edge function
  * and the server-poll path. When a Realtime event arrives with a
