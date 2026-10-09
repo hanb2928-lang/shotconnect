@@ -32,10 +32,6 @@ describe('stepToProgress — backend step values', () => {
     expect(stepToProgress('rendering')).toBe(0.85);
   });
 
-  it('maps "finalizing" to finalize threshold (0.95)', () => {
-    expect(stepToProgress('finalizing')).toBe(0.95);
-  });
-
   it('maps "completed" to 1.0', () => {
     expect(stepToProgress('completed')).toBe(1.0);
   });

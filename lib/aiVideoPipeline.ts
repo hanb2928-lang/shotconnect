@@ -565,7 +565,6 @@ const STEP_LABELS: Record<string, string> = {
   planning: '편집 플랜 구성 중',
   submitting: 'AI 렌더링 요청 중',
   rendering: '영상 렌더링 중',
-  finalizing: '최종 자막 합성 중',
   pending: '대기 중',
   processing: '영상 렌더링 중',
   running: '영상 렌더링 중',

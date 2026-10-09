@@ -128,8 +128,9 @@ export function useResultPolling(
     const realtimeFilter = isSoftTaskId && scanId
       ? `scan_id=eq.${scanId}`
       : `task_id=eq.${jobId}`;
-    try {
-      realtimeChannel = supabase
+
+    const createRealtimeChannel = () => {
+      const ch = supabase
         .channel(`job-poll-${jobId}`)
         .on(
           'postgres_changes',
@@ -155,8 +156,37 @@ export function useResultPolling(
               // Malformed payload — ignore, polling will catch up
             }
           },
-        )
-        .subscribe();
+        );
+
+      if (scanId) {
+        ch.on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'scans',
+            filter: `id=eq.${scanId}`,
+          },
+          (payload) => {
+            if (cancelled || settledRef.current) return;
+            try {
+              const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
+              const finalUrl = row?.muxed_video_url ?? row?.video_url;
+              if (finalUrl) {
+                handleResult('SUCCESS', finalUrl);
+              }
+            } catch {
+              // Malformed payload — ignore, polling will catch up
+            }
+          },
+        );
+      }
+
+      return ch.subscribe();
+    };
+
+    try {
+      realtimeChannel = createRealtimeChannel();
     } catch {
       // Realtime unavailable — polling still works as fallback
     }
@@ -259,7 +289,7 @@ export function useResultPolling(
       // At 95%+, the 5-second forced completion guard is already running a
       // DB force-sync. Skip redundant edge function polls to avoid lock
       // conflicts and wasted network requests on native.
-      if (highestProgressSeen >= 0.95) {
+      if (highestProgressSeen >= 0.85) {
         const delayMs = Math.min(
           Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
           POLL_MAX_MS,
@@ -440,34 +470,7 @@ export function useResultPolling(
           // Re-subscribe Realtime channel (was unsubscribed on background).
           if (!realtimeChannel) {
             try {
-              realtimeChannel = supabase
-                .channel(`job-poll-${jobId}`)
-                .on(
-                  'postgres_changes',
-                  {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'video_jobs',
-                    filter: realtimeFilter,
-                  },
-                  (payload) => {
-                    if (cancelled || settledRef.current) return;
-                    try {
-                      const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null };
-                      if (!row || typeof row.status !== 'string') return;
-                      if (row.status === 'SUCCESS' && row.video_url) {
-                        handleResult(row.status, row.video_url);
-                      } else if (row.status === 'FAILED') {
-                        handleResult(row.status, null, row.error_message ?? undefined);
-                      } else {
-                        applyProgress(stepToProgress(row.step), row.step ?? null);
-                      }
-                    } catch {
-                      // Malformed payload — ignore, polling will catch up
-                    }
-                  },
-                )
-                .subscribe();
+              realtimeChannel = createRealtimeChannel();
             } catch {
               // Realtime unavailable — polling still works as fallback
             }
@@ -503,26 +506,25 @@ export function useResultPolling(
     };
   }, [jobId, scanId, settle]);
 
-  // 5-second forced completion guard: when server-reported progress reaches
-  // 95%+ while still polling, start a 5-second timer. If no terminal status
-  // arrives, do a final DB force-sync — complete if the video is ready,
-  // otherwise escalate to a timeout error so the UI never freezes at 95%.
-  // The server never writes a "finalizing" step — it goes rendering→completed
-  // directly — so 95% means the client's step stall guard advanced it there
-  // and the real result should be imminent or already in the DB.
+  // Forced completion guard: when server-reported progress reaches 85%+
+  // (rendering) while still polling, start a 15-second timer. If no terminal
+  // status arrives, do a DB force-sync — complete if the video is ready,
+  // otherwise retry up to 6 times at 10-second intervals before escalating
+  // to a timeout error. The server goes rendering→completed directly, so
+  // 85% means rendering is underway and the result should arrive soon.
   useEffect(() => {
-    if (jobState !== 'polling' || serverProgress === null || serverProgress < 0.95) return;
+    if (jobState !== 'polling' || serverProgress === null || serverProgress < 0.85) return;
     if (!jobId) return;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let aborted = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 6;
 
-    timer = setTimeout(async () => {
+    const checkOnce = async () => {
       if (aborted || settledRef.current) return;
       try {
         await ensureFreshSession();
-        // First check scans.video_url / muxed_video_url — the webhook
-        // writes here directly and it's the most reliable completion signal.
         if (scanId) {
           const { data: scanData } = await supabase
             .from('scans')
@@ -543,6 +545,11 @@ export function useResultPolling(
           : await query.eq('task_id', jobId).maybeSingle();
         if (aborted || settledRef.current) return;
         if (dbErr || !data) {
+          attempts++;
+          if (attempts < MAX_ATTEMPTS && !aborted && !settledRef.current) {
+            timer = setTimeout(checkOnce, 10_000);
+            return;
+          }
           settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
           return;
         }
@@ -552,14 +559,26 @@ export function useResultPolling(
         } else if (row.status === 'FAILED') {
           settle('failed', row.error_message ?? '영상 생성에 실패했습니다.');
         } else {
+          attempts++;
+          if (attempts < MAX_ATTEMPTS && !aborted && !settledRef.current) {
+            timer = setTimeout(checkOnce, 10_000);
+            return;
+          }
           settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
         }
       } catch {
+        attempts++;
+        if (attempts < MAX_ATTEMPTS && !aborted && !settledRef.current) {
+          timer = setTimeout(checkOnce, 10_000);
+          return;
+        }
         if (!aborted && !settledRef.current) {
           settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
         }
       }
-    }, 5_000);
+    };
+
+    timer = setTimeout(checkOnce, 15_000);
 
     return () => {
       aborted = true;

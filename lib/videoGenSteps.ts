@@ -27,7 +27,6 @@ const STEP_TO_PROGRESS: Record<string, number> = {
   planning: 0.25,
   submitting: 0.35,
   rendering: 0.85,
-  finalizing: 0.95,
   completed: 1.0,
   failed: 0,
 
@@ -77,12 +76,6 @@ export const VIDEO_GEN_STEPS: readonly Omit<VideoGenStep, 'status'>[] = [
     id: 'render',
     label: '영상 렌더링',
     description: 'AI가 프레임을 생성하고 영상을 합성하는 중입니다',
-    threshold: 0.90,
-  },
-  {
-    id: 'finalize',
-    label: '최종 자막 합성',
-    description: '자막 오버레이와 공시문구를 영상에 입힙니다',
     threshold: 1.0,
   },
 ];

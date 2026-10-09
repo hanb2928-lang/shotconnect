@@ -6,10 +6,10 @@ function makeProgress(phase: VideoGenProgress['phase'], progress: number, elapse
 }
 
 describe('videoGenSteps', () => {
-  it('has 6 steps in correct order', () => {
-    expect(VIDEO_GEN_STEPS).toHaveLength(6);
+  it('has 5 steps in correct order', () => {
+    expect(VIDEO_GEN_STEPS).toHaveLength(5);
     expect(VIDEO_GEN_STEPS[0].id).toBe('analyze');
-    expect(VIDEO_GEN_STEPS[5].id).toBe('finalize');
+    expect(VIDEO_GEN_STEPS[4].id).toBe('render');
   });
 
   it('all steps pending when progress is null', () => {
@@ -36,7 +36,6 @@ describe('videoGenSteps', () => {
     expect(steps[2].status).toBe('done');
     expect(steps[3].status).toBe('done');
     expect(steps[4].status).toBe('active');
-    expect(steps[5].status).toBe('pending');
   });
 
   it('all done when completed', () => {
@@ -59,7 +58,7 @@ describe('videoGenSteps', () => {
 
   it('getCurrentStepIndex returns last done when no active', () => {
     const idx = getCurrentStepIndex(makeProgress('completed', 1.0));
-    expect(idx).toBe(5);
+    expect(idx).toBe(4);
   });
 
   it('thresholds are monotonically increasing', () => {
