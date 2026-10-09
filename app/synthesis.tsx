@@ -16,7 +16,7 @@ import { compressAndUploadUri } from '@/lib/imageEdit';
 import { cleanBase64 } from '@/lib/base64';
 import { registerTempFile, unpinTempFile, safeDeleteTempFile } from '@/lib/tempFileManager';
 import { compressImageInWorker, isWorkerPoolAvailable } from '@/lib/workerPool';
-import { ArrowLeft, Sparkles } from 'lucide-react-native';
+import { ArrowLeft, Sparkles, RotateCcw } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -793,6 +793,15 @@ export default function SynthesisScreen() {
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity
+              style={[styles.retryBtn, isGenerating && styles.retryBtnDisabled]}
+              onPress={handleGenerate}
+              disabled={isGenerating}
+              activeOpacity={0.7}
+            >
+              <RotateCcw size={14} color={isGenerating ? theme.colors.dark.textDim : theme.colors.error[400]} strokeWidth={2} />
+              <Text style={[styles.retryBtnText, isGenerating && styles.retryBtnTextDisabled]}>다시 시도</Text>
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -848,11 +857,35 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.sm,
     borderLeftWidth: 3,
     borderLeftColor: theme.colors.error[400],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
   },
   errorText: {
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.error[400],
+    flex: 1,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.error[400] + '15',
+  },
+  retryBtnDisabled: {
+    opacity: 0.4,
+  },
+  retryBtnText: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.error[400],
+  },
+  retryBtnTextDisabled: {
+    color: theme.colors.dark.textDim,
   },
   navHint: {
     backgroundColor: theme.colors.primary[400] + '15',

@@ -11,7 +11,7 @@ jest.mock('@/lib/supabase', () => ({
   supabaseAnonKey: 'test-key',
 }));
 
-const { saveActiveVideoJob, clearActiveVideoJob, getActiveVideoJob, ACTIVE_VIDEO_JOB_KEY } = require('@/lib/videoJobPersistence');
+const { saveActiveVideoJob, clearActiveVideoJob, getActiveVideoJob, updateActiveVideoJobStep, ACTIVE_VIDEO_JOB_KEY } = require('@/lib/videoJobPersistence');
 const { getItem, setItem } = require('@/lib/storage');
 
 describe('videoJobPersistence', () => {
@@ -57,5 +57,29 @@ describe('videoJobPersistence', () => {
     (getItem as jest.Mock).mockResolvedValue('not-json');
     const result = await getActiveVideoJob();
     expect(result).toBeNull();
+  });
+
+  it('updateActiveVideoJobStep updates step and progress on an existing job', async () => {
+    (getItem as jest.Mock).mockResolvedValue(JSON.stringify({
+      jobId: 'job-789',
+      scanId: 'scan-1',
+      step: 'hooking',
+      progress: 0.15,
+      startedAt: 1000,
+      lastUpdated: 1000,
+    }));
+    await updateActiveVideoJobStep('rendering', 0.6);
+    expect(setItem).toHaveBeenCalledWith(ACTIVE_VIDEO_JOB_KEY, expect.any(String));
+    const savedData = JSON.parse((setItem.mock.calls[0] as [string, string])[1]);
+    expect(savedData.step).toBe('rendering');
+    expect(savedData.progress).toBe(0.6);
+    expect(savedData.jobId).toBe('job-789');
+    expect(savedData.lastUpdated).toBeGreaterThan(1000);
+  });
+
+  it('updateActiveVideoJobStep is a no-op when no active job exists', async () => {
+    (getItem as jest.Mock).mockResolvedValue(null);
+    await updateActiveVideoJobStep('rendering');
+    expect(setItem).not.toHaveBeenCalled();
   });
 });

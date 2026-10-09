@@ -7,6 +7,8 @@ import {
   ViewStyle,
   Platform,
   useWindowDimensions,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 
 import {
@@ -502,6 +504,29 @@ useEffect(() => {
       }
     };
   }, [stop]);
+
+  // Release heavy resources when the app goes to background to prevent
+  // OOM kills on native. Pauses video/BGM/audio and clears all intervals.
+  useEffect(() => {
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        if (luminanceIntervalRef.current) {
+          clearInterval(luminanceIntervalRef.current);
+          luminanceIntervalRef.current = null;
+        }
+        if (bgmPlayerRef.current) bgmPlayerRef.current.pause();
+        if (narrationAudioRef.current) narrationAudioRef.current.pause();
+        if (Platform.OS === 'web' && webVideoRef.current) webVideoRef.current.pause();
+        setIsPlaying(false);
+      }
+    };
+    const sub = AppState.addEventListener('change', handleAppState);
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;

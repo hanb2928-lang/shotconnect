@@ -11,7 +11,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
 import { useResultPolling } from '@/hooks/useResultPolling';
-import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob } from '@/lib/videoJobPersistence';
+import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob, updateActiveVideoJobStep } from '@/lib/videoJobPersistence';
 import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
@@ -86,6 +86,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const stepStallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ninetyFivePctSinceRef = useRef<number | null>(null);
   const completionFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appStateActiveRef = useRef(true);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -97,6 +98,15 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }
     return () => { deactivateKeepAwake(tag).catch(() => {}); };
   }, [isGenerating]);
+
+  // Track app active/background state so background-sensitive timers
+  // (step-stall DB sync, hook timeout) can skip work while backgrounded.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      appStateActiveRef.current = state === 'active';
+    });
+    return () => sub.remove();
+  }, []);
 
   // Abort any in-flight submit when the provider unmounts to prevent
   // orphaned fetch callbacks from updating state on an unmounted component.
@@ -135,7 +145,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         jobIdRef.current = active.jobId;
         setJobId(active.jobId);
         setIsGenerating(true);
-        setVideoProgress({ phase: 'generating', progress: 0.5, message: '이전 생성 작업을 복구하는 중...', elapsedSec: 0 });
+        const restoreProgress = active.progress > 0 ? Math.min(active.progress, 0.9) : 0.5;
+        setVideoProgress({ phase: 'generating', progress: restoreProgress, message: '이전 생성 작업을 복구하는 중...', elapsedSec: 0, serverStep: active.step });
       } catch {
         // DB unreachable — don't resume
       }
@@ -441,10 +452,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
 
   // Sync server-reported step from polling into videoProgress so the step
   // tracker can bind its icons to authoritative server state instead of
-  // the time-based soft-creep percentage.
+  // the time-based soft-creep percentage. Also persist the step to local
+  // storage so an app crash/restart can resume from the last known step.
   useEffect(() => {
     const ss = polling.serverStep;
     if (ss) {
+      updateActiveVideoJobStep(ss).catch(() => {});
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (prev.serverStep === ss) return prev;
@@ -530,9 +543,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         if (stalledFor < STEP_STALL_MS) return prev;
 
         // When stuck at "finalizing" (the last step), there's no next step
-        // to advance to. Instead, do a DB force-sync to check if the job
-        // already completed but the Realtime/polling missed the update.
-        if (currentStep === 'finalizing') {
+        // to advance to. Do a DB force-sync to check if the job already
+        // completed but the Realtime/polling missed the update. Skip while
+        // backgrounded — the foreground AppState handler already does a
+        // full DB resync, so this would be a redundant and wasted call.
+        if (currentStep === 'finalizing' && appStateActiveRef.current) {
           const currentJobId = jobIdRef.current;
           const currentScanId = scanIdRef.current;
           if (currentJobId) {
@@ -574,6 +589,14 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             })();
           }
           // Reset stall timer so we retry the DB check every 30s
+          stepStallRef.current = { step: currentStep, since: now };
+          return prev;
+        }
+
+        // Skip step force-advance while backgrounded — the foreground
+        // AppState handler does a full DB resync that will reconcile
+        // the step and progress authoritatively.
+        if (!appStateActiveRef.current) {
           stepStallRef.current = { step: currentStep, since: now };
           return prev;
         }
