@@ -21,8 +21,7 @@ module.exports = function withGradleJvmArgs(config) {
     set('org.gradle.caching', 'false');
     set('android.suppressUnsupportedCompileSdk', '36');
     set('android.builder.sdkDownload', 'true');
-
-    set('AsyncStorage_next_kspVersion', '2.1.20-2.0.1');
+    set('android.packagingOptions.pickFirsts', '**/libc++_shared.so,**/libfbjni.so,**/libreactnativejni.so');
 
     return config;
   });

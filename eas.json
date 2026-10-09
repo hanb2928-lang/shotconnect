@@ -14,6 +14,7 @@
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
+        "NODE_OPTIONS": "--max-old-space-size=8192",
         "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Dorg.gradle.caching=false -Dorg.gradle.parallel=false -Xmx4096m -XX:MaxMetaspaceSize=1024m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://covcgemepkdrohktqlhc.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvdmNnZW1lcGtkcm9oa3RxbGhjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjU3OTcsImV4cCI6MjEwNjM0MTc5N30.hCme7ue6PcPauYGB1vS8bpVdsx2VRA6pyqUvstixHNU"
@@ -27,6 +28,7 @@
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
+        "NODE_OPTIONS": "--max-old-space-size=8192",
         "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Dorg.gradle.caching=false -Dorg.gradle.parallel=false -Xmx4096m -XX:MaxMetaspaceSize=1024m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://covcgemepkdrohktqlhc.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvdmNnZW1lcGtkcm9oa3RxbGhjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjU3OTcsImV4cCI6MjEwNjM0MTc5N30.hCme7ue6PcPauYGB1vS8bpVdsx2VRA6pyqUvstixHNU"
@@ -40,6 +42,7 @@
       "env": {
         "EAS_NO_VCS": "1",
         "GRADLE_DAEMON": "false",
+        "NODE_OPTIONS": "--max-old-space-size=8192",
         "GRADLE_OPTS": "-Dorg.gradle.daemon=false -Dorg.gradle.configureondemand=false -Dorg.gradle.configuration-cache=false -Dorg.gradle.caching=false -Dorg.gradle.parallel=false -Xmx4096m -XX:MaxMetaspaceSize=1024m",
         "EXPO_PUBLIC_SUPABASE_URL": "https://covcgemepkdrohktqlhc.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvdmNnZW1lcGtkcm9oa3RxbGhjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjU3OTcsImV4cCI6MjEwNjM0MTc5N30.hCme7ue6PcPauYGB1vS8bpVdsx2VRA6pyqUvstixHNU"

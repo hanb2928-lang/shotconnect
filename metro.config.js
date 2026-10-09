@@ -3,19 +3,6 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
-delete config.watcher?.unstable_workerThreads;
-
-config.watcher = {
-  ...config.watcher,
-  watchFolders: config.watcher?.watchFolders,
-  healthCheck: { enabled: false },
-};
-
-config.server = {
-  ...config.server,
-  hmrEnabled: false,
-};
-
 config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
 
 config.transformer = {
@@ -25,10 +12,6 @@ config.transformer = {
     keep_classnames: true,
     keep_fnames: true,
   },
-  // Raise the inline-bytes threshold so small assets (icons, tiny
-  // images) are embedded as base64 instead of emitting separate
-  // HTTP requests that block first paint on web preview.
-  maxWorkerSize: 512 * 1024 * 1024,
 };
 
 const projectRoot = __dirname;
