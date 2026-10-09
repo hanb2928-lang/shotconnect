@@ -603,7 +603,6 @@ export default function ResultScreen() {
             planning: '편집 플랜 구성 중...',
             submitting: 'AI 렌더링 요청 중...',
             rendering: '영상 렌더링 중...',
-            finalizing: '최종 자막 합성 중...',
           };
           return {
             ...prev,
@@ -640,6 +639,26 @@ export default function ResultScreen() {
     localPollTimerRef.current = setInterval(async () => {
       if (!mountedRef.current || !scan) return;
       try {
+        // Check scans.video_url / muxed_video_url first — the webhook writes
+        // here directly and it's the most reliable completion signal.
+        const { data: scanData } = await supabase
+          .from('scans')
+          .select('video_url, muxed_video_url')
+          .eq('id', scan.id)
+          .maybeSingle();
+        if (scanData) {
+          const scanFinalUrl = (scanData as { muxed_video_url?: string | null; video_url?: string | null }).muxed_video_url
+            ?? (scanData as { video_url?: string | null }).video_url;
+          if (scanFinalUrl) {
+            setGeneratedVideoUrl(scanFinalUrl);
+            setVideoStage('draft_ready');
+            setIsGeneratingVideo(false);
+            setVideoGenProgress(null);
+            if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
+            return;
+          }
+        }
+
         let query = supabase
           .from('video_jobs')
           .select('status, step, video_url, error_message')
@@ -682,7 +701,6 @@ export default function ResultScreen() {
             planning: '편집 플랜 구성 중...',
             submitting: 'AI 렌더링 요청 중...',
             rendering: '영상 렌더링 중...',
-            finalizing: '최종 자막 합성 중...',
           };
           const label = row.step ? (stepLabel[row.step] ?? prev.message) : prev.message;
           return {
@@ -1093,7 +1111,7 @@ export default function ResultScreen() {
             setVideoGenProgress((prev) => {
               if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
               const serverProgress = typeof result.progress === 'number' && Number.isFinite(result.progress)
-                ? Math.max(0, Math.min(0.95, result.progress))
+                ? Math.max(0, Math.min(0.85, result.progress))
                 : prev.progress;
               const stepLabelMap: Record<string, string> = {
                 analyzing: '다각도 컷 분석 중...',
@@ -1101,7 +1119,6 @@ export default function ResultScreen() {
                 planning: '편집 플랜 구성 중...',
                 submitting: 'AI 렌더링 요청 중...',
                 rendering: '영상 렌더링 중...',
-                finalizing: '최종 자막 합성 중...',
               };
               const stepLabel = result.step ? (stepLabelMap[result.step] ?? prev.message) : prev.message;
               return {
@@ -1693,7 +1710,7 @@ export default function ResultScreen() {
                 if (mountedRef.current) {
                   setVideoGenProgress({
                     phase: 'generating',
-                    progress: Math.min(numericProgress, 0.95),
+                    progress: Math.min(numericProgress, 0.85),
                     message: `AI가 영상을 렌더링하고 있어요${pctLabel}`,
                     elapsedSec: elapsed,
                   });
@@ -1803,6 +1820,23 @@ export default function ResultScreen() {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scan.id}` },
           onPayload,
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scan.id}` },
+          (payload: { new: Record<string, unknown> | null }) => {
+            if (!mountedRef.current || !payload.new) return;
+            const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
+            const finalUrl = row.muxed_video_url ?? row.video_url;
+            if (finalUrl && !generatedVideoUrlRef.current) {
+              setGeneratedVideoUrl(finalUrl);
+              setVideoStage('draft_ready');
+              setIsGeneratingVideo(false);
+              setVideoGenProgress(null);
+              setBgJobNotice(null);
+              autoSaveVideoToAssets(finalUrl);
+            }
+          },
         )
         .subscribe((status: string) => {
           if (!mountedRef.current) return;
