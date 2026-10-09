@@ -73,8 +73,18 @@ async function diagnoseShot(shot: AngleShot): Promise<ShotDiagnostic> {
   };
 }
 
-async function preFlightDiagnose(shots: AngleShot[]): Promise<ShotDiagnostic[]> {
-  const diagnostics = await Promise.all(shots.map(diagnoseShot));
+export async function preFlightDiagnose(
+  shots: AngleShot[],
+  onShotValidated?: (completed: number, total: number, label: string) => void,
+): Promise<ShotDiagnostic[]> {
+  const diagnostics: ShotDiagnostic[] = [];
+  // Validate shots sequentially with per-shot callback so the UI can show
+  // a mini-stepper ("1/5 컷 검증 완료") instead of a flat spinner.
+  for (let i = 0; i < shots.length; i++) {
+    const d = await diagnoseShot(shots[i]);
+    diagnostics.push(d);
+    onShotValidated?.(i + 1, shots.length, d.label);
+  }
   const allIssues = diagnostics.flatMap((d) => d.issues);
   if (allIssues.length > 0) {
     const summary = diagnostics
@@ -231,6 +241,14 @@ async function uploadAngleShotsConcurrently(
     }
   }
 
+  // Yield to GC before starting the upload batch. On native, the camera
+  // capture buffers (multi-MB base64 strings or file-system cache files)
+  // may still be resident in the JS heap. Giving the runtime a chance to
+  // reclaim them before the upload workers allocate network buffers
+  // prevents transient memory spikes that cause frame drops on low-RAM
+  // devices during consecutive multi-angle capture → upload cycles.
+  await nativeHeapCooldownGuard();
+
   const workers = Array.from({ length: Math.min(concurrency, shots.length) }, () => processNext());
   await Promise.all(workers);
 
@@ -255,7 +273,7 @@ export interface CloudPipelineResult {
   };
 }
 
-export type StereoStepKey = 'upload' | 'synthesis' | 'directing' | 'render' | 'publish';
+export type StereoStepKey = 'validate' | 'upload' | 'synthesis' | 'directing' | 'render' | 'publish';
 
 export interface StereoStepState {
   key: StereoStepKey;
@@ -283,6 +301,7 @@ export interface StereoPipelineResult {
 }
 
 const STEP_LABELS: Record<StereoStepKey, string> = {
+  validate: 'AI 구도·조도 실시간 검증',
   upload: '클라우드 AI 입체 합성',
   synthesis: '3D 볼륨 분석 & 실사용 맥락 매칭',
   directing: '유튜브 상위 1% 심리 리듬 연출',
@@ -392,13 +411,14 @@ export async function createScanFromAngleShots(
   shots: AngleShot[],
   signal?: AbortSignal,
   onUploadProgress?: (completed: number, total: number) => void,
+  onValidateProgress?: (completed: number, total: number, label: string) => void,
 ): Promise<{ scanId: string; uploadedUrls: string[] }> {
   const aborted = (): boolean => signal?.aborted === true;
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
   const allShots = sorted.filter((s) => s.base64);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
 
-  const diagnostics = await preFlightDiagnose(allShots);
+  const diagnostics = await preFlightDiagnose(allShots, onValidateProgress);
   const blockingIssues = diagnostics.filter((d) => d.issues.length > 0);
   if (blockingIssues.length > 0) {
     const fatalShots = blockingIssues.filter((d) =>
@@ -481,12 +501,18 @@ export async function runStereoPipeline(
   if (existingUploadUrls && existingUploadUrls.length > 0) {
     imageUrl = existingUploadUrls[0];
     additionalUrls = existingUploadUrls.slice(1);
+    steps[0].status = 'done';
+    steps[0].detail = '사전 검증 완료 (기존 업로드 재사용)';
   } else {
+    // Step 0: Frame validation — per-shot client-side check with mini-stepper
     steps[0].status = 'active';
-    steps[0].detail = `${allShots.length}각도 이미지 사전 점검 중...`;
-    report(0, 0.03);
+    steps[0].detail = `AI 구도·조도 검증 준비 중...`;
+    report(0, 0.02);
 
-    const diagnostics = await preFlightDiagnose(allShots);
+    const diagnostics = await preFlightDiagnose(allShots, (completed, total, label) => {
+      steps[0].detail = `컷 검증 ${completed}/${total} 완료 — ${label} 정상`;
+      report(0, 0.02 + (completed / total) * 0.03);
+    });
     const fatalShots = diagnostics.filter((d) =>
       d.issues.some((i) => i.includes('이미지 데이터 없음') || i.includes('파일이 존재하지 않음') || i.includes('0바이트')),
     );
@@ -495,8 +521,14 @@ export async function runStereoPipeline(
       throw new Error(`업로드 불가 — ${summary}`);
     }
 
-    steps[0].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
+    steps[0].status = 'done';
+    steps[0].detail = `${allShots.length}각도 컷 검증 완료`;
     report(0, 0.05);
+
+    // Step 1: Upload
+    steps[1].status = 'active';
+    steps[1].detail = `${allShots.length}각도 이미지 병렬 업로드 (동시 ${UPLOAD_CONCURRENCY}건)...`;
+    report(1, 0.07);
 
     const { results: uploadResults, failures, uploadedPaths: uploadedPathsResult, failureDetails } = await uploadAngleShotsConcurrently(allShots, UPLOAD_CONCURRENCY, signal);
     uploadedPaths = uploadedPathsResult;
@@ -511,6 +543,10 @@ export async function runStereoPipeline(
 
     imageUrl = uploadResults[0].url;
     additionalUrls = uploadResults.slice(1).map((r) => r.url);
+
+    steps[1].status = 'done';
+    steps[1].detail = `${allShots.length}각도 업로드 완료`;
+    report(1, 0.12);
   }
 
   let scanId: string;
@@ -569,8 +605,9 @@ export async function runStereoPipeline(
   // Run local synthesis and cloud stereo analysis in parallel — local synthesis
   // is CPU-only and doesn't depend on the upload, so it can overlap with the
   // cloud call to cut total latency to max(local, cloud) instead of local + cloud.
-  steps[0].detail = '로컬 3D 분석 + 클라우드 GPU 볼륨 복원 동시 처리 중...';
-  report(0, 0.15);
+  steps[1].status = 'active';
+  steps[1].detail = '로컬 3D 분석 + 클라우드 GPU 볼륨 복원 동시 처리 중...';
+  report(1, 0.18);
   if (aborted()) return createAbortedResult(scanId);
   // Yield to the render thread before the CPU-heavy synchronous synthesis
   // call so the navigation animation can complete without frame drops.
@@ -618,9 +655,9 @@ export async function runStereoPipeline(
     ? (cloudResult.synthesis.contextMatch.context as import('./aiSynthesisEngine').UsageContext)
     : localSynthesis.contextMatch.context;
 
-  steps[0].status = 'done';
-  steps[0].detail = synthesisSummary;
-  report(0, 0.25);
+  steps[1].status = 'done';
+  steps[1].detail = synthesisSummary;
+  report(1, 0.28);
 
   const cloudLabel = cloudResult?.synthesis?.contextMatch?.label?.trim();
   const productName = cloudLabel
@@ -635,15 +672,15 @@ export async function runStereoPipeline(
     : synthesisSummary;
 
   if (cleanMode) {
-    steps[1].status = 'done';
-    steps[1].detail = '클린 모드 — 훅/자막 생성 건너뜀 (순수 비주얼 추출)';
-    report(1, 0.5);
+    steps[2].status = 'done';
+    steps[2].detail = '클린 모드 — 훅/자막 생성 건너뜀 (순수 비주얼 추출)';
+    report(2, 0.53);
   } else {
     if (aborted()) return createAbortedResult(scanId);
     await new Promise((r) => setTimeout(r, 0));
-    steps[1].status = 'active';
-    steps[1].detail = '초반 3초 패러독스 훅 + 비트 싱크 설계 중...';
-    report(1, 0.3);
+    steps[2].status = 'active';
+    steps[2].detail = '초반 3초 패러독스 훅 + 비트 싱크 설계 중...';
+    report(2, 0.33);
   }
 
   const editPlan = cleanMode
@@ -666,15 +703,15 @@ export async function runStereoPipeline(
   if (!cleanMode && directingPlan) {
     await new Promise((r) => setTimeout(r, 600));
     if (aborted()) return createAbortedResult(scanId);
-    steps[1].detail = `훅: ${directingPlan.hookTransition.description} | SFX ${directingPlan.sfxPlans.length}건 | 킬링포인트 자막 ${directingPlan.killPointCaptions.length}건`;
+    steps[2].detail = `훅: ${directingPlan.hookTransition.description} | SFX ${directingPlan.sfxPlans.length}건 | 킬링포인트 자막 ${directingPlan.killPointCaptions.length}건`;
   }
 
   if (aborted()) return createAbortedResult(scanId);
   await new Promise((r) => setTimeout(r, 0));
 
-  steps[2].status = 'active';
-  steps[2].detail = cleanMode ? '클린 모드 렌더링 준비 (텍스트 메타데이터 제외)...' : '9:16 H.264 렌더링 코덱 적용 & 메타데이터 생성 중...';
-  report(2, 0.55);
+  steps[3].status = 'active';
+  steps[3].detail = cleanMode ? '클린 모드 렌더링 준비 (텍스트 메타데이터 제외)...' : '9:16 H.264 렌더링 코덱 적용 & 메타데이터 생성 중...';
+  report(3, 0.58);
 
   const publishPlans = cleanMode
     ? []
@@ -688,26 +725,26 @@ export async function runStereoPipeline(
   await new Promise((r) => setTimeout(r, 600));
   if (aborted()) return createAbortedResult(scanId);
   if (cleanMode) {
-    steps[2].detail = '클린 모드 렌더링 준비 완료 (텍스트 메타데이터 없음)';
+    steps[3].detail = '클린 모드 렌더링 준비 완료 (텍스트 메타데이터 없음)';
   } else {
     const metadataSummary = publishPlans.map((p) => `${p.target}: ${p.metadata.title.slice(0, 20)}...`).join(' | ');
-    steps[2].detail = `3개 플랫폼 렌더링 준비 완료 | ${metadataSummary}`;
+    steps[3].detail = `3개 플랫폼 렌더링 준비 완료 | ${metadataSummary}`;
   }
-  report(2, 0.75);
+  report(3, 0.78);
 
-  steps[3].status = 'active';
-  steps[3].detail = '비차단 갤러리 저장 처리 및 퍼블리시 딥링크 준비 중...';
-  report(3, 0.8);
+  steps[4].status = 'active';
+  steps[4].detail = '비차단 갤러리 저장 처리 및 퍼블리시 딥링크 준비 중...';
+  report(4, 0.83);
 
   await new Promise((r) => setTimeout(r, 400));
 
-  steps[3].status = 'done';
-  steps[3].detail = '갤러리 저장 준비 완료 · 3개 플랫폼 퍼블리시 대기';
-  report(3, 0.95);
+  steps[4].status = 'done';
+  steps[4].detail = '갤러리 저장 준비 완료 · 3개 플랫폼 퍼블리시 대기';
+  report(4, 0.95);
 
-  steps[4].status = 'active';
-  steps[4].detail = '퍼블리시 대기 — 플랫폼 선택 후 원클릭 업로드 가능';
-  report(4, 1.0);
+  steps[5].status = 'active';
+  steps[5].detail = '퍼블리시 대기 — 플랫폼 선택 후 원클릭 업로드 가능';
+  report(5, 1.0);
 
   const result: StereoPipelineResult = {
     scanId,
@@ -757,9 +794,9 @@ export async function runStereoPipeline(
     // non-fatal — pipeline result is still returned in-memory
   }
 
-  steps[4].status = 'done';
-  steps[4].detail = '파이프라인 완료 · 편집 화면으로 이동 가능';
-  report(4, 1.0, null, result);
+  steps[5].status = 'done';
+  steps[5].detail = '파이프라인 완료 · 편집 화면으로 이동 가능';
+  report(5, 1.0, null, result);
 
   if (Platform.OS !== 'web') {
     void Linking;

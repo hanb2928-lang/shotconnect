@@ -454,6 +454,24 @@ export function useResultPolling(
       resumeBurstCount++;
       if (resumeBurstCount === 1) {
         try { await ensureFreshSession(); } catch { /* non-fatal */ }
+        // Instant DB force-sync on foreground return: the Realtime websocket
+        // may take 1-2 seconds to re-subscribe after a network drop, so check
+        // the DB directly to catch any completion that happened while
+        // backgrounded. This fills the gap before the first poll cycle fires.
+        const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
+        if (!cancelled && !settledRef.current && dbResult) {
+          handleResult(dbResult.status, dbResult.videoUrl);
+          if (settledRef.current) return;
+        }
+        // Also check scans.video_url — the webhook may have written the
+        // result directly to scans without the video_jobs row updating.
+        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
+          const scanResult = await forceSyncByScan();
+          if (!cancelled && !settledRef.current && scanResult) {
+            handleResult(scanResult.status, scanResult.videoUrl);
+            if (settledRef.current) return;
+          }
+        }
       }
       pollOnce();
       resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);

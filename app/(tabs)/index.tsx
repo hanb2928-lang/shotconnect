@@ -848,12 +848,15 @@ function CameraScreenInner() {
     let scanId: string;
     let uploadedUrls: string[];
     try {
+      // Step 0: Frame validation mini-stepper — shows per-shot progress
+      // ("1/5 컷 검증 완료") before upload starts, giving the user immediate
+      // feedback that their photos are being analyzed, not just waiting.
       setStereoProgress((previous) => ({
         ...previous,
         currentStep: 0,
-        overallProgress: 0.03,
+        overallProgress: 0.02,
         steps: previous.steps.map((step, index) => index === 0
-          ? { ...step, status: 'active', detail: '다각도 이미지 업로드 준비 중...' }
+          ? { ...step, status: 'active', detail: 'AI 구도·조도 실시간 검증 준비 중...' }
           : step),
       }));
       const result = await stereoMod.createScanFromAngleShots(
@@ -863,10 +866,21 @@ function CameraScreenInner() {
           if (!isMountedRef.current || total <= 0) return;
           setStereoProgress((previous) => ({
             ...previous,
-            currentStep: 0,
-            overallProgress: 0.03 + (completed / total) * 0.17,
-            steps: previous.steps.map((step, index) => index === 0
+            currentStep: 1,
+            overallProgress: 0.07 + (completed / total) * 0.13,
+            steps: previous.steps.map((step, index) => index === 1
               ? { ...step, status: 'active', detail: `${completed}/${total}각도 이미지 업로드 중...` }
+              : index === 0 ? { ...step, status: 'done', detail: `${total}각도 컷 검증 완료` } : step),
+          }));
+        },
+        (completed, total, label) => {
+          if (!isMountedRef.current || total <= 0) return;
+          setStereoProgress((previous) => ({
+            ...previous,
+            currentStep: 0,
+            overallProgress: 0.02 + (completed / total) * 0.03,
+            steps: previous.steps.map((step, index) => index === 0
+              ? { ...step, status: 'active', detail: `컷 검증 ${completed}/${total} 완료 — ${label} 정상` }
               : step),
           }));
         },
@@ -1274,7 +1288,30 @@ function CameraScreenInner() {
 
     let scanId: string;
     try {
-      const result = await stereoMod.createScanFromAngleShots(sorted, controller.signal);
+      setStereoProgress((previous) => ({
+        ...previous,
+        currentStep: 0,
+        overallProgress: 0.02,
+        steps: previous.steps.map((step, index) => index === 0
+          ? { ...step, status: 'active', detail: 'AI 구도·조도 실시간 검증 준비 중...' }
+          : step),
+      }));
+      const result = await stereoMod.createScanFromAngleShots(
+        sorted,
+        controller.signal,
+        undefined,
+        (completed, total, label) => {
+          if (!isMountedRef.current || total <= 0) return;
+          setStereoProgress((previous) => ({
+            ...previous,
+            currentStep: 0,
+            overallProgress: 0.02 + (completed / total) * 0.03,
+            steps: previous.steps.map((step, index) => index === 0
+              ? { ...step, status: 'active', detail: `컷 검증 ${completed}/${total} 완료 — ${label} 정상` }
+              : step),
+          }));
+        },
+      );
       scanId = result.scanId;
     } catch (err) {
       stereoOverlayRef.current = false;
@@ -1975,6 +2012,26 @@ function CameraScreenInner() {
 
 // ─── Lightweight Stereo Pipeline Progress ───
 
+const RENDER_MICRO_COPIES = [
+  '다각도 컷의 공간감을 입체적으로 합성하는 중입니다...',
+  '시선을 사로잡는 훅(Hook) 마케팅 요소를 주입하고 있습니다...',
+  '고해상도 프레임 업그레이드를 마무리하는 중입니다...',
+  '플랫폼별 최적 비율로 크롭과 메타데이터를 생성하고 있습니다...',
+  'AI 디렉터가 심리 리듬 곡선을 미세 조정하는 중입니다...',
+];
+
+function useRotatingMicroCopy(active: boolean, intervalMs = 3000): string {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (!active) { setIndex(0); return; }
+    const timer = setInterval(() => {
+      setIndex((prev) => (prev + 1) % RENDER_MICRO_COPIES.length);
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [active, intervalMs]);
+  return RENDER_MICRO_COPIES[index];
+}
+
 function StereoProgressLightweight({
   visible,
   progress,
@@ -1987,6 +2044,8 @@ function StereoProgressLightweight({
   const hasError = progress.error !== null;
   const pct = Math.round(progress.overallProgress * 100);
   const currentStep = progress.currentStep >= 0 ? progress.steps[progress.currentStep] : null;
+  const inRenderZone = pct >= 55 && pct < 85;
+  const microCopy = useRotatingMicroCopy(visible && !hasError && inRenderZone);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
@@ -2008,13 +2067,21 @@ function StereoProgressLightweight({
               </RNAnimated.View>
               <Text style={styles.stereoLightTitle}>AI 입체컷 생성 중</Text>
               {currentStep && <Text style={styles.stereoLightStep}>{currentStep.label}</Text>}
+              {currentStep?.detail ? (
+                <Text style={styles.stereoLightDetail}>{currentStep.detail}</Text>
+              ) : null}
               {pct > 0 ? (
-                <View style={styles.stereoLightBarWrap}>
-                  <View style={styles.stereoLightBarTrack}>
-                    <View style={[styles.stereoLightBarFill, { width: `${pct}%` }]} />
+                <>
+                  <View style={styles.stereoLightBarWrap}>
+                    <View style={styles.stereoLightBarTrack}>
+                      <View style={[styles.stereoLightBarFill, { width: `${pct}%` }]} />
+                    </View>
+                    <Text style={styles.stereoLightPct}>{pct}%</Text>
                   </View>
-                  <Text style={styles.stereoLightPct}>{pct}%</Text>
-                </View>
+                  {inRenderZone && (
+                    <Text style={styles.stereoLightMicroCopy}>{microCopy}</Text>
+                  )}
+                </>
               ) : (
                 <Text style={styles.stereoLightPendingText}>AI가 안전하게 작업 중입니다...</Text>
               )}
@@ -2517,6 +2584,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.primary[300],
+  },
+  stereoLightDetail: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textDim,
+    marginTop: 4,
+    textAlign: 'center',
+    minHeight: 16,
+  },
+  stereoLightMicroCopy: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textDim,
+    marginTop: 10,
+    textAlign: 'center',
+    minHeight: 32,
+    lineHeight: 17,
+    opacity: 0.85,
   },
   stereoLightError: {
     fontSize: 13,
