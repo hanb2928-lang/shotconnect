@@ -54,6 +54,7 @@ interface VideoGenContextValue extends VideoGenState {
   startGeneration: (params: StartGenerationParams) => Promise<void>;
   clearGeneration: () => void;
   clearResult: () => void;
+  retryFromDB: () => Promise<boolean>;
   progressMessage: string;
 }
 
@@ -888,6 +889,67 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     setResultVideoUrl(null);
   }, []);
 
+  const retryFromDB = useCallback(async (): Promise<boolean> => {
+    const active = await getActiveVideoJob();
+    if (!active || !active.jobId || !active.scanId) return false;
+    try {
+      await ensureFreshSession();
+      const { data: scanData } = await supabase
+        .from('scans')
+        .select('video_url, muxed_video_url')
+        .eq('id', active.scanId)
+        .maybeSingle();
+      const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+      if (scanFinalUrl) {
+        clearActiveVideoJob();
+        setError(null);
+        if (outputModeRef.current === 'image') {
+          setResultImageUrl(scanFinalUrl);
+        } else {
+          setResultVideoUrl(scanFinalUrl);
+        }
+        serverProgRef.current = 1.0;
+        setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+        notifyVideoCompleted();
+        return true;
+      }
+      const isSoft = active.jobId.startsWith('soft-') || active.jobId.startsWith('hd-soft-');
+      let query = supabase.from('video_jobs').select('status, video_url, error_message, step');
+      const { data, error: dbError } = isSoft
+        ? await query.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+        : await query.eq('task_id', active.jobId).maybeSingle();
+      if (dbError || !data) return false;
+      const row = data as { status: string; video_url: string | null; error_message: string | null; step: string | null };
+      if (row.status === 'SUCCESS' && row.video_url) {
+        clearActiveVideoJob();
+        setError(null);
+        if (outputModeRef.current === 'image') {
+          setResultImageUrl(row.video_url);
+        } else {
+          setResultVideoUrl(row.video_url);
+        }
+        serverProgRef.current = 1.0;
+        setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+        notifyVideoCompleted();
+        return true;
+      }
+      if (row.status === 'FAILED') {
+        clearActiveVideoJob();
+        return false;
+      }
+      scanIdRef.current = active.scanId;
+      jobIdRef.current = active.jobId;
+      setJobId(active.jobId);
+      setIsGenerating(true);
+      setError(null);
+      const restoreProgress = active.progress > 0 ? Math.min(active.progress, 0.9) : 0.3;
+      setVideoProgress({ phase: 'generating', progress: restoreProgress, message: '서버에서 진행 중인 작업을 연결하는 중...', elapsedSec: 0, serverStep: row.step ?? active.step });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const value: VideoGenContextValue = {
     isGenerating,
     jobId,
@@ -899,6 +961,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     startGeneration,
     clearGeneration,
     clearResult,
+    retryFromDB,
     progressMessage: polling.progressMessage,
   };
 

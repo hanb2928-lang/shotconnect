@@ -16,7 +16,7 @@ export interface ResultPollingOptions {
   onSoftWarn?: () => void;
 }
 
-const POLL_FIRST_DELAY_MS = 5000;
+const POLL_FIRST_DELAY_MS = 8000;
 const POLL_INITIAL_MS = 7000;
 const POLL_MAX_MS = 30000;
 const POLL_BACKOFF_FACTOR = 1.8;
@@ -96,6 +96,8 @@ export function useResultPolling(
     let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
     const pollErrorWindow: number[] = [];
     let pollAttempt = 0;
+    let notFoundRetries = 0;
+    const MAX_404_RETRIES = 3;
     // Monotonic guard: track the highest progress and latest step seen
     // across both realtime and polling. Stale realtime payloads that arrive
     // after a newer poll result (common on background→foreground transition)
@@ -356,7 +358,19 @@ export function useResultPolling(
             handleResult(status, pollData.videoUrl as string);
             return;
           } else if (status === 'FAILED') {
-            handleResult(status, null, pollData.error as string | undefined);
+            const errStr = (pollData.error as string) ?? '';
+            if (errStr.includes('404') && notFoundRetries < MAX_404_RETRIES) {
+              notFoundRetries++;
+              const notFoundDelay = 3000 * notFoundRetries;
+              setProgressMessage(notFoundRetries === 1
+                ? '서버에 작업이 등록되는 중입니다. 잠시만 기다려주세요...'
+                : '작업 상태를 다시 확인하는 중...');
+              if (!cancelled && !settledRef.current) {
+                pollTimer = setTimeout(pollOnce, notFoundDelay);
+              }
+              return;
+            }
+            handleResult(status, null, errStr || undefined);
             return;
           } else {
             const rawProgress = pollData.progress ? parseFloat(pollData.progress) : NaN;

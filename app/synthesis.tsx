@@ -277,6 +277,7 @@ export default function SynthesisScreen() {
     error: genError,
     startGeneration,
     clearResult,
+    retryFromDB,
   } = videoGen;
 
   const error = localError ?? genError;
@@ -795,7 +796,10 @@ export default function SynthesisScreen() {
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity
               style={[styles.retryBtn, isGenerating && styles.retryBtnDisabled]}
-              onPress={handleGenerate}
+              onPress={async () => {
+                const recovered = await retryFromDB();
+                if (!recovered) handleGenerate();
+              }}
               disabled={isGenerating}
               activeOpacity={0.7}
             >

@@ -1286,6 +1286,18 @@ async function pollRunwayTask(
         const errText = await resp.text().catch(() => "");
         const errDetail = parseRunwayError(errText);
 
+        // 404 from the tasks endpoint usually means the task was just created
+        // but hasn't propagated to the Runway API's read store yet. Retry with
+        // backoff instead of failing immediately — the task ID is valid, it
+        // just needs a few seconds to become visible.
+        if (resp.status === 404 && attempt < MAX_RETRIES) {
+          lastErr = `Runway 폴링 실패 (HTTP 404): ${errDetail}`;
+          const backoffDelay = RETRY_INITIAL_DELAY_MS * Math.pow(2, attempt);
+          console.log(`[generate-video] Poll retry ${attempt + 1}/${MAX_RETRIES} after ${backoffDelay}ms (HTTP 404, task not yet visible)`);
+          await delay(backoffDelay);
+          continue;
+        }
+
         // 5xx errors are transient — retry with backoff
         if (resp.status >= 500 && resp.status < 600 && attempt < MAX_RETRIES) {
           lastErr = `Runway 폴링 실패 (HTTP ${resp.status}): ${errDetail}`;
