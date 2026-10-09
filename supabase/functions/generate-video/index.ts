@@ -83,6 +83,7 @@ const SERVER_POLL_INITIAL_DELAY_MS = 2000;
 const SERVER_POLL_MAX_DELAY_MS = 15000;
 const SERVER_POLL_SELF_INVOKE_TIMEOUT_MS = 15000; // AbortController timeout for self-reinvocation fetch
 const JITTER_MAX_MS = 2000; // Random jitter added to each backoff delay to desynchronize concurrent polls
+const FIRST_POLL_BUFFER_MS = 5000; // Grace period before first Runway poll — gives the async submit + DB write enough time to propagate the real runway_task_id
 const VIDEO_DAILY_LIMIT = 10; // Max AI video generations per IP per day
 
 const VIDEO_UNKNOWN_PATTERNS = [
@@ -464,7 +465,7 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
         }).catch(() => {
           // Non-fatal — zombie-job guard will catch it if this fails.
         });
-      }, SERVER_POLL_INITIAL_DELAY_MS);
+      }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS);
     }
 
     return new Response(
@@ -603,51 +604,12 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
     );
   }
 
-  const status = await pollRunwayTask(taskId, runwayKey);
-
-  if (status.status === "SUCCESS" && status.videoUrl) {
-    const originalUrl = status.videoUrl;
-    if (body.scanId && supabaseUrl && serviceRoleKey) {
-      await markVideoJobComplete(body.scanId, taskId, originalUrl);
-    }
-    if (body.scanId) {
-      persistVideoInBackground(originalUrl, body.scanId, taskId);
-    }
-    return new Response(
-      JSON.stringify({
-        mode: "poll",
-        status: "SUCCESS",
-        videoUrl: originalUrl,
-        taskId,
-        provider: "runway",
-        persisted: false,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  }
-
-  if (status.status === "FAILED") {
-    return new Response(
-      JSON.stringify({
-        mode: "poll",
-        status: "FAILED",
-        error: status.error ?? "Runway 비디오 생성에 실패했습니다.",
-        taskId,
-        provider: "runway",
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  }
-
+  // scanId is required for poll mode — without it we cannot look up the
+  // runway_task_id from the DB, and polling Runway with the raw internal
+  // UUID produces spurious 404s.
   return new Response(
-    JSON.stringify({
-      mode: "poll",
-      status: status.status,
-      progress: status.progress ?? "",
-      taskId,
-      provider: "runway",
-    }),
-    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    JSON.stringify({ error: "폴링 모드에서는 scanId가 필요합니다.", step: "poll", provider: "runway" }),
+    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 }
 
@@ -692,6 +654,36 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
   }
   const internalJobId = resolvedJob?.internalJobId ?? taskId;
 
+  // Hard gate: never poll Runway unless the real runway_task_id has been
+  // persisted to the DB. Without this, a transient DB lookup failure could
+  // substitute the internal UUID for the Runway task ID, producing 404s.
+  if (!resolvedJob?.runwayTaskId) {
+    if (attempt >= SERVER_POLL_MAX_ATTEMPTS) {
+      await markVideoJobFailed(scanId, internalJobId, "Runway 작업 ID가 저장되지 않아 폴링을 시작할 수 없습니다. 다시 시도해주세요.");
+      return new Response(
+        JSON.stringify({ mode: "server-poll", status: "FAILED", error: "Runway 작업 ID 미저장", taskId }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    // Reschedule with buffer delay to give runway-submit time to persist the ID
+    const bufferDelay = SERVER_POLL_INITIAL_DELAY_MS + (attempt === 0 ? FIRST_POLL_BUFFER_MS : 0);
+    setTimeout(() => {
+      const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+      fetch(selfUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey },
+        body: JSON.stringify({ mode: "server-poll", taskId, scanId, variationSeed: attempt + 1 }),
+        signal: controller.signal,
+      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
+    }, bufferDelay);
+    return new Response(
+      JSON.stringify({ mode: "server-poll", status: "PROCESSING", progress: "Runway 작업 ID 대기 중...", taskId, nextPollInMs: bufferDelay, attempt: attempt + 1 }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
   if (attempt >= SERVER_POLL_MAX_ATTEMPTS) {
     await markVideoJobFailed(scanId, internalJobId, "서버 폴링이 최대 횟수에 도달했습니다. 좀비 작업으로 분류됩니다.");
     return new Response(
@@ -700,8 +692,8 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     );
   }
 
-  // Poll Runway once
-  const status = await pollRunwayTask(taskId, runwayKey);
+  // Poll Runway once — use the validated runway_task_id from the DB, not the raw taskId
+  const status = await pollRunwayTask(resolvedJob.runwayTaskId, runwayKey);
 
   if (status.status === "SUCCESS" && status.videoUrl) {
     // Check if the webhook already completed this job — skip redundant work
@@ -1002,7 +994,7 @@ async function findLatestJobByScanId(scanId: string): Promise<{ status: string; 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&select=status,error_message,video_url,task_id,created_at&order=created_at.desc&limit=1`,
+      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&select=status,error_message,video_url,task_id,runway_task_id,created_at&order=created_at.desc&limit=1`,
       {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
         signal: controller.signal,
@@ -1010,7 +1002,7 @@ async function findLatestJobByScanId(scanId: string): Promise<{ status: string; 
     );
     clearTimeout(timeoutId);
     if (!resp.ok) return null;
-    const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string }>;
+    const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string; runway_task_id: string | null }>;
     const row = rows[0];
     if (!row) return null;
     return {
@@ -1018,6 +1010,7 @@ async function findLatestJobByScanId(scanId: string): Promise<{ status: string; 
       error: row.error_message ?? undefined,
       videoUrl: row.video_url ?? undefined,
       internalJobId: row.task_id,
+      runwayTaskId: row.runway_task_id ?? undefined,
     };
   } catch {
     return null;
@@ -1030,7 +1023,7 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&runway_task_id=eq.${encodeURIComponent(runwayTaskId)}&select=status,error_message,video_url,task_id,created_at`,
+      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&runway_task_id=eq.${encodeURIComponent(runwayTaskId)}&select=status,error_message,video_url,task_id,runway_task_id,created_at`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -1041,7 +1034,7 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
     );
     clearTimeout(timeoutId);
     if (resp.ok) {
-      const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string; created_at: string }>;
+      const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string; runway_task_id: string | null; created_at: string }>;
       if (rows.length > 0) {
         const row = rows[0];
         const isZombie = (row.status === 'PENDING' || row.status === 'PROCESSING' || row.status === 'RUNNING' || row.status === 'THROTTLED')
@@ -1055,6 +1048,7 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
           error: row.error_message ?? undefined,
           videoUrl: row.video_url ?? undefined,
           internalJobId: row.task_id,
+          runwayTaskId: row.runway_task_id ?? undefined,
         };
       }
     }

@@ -193,7 +193,13 @@ describe('generate-video edge function', () => {
           return Promise.resolve(jsonResponse([{ video_url: null }]));
         }
         if (url.includes('/rest/v1/video_jobs')) {
-          return Promise.resolve(jsonResponse([]));
+          return Promise.resolve(jsonResponse([{
+            status: 'PROCESSING',
+            error_message: null,
+            video_url: null,
+            created_at: new Date().toISOString(),
+            runway_task_id: 'task-123',
+          }]));
         }
         if (url.includes('api.dev.runwayml.com/v1/tasks/')) {
           return Promise.resolve(jsonResponse({
@@ -207,7 +213,7 @@ describe('generate-video edge function', () => {
       const req = new Request('https://test.supabase.co/functions/v1/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'poll', taskId: 'task-123' }),
+        body: JSON.stringify({ mode: 'poll', taskId: 'task-123', scanId: 'scan-456' }),
       });
       const resp = await handler(req);
       expect(resp.status).toBe(200);
@@ -225,7 +231,13 @@ describe('generate-video edge function', () => {
           return Promise.resolve(jsonResponse([{ video_url: null }]));
         }
         if (url.includes('/rest/v1/video_jobs')) {
-          return Promise.resolve(jsonResponse([]));
+          return Promise.resolve(jsonResponse([{
+            status: 'PROCESSING',
+            error_message: null,
+            video_url: null,
+            created_at: new Date().toISOString(),
+            runway_task_id: 'task-123',
+          }]));
         }
         if (url.includes('api.dev.runwayml.com/v1/tasks/')) {
           return Promise.resolve(jsonResponse({
@@ -239,7 +251,7 @@ describe('generate-video edge function', () => {
       const req = new Request('https://test.supabase.co/functions/v1/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'poll', taskId: 'task-123' }),
+        body: JSON.stringify({ mode: 'poll', taskId: 'task-123', scanId: 'scan-456' }),
       });
       const resp = await handler(req);
       expect(resp.status).toBe(200);
