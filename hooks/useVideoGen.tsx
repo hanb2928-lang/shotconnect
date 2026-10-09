@@ -84,6 +84,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const prefetchedHookRef = useRef<ReturnType<typeof autoSelectHook> | null>(null);
   const stepStallRef = useRef<{ step: string; since: number } | null>(null);
   const stepStallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ninetyFivePctSinceRef = useRef<number | null>(null);
+  const completionFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -218,6 +220,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setInterval> | null = null;
     let creepTimer: ReturnType<typeof setInterval> | null = null;
     let hardGuardTimer: ReturnType<typeof setInterval> | null = null;
+    let completionWatchTimer: ReturnType<typeof setInterval> | null = null;
 
     const startTimers = () => {
       if (timer || creepTimer) return;
@@ -264,11 +267,92 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           return { ...prev, progress: forced };
         });
       }, 12_000);
+      // 95% completion fallback: if progress stays at or above 95% for 90
+      // seconds without the server delivering a terminal status, do a final
+      // DB force-sync. If the video is ready, complete immediately; otherwise
+      // escalate to a timeout error so the UI never freezes at 95% forever.
+      const COMPLETION_FALLBACK_DELAY_MS = 90_000;
+      const checkCompletionFallback = () => {
+        const currentJobId = jobIdRef.current;
+        const currentScanId = scanIdRef.current;
+        if (!currentJobId) return;
+        (async () => {
+          try {
+            await ensureFreshSession();
+            const isSoft = currentJobId.startsWith('soft-');
+            let q = supabase.from('video_jobs').select('status, video_url, error_message');
+            const { data, error: dbErr } = isSoft && currentScanId
+              ? await q.eq('scan_id', currentScanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+              : await q.eq('task_id', currentJobId).maybeSingle();
+            if (dbErr || !data) {
+              throw new Error('DB lookup failed');
+            }
+            const row = data as { status: string; video_url: string | null; error_message: string | null };
+            if (row.status === 'SUCCESS' && row.video_url) {
+              clearActiveVideoJob();
+              jobIdRef.current = null;
+              setJobId(null);
+              setIsGenerating(false);
+              serverProgRef.current = 1.0;
+              if (outputModeRef.current === 'image') {
+                setResultImageUrl(row.video_url);
+              } else {
+                setResultVideoUrl(row.video_url);
+              }
+              setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+              notifyVideoCompleted();
+            } else if (row.status === 'FAILED') {
+              clearActiveVideoJob();
+              jobIdRef.current = null;
+              setJobId(null);
+              setIsGenerating(false);
+              setVideoProgress(null);
+              serverProgRef.current = null;
+              setError(row.error_message ?? '영상 생성에 실패했습니다.');
+            } else {
+              throw new Error('Stuck at 95%');
+            }
+          } catch {
+            jobIdRef.current = null;
+            setJobId(null);
+            setIsGenerating(false);
+            setVideoProgress(null);
+            serverProgRef.current = null;
+            setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
+          }
+        })();
+      };
+
+      completionWatchTimer = setInterval(() => {
+        setVideoProgress((prev) => {
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') {
+            ninetyFivePctSinceRef.current = null;
+            return prev;
+          }
+          if (prev.progress >= 0.95) {
+            if (ninetyFivePctSinceRef.current === null) {
+              ninetyFivePctSinceRef.current = Date.now();
+            } else if (Date.now() - ninetyFivePctSinceRef.current >= COMPLETION_FALLBACK_DELAY_MS) {
+              if (!completionFallbackRef.current) {
+                completionFallbackRef.current = setTimeout(checkCompletionFallback, 0);
+              }
+              ninetyFivePctSinceRef.current = null;
+            }
+          } else {
+            ninetyFivePctSinceRef.current = null;
+          }
+          return prev;
+        });
+      }, 3000);
     };
+
     const stopTimers = () => {
       if (timer) { clearInterval(timer); timer = null; }
       if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
       if (hardGuardTimer) { clearInterval(hardGuardTimer); hardGuardTimer = null; }
+      if (completionWatchTimer) { clearInterval(completionWatchTimer); completionWatchTimer = null; }
+      if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
+      ninetyFivePctSinceRef.current = null;
     };
 
     startTimers();
@@ -661,6 +745,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       hookTimeoutRef.current = null;
     }
     stepStallRef.current = null;
+    ninetyFivePctSinceRef.current = null;
+    if (completionFallbackRef.current) {
+      clearTimeout(completionFallbackRef.current);
+      completionFallbackRef.current = null;
+    }
     clearActiveVideoJob();
   }, []);
 
