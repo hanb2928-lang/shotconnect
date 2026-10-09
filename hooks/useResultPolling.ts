@@ -209,8 +209,35 @@ export function useResultPolling(
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (forceSyncAbort.signal.aborted || dbError || !data) return null;
+        if (forceSyncAbort.signal.aborted || dbError || !data) {
+          // Fallback: check scans.video_url / muxed_video_url directly — the
+          // webhook may have written the result to scans without the
+          // video_jobs row updating.
+          const { data: scanData } = await supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle();
+          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          if (scanFinalUrl) {
+            return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed' };
+          }
+          return null;
+        }
         const row = data as { status: string; video_url: string | null; step: string | null };
+        if (row.status === 'SUCCESS' && row.video_url) {
+          return { status: row.status, videoUrl: row.video_url, step: row.step };
+        }
+        // Non-terminal: also check scans.video_url / muxed_video_url as a fallback.
+        const { data: scanData } = await supabase
+          .from('scans')
+          .select('video_url, muxed_video_url')
+          .eq('id', scanId)
+          .maybeSingle();
+        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        if (scanFinalUrl) {
+          return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed' };
+        }
         return { status: row.status, videoUrl: row.video_url, step: row.step };
       } catch {
         return null;
@@ -228,6 +255,19 @@ export function useResultPolling(
 
     const pollOnce = async () => {
       if (cancelled || settledRef.current) return;
+
+      // At 95%+, the 5-second forced completion guard is already running a
+      // DB force-sync. Skip redundant edge function polls to avoid lock
+      // conflicts and wasted network requests on native.
+      if (highestProgressSeen >= 0.95) {
+        const delayMs = Math.min(
+          Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
+          POLL_MAX_MS,
+        );
+        pollAttempt++;
+        pollTimer = setTimeout(pollOnce, delayMs);
+        return;
+      }
 
       // Abort any previous in-flight poll before starting a new one.
       pollAbort?.abort();
@@ -328,6 +368,16 @@ export function useResultPolling(
         if (dbResult) {
           handleResult(dbResult.status, dbResult.videoUrl);
           if (settledRef.current) return;
+        }
+        // Also check scans.video_url — the webhook may have completed
+        // without the video_jobs row being visible yet.
+        if (scanId) {
+          const scanResult = await forceSyncByScan();
+          if (cancelled) return;
+          if (scanResult) {
+            handleResult(scanResult.status, scanResult.videoUrl);
+            if (settledRef.current) return;
+          }
         }
       }
 
@@ -453,10 +503,13 @@ export function useResultPolling(
     };
   }, [jobId, scanId, settle]);
 
-  // 95% stall guard: when server-reported progress reaches 95%+ while still
-  // polling, start a 25-second timer. If no terminal status arrives, do a
-  // final DB force-sync — complete if the video is ready, otherwise escalate
-  // to a timeout error so the UI never freezes at 95% indefinitely.
+  // 5-second forced completion guard: when server-reported progress reaches
+  // 95%+ while still polling, start a 5-second timer. If no terminal status
+  // arrives, do a final DB force-sync — complete if the video is ready,
+  // otherwise escalate to a timeout error so the UI never freezes at 95%.
+  // The server never writes a "finalizing" step — it goes rendering→completed
+  // directly — so 95% means the client's step stall guard advanced it there
+  // and the real result should be imminent or already in the DB.
   useEffect(() => {
     if (jobState !== 'polling' || serverProgress === null || serverProgress < 0.95) return;
     if (!jobId) return;
@@ -468,6 +521,21 @@ export function useResultPolling(
       if (aborted || settledRef.current) return;
       try {
         await ensureFreshSession();
+        // First check scans.video_url / muxed_video_url — the webhook
+        // writes here directly and it's the most reliable completion signal.
+        if (scanId) {
+          const { data: scanData } = await supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle();
+          if (aborted || settledRef.current) return;
+          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          if (scanFinalUrl) {
+            settle('completed', undefined, scanFinalUrl);
+            return;
+          }
+        }
         const isSoft = jobId.startsWith('soft-');
         let query = supabase.from('video_jobs').select('status, video_url, error_message');
         const { data, error: dbErr } = isSoft && scanId
@@ -491,7 +559,7 @@ export function useResultPolling(
           settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
         }
       }
-    }, 25_000);
+    }, 5_000);
 
     return () => {
       aborted = true;

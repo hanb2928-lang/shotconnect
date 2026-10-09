@@ -718,13 +718,15 @@ function waitForVideoCompletion(
       try {
         const { data, error } = await supabase
           .from('scans')
-          .select('video_url')
+          .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        if (error || !data?.video_url) return;
+        if (error || !data) return;
+        const finalUrl = data.muxed_video_url ?? data.video_url;
+        if (!finalUrl) return;
         report('completed', 1.0, 'AI 비디오 생성 완료');
         finish(() => resolve({
-          videoUrl: data.video_url!,
+          videoUrl: finalUrl,
           jobId: submitData.taskId,
           motionPrompt: submitData.motionPrompt,
           durationSec: submitData.durationSec,
@@ -1213,13 +1215,14 @@ export function subscribeVideoJob(
         try {
           const { data: scanData } = await supabase
             .from('scans')
-            .select('video_url')
+            .select('video_url, muxed_video_url')
             .eq('id', scanId)
             .maybeSingle();
-          if (scanData?.video_url) {
+          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          if (scanFinalUrl) {
             settled = true;
             cleanup();
-            callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanData.video_url });
+            callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanFinalUrl });
             return;
           }
         } catch { /* ignore — no fallback URL */ }
@@ -1245,13 +1248,14 @@ export function subscribeVideoJob(
       try {
         const { data: scanData } = await supabase
           .from('scans')
-          .select('video_url')
+          .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        if (scanData?.video_url) {
+        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        if (scanFinalUrl) {
           settled = true;
           cleanup();
-          callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanData.video_url });
+          callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanFinalUrl });
           return;
         }
       } catch { /* ignore */ }
@@ -1649,18 +1653,20 @@ export function subscribeHdUpgrade(
         callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
         return;
       }
-      // Fallback: check scans.video_url — if the draft or HD result was
-      // written to scans but the video_jobs row hasn't updated yet.
+      // Fallback: check scans.video_url / muxed_video_url — if the draft
+      // or HD result was written to scans but the video_jobs row hasn't
+      // updated yet.
       try {
         const { data: scanData } = await supabase
           .from('scans')
-          .select('video_url')
+          .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        if (scanData?.video_url) {
+        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        if (scanFinalUrl) {
           settled = true;
           cleanup();
-          callback({ status: 'SUCCESS', videoUrl: scanData.video_url });
+          callback({ status: 'SUCCESS', videoUrl: scanFinalUrl });
         }
       } catch { /* ignore */ }
     } catch (err) {
@@ -1837,14 +1843,15 @@ export async function recoverVideoJob(
       .maybeSingle();
 
     if (error || !data) {
-      // Fallback: check scans.video_url directly
+      // Fallback: check scans.video_url / muxed_video_url directly
       const { data: scanData } = await supabase
         .from('scans')
-        .select('video_url')
+        .select('video_url, muxed_video_url')
         .eq('id', scanId)
         .maybeSingle();
-      if (scanData?.video_url) {
-        return { videoUrl: scanData.video_url, isHd: false, status: 'SUCCESS' };
+      const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+      if (scanFinalUrl) {
+        return { videoUrl: scanFinalUrl, isHd: false, status: 'SUCCESS' };
       }
       return null;
     }

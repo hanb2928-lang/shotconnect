@@ -1448,6 +1448,9 @@ export default function ResultScreen() {
         } else if (settingsResult?.clean_footage_enabled) {
           setIsCleanVideoMode(true);
         }
+        if (scanData.muxed_video_url) {
+          setMuxedVideoUrl(scanData.muxed_video_url);
+        }
         if (scanData.video_url) {
           setGeneratedVideoUrl(scanData.video_url);
         }
@@ -1999,7 +2002,17 @@ export default function ResultScreen() {
           .maybeSingle(),
       ).then(({ data }) => {
         if (mountedRef.current && data) {
-          setScan(data as Scan);
+          const updated = data as Scan;
+          setScan(updated);
+          if (updated.muxed_video_url) {
+            setMuxedVideoUrl(updated.muxed_video_url);
+          }
+          if (updated.video_url && !generatedVideoUrlRef.current) {
+            setGeneratedVideoUrl(updated.video_url);
+            setVideoStage('draft_ready');
+            setIsGeneratingVideo(false);
+            setVideoGenProgress(null);
+          }
         }
       }).catch(() => {});
     };

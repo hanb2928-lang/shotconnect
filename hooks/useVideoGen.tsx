@@ -175,7 +175,33 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             const { data, error: dbError } = isSoft && scanIdRef.current
               ? await query.eq('scan_id', scanIdRef.current).order('created_at', { ascending: false }).limit(1).maybeSingle()
               : await query.eq('task_id', jobId).maybeSingle();
-            if (dbError || !data) return;
+            if (dbError || !data) {
+              // video_jobs lookup failed — try scans.video_url / muxed_video_url as fallback.
+              if (scanIdRef.current) {
+                const { data: scanData } = await supabase
+                  .from('scans')
+                  .select('video_url, muxed_video_url')
+                  .eq('id', scanIdRef.current)
+                  .maybeSingle();
+                const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+                if (scanFinalUrl) {
+                  clearActiveVideoJob();
+                  jobIdRef.current = null;
+                  setJobId(null);
+                  setIsGenerating(false);
+                  if (outputModeRef.current === 'image') {
+                    setResultImageUrl(scanFinalUrl);
+                  } else {
+                    setResultVideoUrl(scanFinalUrl);
+                  }
+                  serverProgRef.current = 1.0;
+                  setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+                  notifyVideoCompleted();
+                  return;
+                }
+              }
+              return;
+            }
             const row = data as { status: string; video_url: string | null; error_message: string | null; step: string | null };
             if (row.status === 'SUCCESS' && row.video_url) {
               clearActiveVideoJob();
@@ -288,11 +314,13 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           return { ...prev, progress: forced };
         });
       }, 12_000);
-      // 95% completion fallback: if progress stays at or above 95% for 90
-      // seconds without the server delivering a terminal status, do a final
-      // DB force-sync. If the video is ready, complete immediately; otherwise
-      // escalate to a timeout error so the UI never freezes at 95% forever.
-      const COMPLETION_FALLBACK_DELAY_MS = 90_000;
+      // 5-second forced completion guard: if progress stays at or above 95%
+      // for 5 seconds without the server delivering a terminal status, do a
+      // final DB force-sync. The server never writes a "finalizing" step —
+      // it goes rendering→completed directly — so 95% means the client's
+      // step stall guard advanced it there and the result should already be
+      // in the DB or imminent.
+      const COMPLETION_FALLBACK_DELAY_MS = 5_000;
       const checkCompletionFallback = () => {
         const currentJobId = jobIdRef.current;
         const currentScanId = scanIdRef.current;
@@ -300,6 +328,33 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         (async () => {
           try {
             await ensureFreshSession();
+            // First check scans.video_url — the webhook writes here directly
+            // and it's the most reliable completion signal.
+            if (currentScanId) {
+              const { data: scanData } = await supabase
+                .from('scans')
+                .select('video_url, muxed_video_url')
+                .eq('id', currentScanId)
+                .maybeSingle();
+              if (scanData) {
+                const scanFinalUrl = scanData.muxed_video_url ?? scanData.video_url;
+                if (scanFinalUrl) {
+                  clearActiveVideoJob();
+                  jobIdRef.current = null;
+                  setJobId(null);
+                  setIsGenerating(false);
+                  serverProgRef.current = 1.0;
+                  if (outputModeRef.current === 'image') {
+                    setResultImageUrl(scanFinalUrl);
+                  } else {
+                    setResultVideoUrl(scanFinalUrl);
+                  }
+                  setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+                  notifyVideoCompleted();
+                  return;
+                }
+              }
+            }
             const isSoft = currentJobId.startsWith('soft-');
             let q = supabase.from('video_jobs').select('status, video_url, error_message');
             const { data, error: dbErr } = isSoft && currentScanId
@@ -373,7 +428,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       if (hardGuardTimer) { clearInterval(hardGuardTimer); hardGuardTimer = null; }
       if (completionWatchTimer) { clearInterval(completionWatchTimer); completionWatchTimer = null; }
       if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
-      ninetyFivePctSinceRef.current = null;
+      // Do NOT reset ninetyFivePctSinceRef here — backgrounding should
+      // pause the countdown, not reset it. Otherwise a brief background
+      // transition on native (e.g. notification banner) resets the 60s
+      // timer indefinitely and the fallback never fires.
     };
 
     startTimers();
@@ -562,6 +620,33 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             (async () => {
               try {
                 await ensureFreshSession();
+                // First check scans.video_url — the webhook writes here
+                // directly and it's the most reliable completion signal.
+                if (currentScanId) {
+                  const { data: scanData } = await supabase
+                    .from('scans')
+                    .select('video_url, muxed_video_url')
+                    .eq('id', currentScanId)
+                    .maybeSingle();
+                  if (scanData) {
+                    const scanFinalUrl = scanData.muxed_video_url ?? scanData.video_url;
+                    if (scanFinalUrl) {
+                      clearActiveVideoJob();
+                      jobIdRef.current = null;
+                      setJobId(null);
+                      setIsGenerating(false);
+                      serverProgRef.current = 1.0;
+                      if (outputModeRef.current === 'image') {
+                        setResultImageUrl(scanFinalUrl);
+                      } else {
+                        setResultVideoUrl(scanFinalUrl);
+                      }
+                      setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+                      notifyVideoCompleted();
+                      return;
+                    }
+                  }
+                }
                 const isSoft = currentJobId.startsWith('soft-');
                 let q = supabase.from('video_jobs').select('status, video_url, error_message');
                 const { data, error: dbErr } = isSoft && currentScanId
