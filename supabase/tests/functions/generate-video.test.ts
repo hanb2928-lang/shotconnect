@@ -108,7 +108,7 @@ describe('generate-video edge function', () => {
         if (url.includes('/rest/v1/user_settings')) {
           return Promise.resolve(jsonResponse([{ runway_api_key: 'user-key' }]));
         }
-        if (url.includes('/rest/v1/scans?select=video_url')) {
+        if (url.includes('/rest/v1/scans?select=video_url,muxed_video_url')) {
           return Promise.resolve(jsonResponse([{ video_url: null }]));
         }
         if (url.includes('/rest/v1/video_jobs')) {
@@ -145,11 +145,17 @@ describe('generate-video edge function', () => {
         if (url.includes('/rest/v1/user_settings')) {
           return Promise.resolve(jsonResponse([{ runway_api_key: 'user-key' }]));
         }
-        if (url.includes('/rest/v1/scans?select=video_url')) {
+        if (url.includes('/rest/v1/scans?select=video_url,muxed_video_url')) {
           return Promise.resolve(jsonResponse([{ video_url: null }]));
         }
         if (url.includes('/rest/v1/video_jobs')) {
-          return Promise.resolve(jsonResponse([]));
+          return Promise.resolve(jsonResponse([{
+            status: 'PROCESSING',
+            error_message: null,
+            video_url: null,
+            created_at: new Date().toISOString(),
+            runway_task_id: 'task-123',
+          }]));
         }
         if (url.includes('api.dev.runwayml.com/v1/tasks/')) {
           return Promise.resolve(jsonResponse({
@@ -183,7 +189,7 @@ describe('generate-video edge function', () => {
         if (url.includes('/rest/v1/user_settings')) {
           return Promise.resolve(jsonResponse([{ runway_api_key: 'user-key' }]));
         }
-        if (url.includes('/rest/v1/scans?select=video_url')) {
+        if (url.includes('/rest/v1/scans?select=video_url,muxed_video_url')) {
           return Promise.resolve(jsonResponse([{ video_url: null }]));
         }
         if (url.includes('/rest/v1/video_jobs')) {
@@ -215,7 +221,7 @@ describe('generate-video edge function', () => {
         if (url.includes('/rest/v1/user_settings')) {
           return Promise.resolve(jsonResponse([{ runway_api_key: 'user-key' }]));
         }
-        if (url.includes('/rest/v1/scans?select=video_url')) {
+        if (url.includes('/rest/v1/scans?select=video_url,muxed_video_url')) {
           return Promise.resolve(jsonResponse([{ video_url: null }]));
         }
         if (url.includes('/rest/v1/video_jobs')) {
@@ -248,11 +254,17 @@ describe('generate-video edge function', () => {
         if (url.includes('/rest/v1/user_settings')) {
           return Promise.resolve(jsonResponse([{ runway_api_key: 'user-key' }]));
         }
-        if (url.includes('/rest/v1/scans?select=video_url')) {
+        if (url.includes('/rest/v1/scans?select=video_url,muxed_video_url')) {
           return Promise.resolve(jsonResponse([{ video_url: null }]));
         }
         if (url.includes('/rest/v1/video_jobs')) {
-          return Promise.resolve(jsonResponse([]));
+          return Promise.resolve(jsonResponse([{
+            status: 'PROCESSING',
+            error_message: null,
+            video_url: null,
+            created_at: new Date().toISOString(),
+            runway_task_id: 'task-123',
+          }]));
         }
         if (url.includes('api.dev.runwayml.com/v1/tasks/')) {
           pollCallCount++;

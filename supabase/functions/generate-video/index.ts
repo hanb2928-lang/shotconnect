@@ -540,7 +540,7 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
 
     // The client starts with the internal job ID. Until the async submission
     // stores the real Runway task ID, there is no external task to poll.
-    if (jobStatus && !jobStatus.runwayTaskId) {
+    if (!jobStatus || !jobStatus.runwayTaskId) {
       return new Response(
         JSON.stringify({
           mode: "poll",
@@ -553,7 +553,7 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
       );
     }
 
-    const runwayTaskId = jobStatus?.runwayTaskId ?? taskId;
+    const runwayTaskId = jobStatus.runwayTaskId;
     const pollStatus = await pollRunwayTask(runwayTaskId, runwayKey);
 
     if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
@@ -922,7 +922,7 @@ async function checkWebhookResult(scanId: string): Promise<string | null> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/scans?select=video_url&id=eq.${encodeURIComponent(scanId)}`,
+      `${supabaseUrl}/rest/v1/scans?select=video_url,muxed_video_url&id=eq.${encodeURIComponent(scanId)}`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -933,9 +933,10 @@ async function checkWebhookResult(scanId: string): Promise<string | null> {
     );
     clearTimeout(timeoutId);
     if (resp.ok) {
-      const rows = await resp.json() as Array<{ video_url: string | null }>;
-      if (rows.length > 0 && rows[0].video_url) {
-        return rows[0].video_url;
+      const rows = await resp.json() as Array<{ video_url: string | null; muxed_video_url: string | null }>;
+      const finalUrl = rows[0]?.muxed_video_url ?? rows[0]?.video_url;
+      if (finalUrl) {
+        return finalUrl;
       }
     }
   } catch {

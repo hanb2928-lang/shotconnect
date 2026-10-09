@@ -1890,7 +1890,7 @@ export async function recoverVideoJob(
       return { videoUrl: '', isHd: false, status: 'FAILED' };
     }
 
-    return null;
+    return { videoUrl: '', isHd: row.is_hd ?? false, status: 'PENDING' };
   } catch (err) {
     logError(err, { component: 'aiVideoPipeline', action: 'recoverVideoJob' });
     return null;

@@ -908,6 +908,15 @@ export default function ResultScreen() {
         videoGenLockRef.current = false;
         return;
       }
+      if (recovered?.status === 'PENDING' || recovered?.status === 'PROCESSING' || recovered?.status === 'RUNNING' || recovered?.status === 'THROTTLED') {
+        if (mountedRef.current) {
+          setIsGeneratingVideo(false);
+          setVideoGenProgress(null);
+          setBgJobNotice('이전 영상 생성 작업이 이미 진행 중입니다. 완료되면 자동으로 표시됩니다.');
+        }
+        videoGenLockRef.current = false;
+        return;
+      }
       if (recovered?.status === 'FAILED') {
         // Previous job failed — clear it so we can submit a fresh one
       }
