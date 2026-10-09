@@ -567,14 +567,16 @@ export default function ResultScreen() {
     }
 
     const STEP_STALL_MS = 4000;
-    const stepOrder = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering', 'finalizing'] as const;
+    // Server goes rendering → completed directly; finalizing is never sent.
+    // Stop the stall guard at rendering (85%) so the client never traps
+    // itself at a fake 95% step that the server won't advance past.
+    const stepOrder = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering'] as const;
     const stepThresholds: Record<string, number> = {
       analyzing: 0.05,
       hooking: 0.15,
       planning: 0.25,
       submitting: 0.35,
-      rendering: 0.50,
-      finalizing: 0.95,
+      rendering: 0.85,
     };
 
     if (!stepAdvanceTimerRef.current) {
@@ -651,8 +653,22 @@ export default function ResultScreen() {
         const { data, error } = await query.maybeSingle();
         if (error || !data) return;
         const row = data as { status: string; step?: string | null; video_url?: string | null; error_message?: string | null };
-        if (row.status === 'SUCCESS' && row.video_url) return;
-        if (row.status === 'FAILED') return;
+        if (row.status === 'SUCCESS' && row.video_url) {
+          setGeneratedVideoUrl(row.video_url);
+          setVideoStage('draft_ready');
+          setIsGeneratingVideo(false);
+          setVideoGenProgress(null);
+          if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
+          return;
+        }
+        if (row.status === 'FAILED') {
+          setVideoGenError(row.error_message ?? 'AI 영상 생성에 실패했습니다.');
+          setVideoStage('failed');
+          setIsGeneratingVideo(false);
+          setVideoGenProgress(null);
+          if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
+          return;
+        }
         const sp = stepToProgress(row.step);
         if (!sp) return;
         setVideoGenProgress((prev) => {

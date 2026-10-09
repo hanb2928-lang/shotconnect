@@ -237,7 +237,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
                 const timeProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
                 const merged = Math.max(prev.progress, timeProgress, stepProg ?? 0);
-                const clampMax = row.step === 'finalizing' ? 0.98 : 0.95;
+                const clampMax = 0.95;
                 return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(clampMax, merged || 0)) };
               });
             }
@@ -268,6 +268,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     let creepTimer: ReturnType<typeof setInterval> | null = null;
     let hardGuardTimer: ReturnType<typeof setInterval> | null = null;
     let completionWatchTimer: ReturnType<typeof setInterval> | null = null;
+    const completionRetry = { attempts: 0, max: 6 };
 
     const startTimers = () => {
       if (timer || creepTimer) return;
@@ -275,8 +276,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const isFinalizing = prev.serverStep === 'finalizing';
-          const clampMax = isFinalizing ? 0.98 : 0.95;
+          const clampMax = 0.95;
           const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
           const serverProg = serverProgRef.current;
           const safeServer = (serverProg !== null && !isNaN(serverProg) && isFinite(serverProg)) ? serverProg : null;
@@ -290,8 +290,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       creepTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const isFinalizing = prev.serverStep === 'finalizing';
-          const creepCeiling = isFinalizing ? 0.98 : 0.9;
+          const creepCeiling = 0.9;
           if (prev.progress >= creepCeiling) return prev;
           const serverProg = serverProgRef.current;
           const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, creepCeiling) : creepCeiling;
@@ -305,8 +304,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       hardGuardTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const isFinalizing = prev.serverStep === 'finalizing';
-          const guardCeiling = isFinalizing ? 0.98 : 0.9;
+          const guardCeiling = 0.9;
           if (prev.progress >= guardCeiling) return prev;
           const forced = Math.min(prev.progress + 0.10, guardCeiling);
           const serverProg = serverProgRef.current;
@@ -314,13 +312,14 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           return { ...prev, progress: forced };
         });
       }, 12_000);
-      // 5-second forced completion guard: if progress stays at or above 95%
-      // for 5 seconds without the server delivering a terminal status, do a
-      // final DB force-sync. The server never writes a "finalizing" step —
-      // it goes rendering→completed directly — so 95% means the client's
-      // step stall guard advanced it there and the result should already be
-      // in the DB or imminent.
-      const COMPLETION_FALLBACK_DELAY_MS = 5_000;
+      // Completion guard: if progress stays at or above 85% (rendering)
+      // for 15 seconds without the server delivering a terminal status, do
+      // a DB force-sync. The server goes rendering→completed directly, so
+      // 85% means rendering is underway and the result should be in the DB
+      // soon. If the DB check finds the job still in progress, retry after
+      // a delay instead of bailing out with a timeout error.
+      const COMPLETION_FALLBACK_DELAY_MS = 15_000;
+      const completionRetryRef = completionRetry;
       const checkCompletionFallback = () => {
         const currentJobId = jobIdRef.current;
         const currentScanId = scanIdRef.current;
@@ -386,15 +385,26 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               serverProgRef.current = null;
               setError(row.error_message ?? '영상 생성에 실패했습니다.');
             } else {
-              throw new Error('Stuck at 95%');
+              // Job still in progress — retry after delay instead of bailing
+              completionRetryRef.attempts++;
+              if (completionRetryRef.attempts < completionRetryRef.max) {
+                completionFallbackRef.current = setTimeout(checkCompletionFallback, 10_000);
+                return;
+              }
+              throw new Error('Completion retry limit reached');
             }
           } catch {
-            jobIdRef.current = null;
-            setJobId(null);
-            setIsGenerating(false);
-            setVideoProgress(null);
-            serverProgRef.current = null;
-            setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
+            // Only bail out after exhausting retries or on hard DB failure
+            if (completionRetryRef.attempts >= completionRetryRef.max) {
+              jobIdRef.current = null;
+              setJobId(null);
+              setIsGenerating(false);
+              setVideoProgress(null);
+              serverProgRef.current = null;
+              setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
+            } else {
+              completionFallbackRef.current = setTimeout(checkCompletionFallback, 10_000);
+            }
           }
         })();
       };
@@ -405,7 +415,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             ninetyFivePctSinceRef.current = null;
             return prev;
           }
-          if (prev.progress >= 0.95) {
+          if (prev.progress >= 0.85) {
             if (ninetyFivePctSinceRef.current === null) {
               ninetyFivePctSinceRef.current = Date.now();
             } else if (Date.now() - ninetyFivePctSinceRef.current >= COMPLETION_FALLBACK_DELAY_MS) {
@@ -430,8 +440,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
       // Do NOT reset ninetyFivePctSinceRef here — backgrounding should
       // pause the countdown, not reset it. Otherwise a brief background
-      // transition on native (e.g. notification banner) resets the 60s
+      // transition on native (e.g. notification banner) resets the
       // timer indefinitely and the fallback never fires.
+      completionRetry.attempts = 0;
     };
 
     startTimers();
@@ -508,9 +519,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (isNaN(clamped) || clamped <= prev.progress) return prev;
         const pctLabel = ` (${Math.round(clamped * 100)}%)`;
-        const msg = prev.serverStep === 'finalizing'
-          ? `최종 자막 합성 중${pctLabel}...`
-          : `AI가 영상을 렌더링하고 있어요${pctLabel}...`;
+        const msg = `AI가 영상을 렌더링하고 있어요${pctLabel}...`;
         return { ...prev, progress: clamped, message: msg };
       });
     }
@@ -585,7 +594,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }
     if (stepStallTimerRef.current) return;
 
-    const STEP_ORDER = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering', 'finalizing'];
+    // Server goes rendering → completed directly; finalizing is never sent.
+    // Stop the stall guard at rendering (85%) and do a DB completion check
+    // from there, instead of advancing to a fake 95% finalizing step that
+    // traps the client.
+    const STEP_ORDER = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering'];
     const STEP_STALL_MS = 30_000;
     const STEP_THRESHOLDS: Record<string, number> = {
       analyzing: 0.05,
@@ -593,7 +606,6 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       planning: 0.25,
       submitting: 0.35,
       rendering: 0.85,
-      finalizing: 0.95,
     };
 
     stepStallTimerRef.current = setInterval(() => {
@@ -608,12 +620,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const stalledFor = now - stepStallRef.current.since;
         if (stalledFor < STEP_STALL_MS) return prev;
 
-        // When stuck at "finalizing" (the last step), there's no next step
-        // to advance to. Do a DB force-sync to check if the job already
-        // completed but the Realtime/polling missed the update. Skip while
-        // backgrounded — the foreground AppState handler already does a
-        // full DB resync, so this would be a redundant and wasted call.
-        if (currentStep === 'finalizing' && appStateActiveRef.current) {
+        // When stuck at "rendering" (the last step the server sends), do a
+        // DB force-sync to check if the job already completed but the
+        // Realtime/polling missed the update. Skip while backgrounded — the
+        // foreground AppState handler already does a full DB resync, so this
+        // would be a redundant and wasted call.
+        if (currentStep === 'rendering' && appStateActiveRef.current) {
           const currentJobId = jobIdRef.current;
           const currentScanId = scanIdRef.current;
           if (currentJobId) {

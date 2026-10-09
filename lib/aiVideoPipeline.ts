@@ -1370,6 +1370,25 @@ export function subscribeVideoJob(
           }
         },
       )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scanId}` },
+        (payload) => {
+          if (!payload.new) return;
+          try {
+            const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
+            const finalUrl = row.muxed_video_url ?? row.video_url;
+            if (finalUrl) {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: finalUrl });
+            }
+          } catch {
+            addBreadcrumb('realtime', 'scans Realtime callback error', 'warning');
+          }
+        },
+      )
       .subscribe((status: string) => {
         if (settled) return;
         if (status === 'SUBSCRIBED') {
