@@ -6,7 +6,7 @@
  * Falls back to Canvas 2D when WebGL2 is unavailable.
  */
 import { Platform } from 'react-native';
-import { getAdaptiveRenderParams, computeScaledDimensions, setMemoryPressure } from '@/lib/devicePerformance';
+import { getAdaptiveRenderParams, computeScaledDimensions, setMemoryPressure, detectRuntimePressure } from '@/lib/devicePerformance';
 import { logError, addBreadcrumb } from '@/lib/errorLogger';
 
 export interface GLContext {
@@ -531,6 +531,14 @@ export function cpuChunkedProcess(
   if (!outCtx) return null;
 
   for (let y = 0; y < height; y += CHUNK_TILE_HEIGHT) {
+    // OOM guard: check memory pressure between tile strips. On a large
+    // image, the accumulated ImageData buffers can exceed the JS heap
+    // limit mid-loop, crashing the tab. Abort and return null so the
+    // caller can fall back to a lower-resolution path.
+    if (detectRuntimePressure() === 'severe') {
+      addBreadcrumb('gl', `cpuChunkedProcess aborted at y=${y}/${height} due to severe memory pressure`, 'error');
+      return null;
+    }
     const stripH = Math.min(CHUNK_TILE_HEIGHT, height - y);
     const imageData = ctx.getImageData(0, y, width, stripH);
     processStrip(imageData.data, y, stripH);

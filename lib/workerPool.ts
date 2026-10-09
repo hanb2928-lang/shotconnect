@@ -33,10 +33,12 @@ type PendingTask = {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
   transferables?: Transferable[];
+  timeoutId?: ReturnType<typeof setTimeout>;
 };
 
 const MAX_POOL_SIZE = 3;
 const MAX_CONCURRENT_UNDER_PRESSURE = 1;
+const WORKER_TASK_TIMEOUT_MS = 60_000;
 let pool: Worker[] = [];
 let workerBlobUrls: string[] = [];
 
@@ -351,6 +353,7 @@ function handleWorkerMessage(e: MessageEvent<WorkerTaskResponse>) {
   const { id, ok, result, error } = e.data;
   const task = pending.get(id);
   if (!task) return;
+  if (task.timeoutId) clearTimeout(task.timeoutId);
   pending.delete(id);
   activeDispatches = Math.max(0, activeDispatches - 1);
 
@@ -380,18 +383,31 @@ function dispatch(
     pending.set(request.id, { resolve, reject, transferables });
     activeDispatches++;
 
+    // Per-task timeout: if a worker hangs (OOM in OffscreenCanvas, stuck
+    // image decode), reject after 60s so the pending map doesn't leak
+    // and the caller can fall back to main-thread execution.
+    const taskTimeout = setTimeout(() => {
+      const task = pending.get(request.id);
+      if (!task) return;
+      pending.delete(request.id);
+      activeDispatches = Math.max(0, activeDispatches - 1);
+      task.reject(new Error('Worker task timed out (60s)'));
+    }, WORKER_TASK_TIMEOUT_MS);
+    pending.get(request.id)!.timeoutId = taskTimeout;
+
     // Find a worker with the fewest pending tasks (simplified: round-robin)
     const worker = pool[request.id % pool.length];
     if (worker) {
       try {
         worker.postMessage(request, transferables || []);
       } catch (err) {
+        clearTimeout(taskTimeout);
         pending.delete(request.id);
         activeDispatches--;
         reject(err instanceof Error ? err : new Error('Worker dispatch failed'));
       }
     } else {
-      // No workers available — reject
+      clearTimeout(taskTimeout);
       pending.delete(request.id);
       activeDispatches--;
       reject(new Error('No workers available'));
@@ -573,6 +589,9 @@ export function terminateWorkerPool(): void {
     try { URL.revokeObjectURL(url); } catch {}
   });
   workerBlobUrls = [];
+  for (const task of pending.values()) {
+    if (task.timeoutId) clearTimeout(task.timeoutId);
+  }
   pending.clear();
   activeDispatches = 0;
   initialized = false;

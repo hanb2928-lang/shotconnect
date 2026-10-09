@@ -184,10 +184,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               serverProgRef.current = null;
               setError(row.error_message ?? '영상 생성에 실패했습니다.');
             } else {
-              // Still in progress — nudge progress forward to show the UI is alive
+              // Still in progress — nudge progress forward to show the UI is alive.
+              // Monotonic guard: never let a stale DB read regress progress below
+              // what the UI already shows (race condition on background→foreground).
               const stepProg = stepToProgress(row.step);
               if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
-                serverProgRef.current = stepProg;
+                serverProgRef.current = Math.max(serverProgRef.current ?? 0, stepProg);
               }
               setVideoProgress((prev) => {
                 if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;

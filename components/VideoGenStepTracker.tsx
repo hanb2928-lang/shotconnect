@@ -3,12 +3,14 @@ import { View, Text, StyleSheet, type DimensionValue } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedReaction,
   withTiming,
   withRepeat,
   withSequence,
   withDelay,
   cancelAnimation,
   interpolate,
+  runOnJS,
   Easing,
 } from 'react-native-reanimated';
 import { Check, Loader2 } from 'lucide-react-native';
@@ -57,24 +59,10 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   const isRendering = activeIdx >= 0 && progress?.phase !== 'completed' && progress?.phase !== 'error';
   const isCompleted = progress?.phase === 'completed';
 
-  // Animated progress bar via Reanimated SharedValue for smooth transitions.
-  // The bar width is driven by a SharedValue that eases toward the target
-  // percentage, eliminating the janky stepwise jumps of the old static View.
   const barWidthSV = useSharedValue(0);
+  const percentSV = useSharedValue(0);
   const [creepFloor, setCreepFloor] = useState(0);
 
-  // Soft creep guard: every 2 seconds, nudge a floor value up by 3 points so
-  // the bar never visually freezes even when the server is silent. The cap is
-  // bound to the server step progress so the bar cannot race to 90% while the
-  // step icons are still on an earlier stage (the desync bug).
-  const serverStepProg = progress?.serverStep
-    ? stepToProgress(progress.serverStep)
-    : null;
-  // Don't bind the creep cap to the server step — if the websocket drops,
-  // the stale server step would clamp the bar below its actual position.
-  // Instead, always allow creep up to 90% so the bar stays alive while
-  // the step icons are driven by resolveVideoGenSteps (which now also
-  // factors in the raw percentage).
   const creepCap = 90;
 
   useEffect(() => {
@@ -89,16 +77,38 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   }, [isRendering, creepCap]);
 
   // Drive the animated bar toward the max of (realProgress, creepFloor).
-  // On completion, snap to 100% immediately.
+  // Duration scales with the delta so large jumps (80%→95%) get more time
+  // to animate smoothly, while small incremental updates stay snappy.
+  // Uses cubic bezier easing for a natural deceleration that eliminates
+  // the linear stop that caused the visual jolt at 100%.
   useEffect(() => {
     const target = isCompleted ? 100 : Math.max(progressPercent, creepFloor);
     const safeTarget = Math.max(0, Math.min(100, isNaN(target) ? 0 : target));
-    barWidthSV.value = withTiming(safeTarget, {
-      duration: isCompleted ? 300 : 500,
-      easing: Easing.out(Easing.quad),
-    });
-    setDisplayPercent(safeTarget);
-  }, [progressPercent, creepFloor, isCompleted, barWidthSV]);
+    const currentVal = barWidthSV.value;
+    const delta = Math.abs(safeTarget - currentVal);
+    const duration = isCompleted
+      ? Math.min(800 + delta * 6, 1500)
+      : Math.min(400 + delta * 8, 1200);
+    const easing = isCompleted
+      ? Easing.bezier(0.22, 1, 0.36, 1)
+      : delta > 10
+        ? Easing.bezier(0.25, 0.1, 0.25, 1)
+        : Easing.out(Easing.quad);
+
+    barWidthSV.value = withTiming(safeTarget, { duration, easing });
+    percentSV.value = withTiming(safeTarget, { duration, easing });
+  }, [progressPercent, creepFloor, isCompleted, barWidthSV, percentSV]);
+
+  // Sync displayPercent from the UI-thread SharedValue back to JS state
+  // so the Text component counts up smoothly in lockstep with the bar.
+  useAnimatedReaction(
+    () => Math.round(percentSV.value),
+    (rounded, prev) => {
+      if (rounded !== prev) {
+        runOnJS(setDisplayPercent)(rounded);
+      }
+    },
+  );
 
   const pulseSV = useSharedValue(0);
   const prevActiveRef = useRef(-1);
@@ -134,7 +144,6 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
     return () => { cancelAnimation(pulseSV); };
   }, [pulseSV]);
 
-  // Rotating activity messages during rendering to reduce perceived wait.
   useEffect(() => {
     if (!isRendering) {
       setActivityMsg('');

@@ -31,7 +31,7 @@ const MAX_POLL_ERRORS_IN_WINDOW = 8;
  * - Polls the `generate-video` edge function in `poll` mode every 5 seconds.
  * - Falls back to a direct `video_jobs` DB query (force sync) if the edge
  *   function call fails repeatedly.
- * - Fires a soft warning after 120 seconds and a hard timeout at 300 seconds.
+ * - Fires a soft warning after 120 seconds and a hard timeout at 600 seconds.
  */
 export function useResultPolling(
   jobId: string | null,
@@ -96,6 +96,27 @@ export function useResultPolling(
     let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
     const pollErrorWindow: number[] = [];
     let pollAttempt = 0;
+    // Monotonic guard: track the highest progress and latest step seen
+    // across both realtime and polling. Stale realtime payloads that arrive
+    // after a newer poll result (common on background→foreground transition)
+    // are rejected instead of regressing the UI backwards.
+    let highestProgressSeen = 0;
+    let latestStepSeen: string | null = null;
+
+    const applyProgress = (stepProg: number | null, step: string | null) => {
+      if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
+        if (stepProg < highestProgressSeen) return; // stale — reject
+        highestProgressSeen = stepProg;
+        const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+        const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
+        setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
+        setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
+      }
+      if (step && step !== latestStepSeen) {
+        latestStepSeen = step;
+        setServerStep(step);
+      }
+    };
 
     // Primary trigger: Realtime websocket push on video_jobs row update.
     // This fires the instant the server writes a terminal status, giving
@@ -128,14 +149,7 @@ export function useResultPolling(
               } else if (row.status === 'FAILED') {
                 handleResult(row.status, null, row.error_message ?? undefined);
               } else {
-                const stepProg = stepToProgress(row.step);
-                if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
-                  const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-                  const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
-                  setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
-                  setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
-                }
-                if (row.step) setServerStep(row.step);
+                applyProgress(stepToProgress(row.step), row.step ?? null);
               }
             } catch {
               // Malformed payload — ignore, polling will catch up
@@ -237,13 +251,7 @@ export function useResultPolling(
         if (cancelled || settledRef.current) return;
         if (scanResult) {
           if (scanResult.step) {
-            const stepProg = stepToProgress(scanResult.step);
-            if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
-              setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
-              const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
-              setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
-            }
-            setServerStep(scanResult.step);
+            applyProgress(stepToProgress(scanResult.step), scanResult.step);
           }
           handleResult(scanResult.status, scanResult.videoUrl);
           if (settledRef.current) return;
@@ -285,14 +293,7 @@ export function useResultPolling(
             const stepProg = stepToProgress(pollData.step as string | undefined);
             const candidate = !isNaN(rawProgress) ? rawProgress : stepProg;
             const bestProgress = Math.max(0, Math.min(1, (candidate ?? 0))) || 0;
-            const pctLabel = !isNaN(bestProgress)
-              ? ` (${Math.round(bestProgress * 100)}%)`
-              : '';
-            setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
-            if (!isNaN(bestProgress) && bestProgress > 0) {
-              setServerProgress((prev) => Math.max(prev ?? 0, bestProgress));
-            }
-            if (pollData.step) setServerStep(pollData.step as string);
+            applyProgress(!isNaN(bestProgress) && bestProgress > 0 ? bestProgress : null, (pollData.step as string) ?? null);
           }
         }
       } catch {
@@ -348,7 +349,7 @@ export function useResultPolling(
       }
     }, SOFT_WARN_MS);
 
-    // Hard timeout at 300 seconds.
+    // Hard timeout at 600 seconds (10 minutes).
     timeoutTimer = setTimeout(() => {
       if (!cancelled && !settledRef.current) {
         settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
@@ -409,14 +410,7 @@ export function useResultPolling(
                       } else if (row.status === 'FAILED') {
                         handleResult(row.status, null, row.error_message ?? undefined);
                       } else {
-                        const stepProg = stepToProgress(row.step);
-                        if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
-                          const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-                          const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
-                          setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
-                          setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
-                        }
-                        if (row.step) setServerStep(row.step);
+                        applyProgress(stepToProgress(row.step), row.step ?? null);
                       }
                     } catch {
                       // Malformed payload — ignore, polling will catch up

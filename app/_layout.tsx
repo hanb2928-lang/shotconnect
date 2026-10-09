@@ -43,6 +43,7 @@ import { sweepStaleOfflineCache } from '@/lib/offlineCache';
 import { runBootSweep } from '@/lib/bootSweeper';
 import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
+import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
 
 installGlobalErrorHandlers();
 
@@ -233,6 +234,49 @@ export default function RootLayout() {
     document.head.appendChild(style);
   }, []);
 
+  // Web: inject touch-action: manipulation globally to eliminate the
+  // 300ms tap delay and double-tap-to-zoom interference on mobile webviews.
+  // Without this, tapping buttons (generate, retry, share) can feel sluggish
+  // or trigger accidental zoom on rapid double-taps in hybrid environments.
+  // Applied to all elements + specific interactive pseudo-classes to cover
+  // React Native Web's rendered DOM tree.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const styleId = 'touch-action-manipulation';
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = [
+      '* { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }',
+      'input, textarea, [contenteditable] { touch-action: auto; }',
+      '[role="button"], button { touch-action: manipulation; }',
+    ].join('\n');
+    document.head.appendChild(style);
+  }, []);
+
+  // Web: ensure the viewport meta tag includes interactive-widget=resizes-content
+  // so the OS keyboard resizes the layout viewport instead of overlaying it.
+  // Without this, bottom buttons (generate, export) get hidden behind the
+  // virtual keyboard on mobile webviews, making them untappable.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const existing = document.querySelector('meta[name="viewport"]');
+    if (existing) {
+      const content = existing.getAttribute('content') ?? '';
+      if (!content.includes('interactive-widget')) {
+        existing.setAttribute(
+          'content',
+          content.replace(/\s*$/, '') + ', interactive-widget=resizes-content',
+        );
+      }
+    } else {
+      const meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content';
+      document.head.appendChild(meta);
+    }
+  }, []);
+
   // Init effect: runs exactly once. The finally block is the sole
   // trigger for setReady('app'). A hard 4s outer timeout prevents
   // a hung native module from blocking the app forever.
@@ -264,6 +308,13 @@ export default function RootLayout() {
       markBooted();
     });
   }, [hideSplash, markBooted, isFreshBoot]);
+
+  // Refresh auth session and sweep stale resources when the app returns
+  // to the foreground (native: AppState 'active', web: visibilitychange).
+  useAppLifecycleSync(() => {
+    sweepTempFiles().catch(() => {});
+    sweepStaleOfflineCache().catch(() => {});
+  });
 
   // Deep link handling
   useEffect(() => {
@@ -337,7 +388,9 @@ export default function RootLayout() {
           <AffiliateToastProvider>
             <VideoGenProvider>
               <SafeAreaProvider>
-              <GestureHandlerRootView style={{ flex: 1 }}>
+              <GestureHandlerRootView
+                style={{ flex: 1, touchAction: 'manipulation' } as any}
+              >
                 <View key={bootKey} style={{ flex: 1 }}>
                   {!shellReady && <LoadingScreen fullScreen />}
                   {shellReady && (

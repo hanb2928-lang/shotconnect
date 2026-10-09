@@ -642,7 +642,7 @@ useEffect(() => {
           ) : null}
 
           {activeSegment && !isDisclosureActive && activeSegment.textOverlay.trim().length > 0 && (
-            <View style={[styles.captionOverlay, segmentPositionStyle, { paddingHorizontal: safeZonePadding.paddingHorizontal }]}>
+            <View style={[styles.captionOverlay, segmentPositionStyle, { paddingHorizontal: safeZonePadding.paddingHorizontal }]} pointerEvents="none">
               <Text
                 style={{
                   fontSize: captionStyle.fontSize,
@@ -686,7 +686,7 @@ useEffect(() => {
           )}
 
           {isDisclosureActive && (
-            <View style={styles.disclosureOverlay}>
+            <View style={styles.disclosureOverlay} pointerEvents="none">
               <Text style={styles.disclosureText} numberOfLines={2}>
                 {editPlan?.disclosureOverlay?.text || '광고·협찬 포함'}
               </Text>
@@ -694,13 +694,13 @@ useEffect(() => {
           )}
 
           {hasGeneratedVideo && isBgmActive && (
-            <View style={styles.bgmIndicator}>
+            <View style={styles.bgmIndicator} pointerEvents="none">
               <Text style={styles.bgmText} numberOfLines={1}>{editPlan?.bgmTemplate?.label ?? 'BGM'}</Text>
             </View>
           )}
 
           {activeSegment && isPlaying && (
-            <View style={styles.sceneBadge}>
+            <View style={styles.sceneBadge} pointerEvents="none">
               <View style={[styles.sceneDot, { backgroundColor: STORY_PHASE_COLORS[activeSegment.storyPhase] }]} />
               <Text style={[styles.sceneBadgeText, { color: STORY_PHASE_COLORS[activeSegment.storyPhase] }]} numberOfLines={1}>
                 {STORY_PHASE_LABELS[activeSegment.storyPhase]}
@@ -709,7 +709,7 @@ useEffect(() => {
           )}
 
           {hasGeneratedVideo && (
-            <View style={styles.timeBadge}>
+            <View style={styles.timeBadge} pointerEvents="none">
               <Text style={styles.timeText}>{currentSec.toFixed(1)}s / {totalDuration}s</Text>
             </View>
           )}

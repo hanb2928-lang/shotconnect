@@ -721,7 +721,9 @@ export default function SynthesisScreen() {
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + theme.spacing.lg }]}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!isGenerating}
       >
+        <View pointerEvents={isGenerating ? 'none' : 'auto'}>
         <PlatformModeSelectCard
           platform={platform}
           outputMode={outputMode}
@@ -774,6 +776,7 @@ export default function SynthesisScreen() {
           onShare={handleShare}
           isExporting={isExporting}
         />
+        </View>
 
         {isGenerating && videoProgress && (
           <VideoGenStepTracker progress={videoProgress} variant="inline" />

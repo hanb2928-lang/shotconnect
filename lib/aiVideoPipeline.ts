@@ -78,7 +78,6 @@ const SUBMIT_MAX_RETRIES = 2;
 const SUBMIT_RETRY_DELAY_MS = 500;
 const REALTIME_TIMEOUT_MS = 300_000;
 const REALTIME_SOFT_WARN_MS = 120_000;
-const FALLBACK_POLL_INTERVAL_MS = 5000;
 const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 12000;
 const RUNWAY_POLL_FALLBACK_START_MS = 20_000;
 const FIRST_POLL_DELAY_MS = 3000;
@@ -225,11 +224,18 @@ async function invokeWithNetworkRetry(
       lastError = err;
       const errStatus = (err as { status?: number }).status;
       const isAuthError = errStatus === 401 || errStatus === 403;
+      const isRateLimited = errStatus === 429;
       const isTimeout = err instanceof Error && (err.message.includes('초과') || err.message.includes('timeout'));
       if (isAuthError && attempt < maxRetries) {
         await ensureFreshSession();
         onRetry?.(attempt + 1, '인증 세션 갱신 중...');
         await delay(SUBMIT_RETRY_DELAY_MS * (attempt + 1));
+        continue;
+      }
+      if (isRateLimited && attempt < maxRetries) {
+        const rateLimitDelay = Math.min(2000 * Math.pow(2, attempt), 16000);
+        onRetry?.(attempt + 1, '요청 제한으로 인해 대기 중...');
+        await delay(rateLimitDelay);
         continue;
       }
       if (attempt < maxRetries && (isNetworkError(err) || isTimeout)) {
@@ -1025,7 +1031,7 @@ export async function submitVideoJobAsync(
     onProgress?.({ phase, progress, message, elapsedSec: 0, serverStep: serverStep ?? undefined });
   };
 
-  const bodyJson = JSON.stringify(compactBody({
+  const submitBody = compactBody({
     mode: 'submit',
     prompt,
     durationSec: options.durationSec ?? 5,
@@ -1063,7 +1069,7 @@ export async function submitVideoJobAsync(
     enableVirtualFitting: options.enableVirtualFitting,
     enableFabricPhysics: options.enableFabricPhysics,
     mainImageUrl: options.mainImageUrl,
-  }));
+  });
 
   await ensureFreshSession();
 
@@ -1083,7 +1089,7 @@ export async function submitVideoJobAsync(
   }
 
   const invokePromise = (supabase.functions.invoke('generate-video', {
-    body: bodyJson,
+    body: submitBody,
     signal: submitController.signal,
   }) as Promise<{ data: { taskId: string; motionPrompt: string; durationSec: number; aspectRatio: string; variationSeed: number } | null; error: unknown }>)
     .catch((err: unknown) => {
@@ -1396,7 +1402,7 @@ export async function upgradeVideoToHd(
   const HD_SUBMIT_TIMEOUT_MS = 90_000;
   const HD_SUBMIT_SOFT_TIMEOUT_MS = 6_000;
 
-  const bodyJson = JSON.stringify(compactBody({
+  const hdSubmitBody = compactBody({
     mode: 'submit',
     prompt,
     durationSec: options.durationSec ?? 5,
@@ -1434,14 +1440,14 @@ export async function upgradeVideoToHd(
     enableVirtualFitting: options.enableVirtualFitting,
     enableFabricPhysics: options.enableFabricPhysics,
     mainImageUrl: options.mainImageUrl,
-  }));
+  });
 
   await ensureFreshSession();
 
   const hdController = new AbortController();
   const hdTimeoutId = setTimeout(() => hdController.abort(), HD_SUBMIT_TIMEOUT_MS);
   const invokePromise = (supabase.functions.invoke('generate-video', {
-    body: bodyJson,
+    body: hdSubmitBody,
     signal: hdController.signal,
   }) as Promise<{ data: { taskId: string } | null; error: unknown }>)
     .catch((err: unknown) => {

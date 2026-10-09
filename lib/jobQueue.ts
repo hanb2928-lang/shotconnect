@@ -250,6 +250,24 @@ export function subscribeToJob(
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let currentChannel: ReturnType<typeof supabase.channel> | null = null;
 
+  // Stale-job guard: if no update is received within 5 minutes, fire
+  // onError so the caller can surface a timeout instead of staying
+  // subscribed to a zombie job forever. The timer resets on every
+  // valid update, so an active job with periodic progress updates
+  // will never trip it.
+  const STALE_JOB_TIMEOUT_MS = 300_000;
+  let staleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const resetStaleTimer = () => {
+    if (staleTimer) clearTimeout(staleTimer);
+    if (disposed) return;
+    staleTimer = setTimeout(() => {
+      if (disposed) return;
+      if (onError) onError();
+    }, STALE_JOB_TIMEOUT_MS);
+  };
+  resetStaleTimer();
+
   const connect = () => {
     if (disposed) return;
 
@@ -262,6 +280,7 @@ export function subscribeToJob(
           if (disposed) return;
           if (payload.new) {
             retryCount = 0;
+            resetStaleTimer();
             onUpdate(payload.new as RenderJob);
           }
         },
@@ -289,6 +308,7 @@ export function subscribeToJob(
     unsubscribe: () => {
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (staleTimer) clearTimeout(staleTimer);
       if (currentChannel) {
         try { supabase.removeChannel(currentChannel); } catch { /* channel already closed */ }
         currentChannel = null;

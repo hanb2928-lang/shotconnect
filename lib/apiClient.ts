@@ -248,18 +248,27 @@ export async function safeSupabaseCall<T>(
         err.message.includes('abort') ||
         err.message.includes('timeout')
       );
+      const isRateLimited = err instanceof Error && (
+        err.message.includes('429') || err.message.includes('rate limit') || err.message.includes('Too Many Requests')
+      );
 
-      if (isNetwork && attempt < retries) {
+      if ((isNetwork || isRateLimited) && attempt < retries) {
         if (!isOnline()) {
           const recovered = await waitForOnline();
           if (!recovered) {
             throw new ApiError('네트워크 연결이 끊겨 재시도할 수 없습니다. 인터넷 연결을 확인해주세요.', 0);
           }
         }
-        await new Promise((r) => setTimeout(r, BASE_BACKOFF_MS * Math.pow(2, attempt)));
+        const backoff = isRateLimited
+          ? BASE_BACKOFF_MS * Math.pow(2, attempt + 1)
+          : BASE_BACKOFF_MS * Math.pow(2, attempt);
+        await new Promise((r) => setTimeout(r, backoff));
         continue;
       }
 
+      if (isRateLimited) {
+        throw new ApiError('요청이 너무 많습니다. 잠시 후 다시 시도해주세요.', 429);
+      }
       if (isNetwork) {
         throw new ApiError('네트워크 연결에 실패했습니다. 인터넷 연결을 확인해주세요.', 0);
       }
