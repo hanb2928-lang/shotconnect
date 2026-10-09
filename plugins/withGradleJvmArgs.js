@@ -1,7 +1,7 @@
-const { withGradleProperties } = require('expo/config-plugins');
+const { withGradleProperties, withSettingsGradle } = require('expo/config-plugins');
 
 module.exports = function withGradleJvmArgs(config) {
-  return withGradleProperties(config, (config) => {
+  config = withGradleProperties(config, (config) => {
     const props = config.modResults;
 
     const set = (key, value) => {
@@ -25,4 +25,15 @@ module.exports = function withGradleJvmArgs(config) {
 
     return config;
   });
+
+  config = withSettingsGradle(config, (config) => {
+    const contents = config.modResults.contents;
+    config.modResults.contents = contents.replace(
+      /rootProject\.name\s*=\s*['"].*['"]/,
+      "rootProject.name = 'SnapAndConnect'",
+    );
+    return config;
+  });
+
+  return config;
 };
