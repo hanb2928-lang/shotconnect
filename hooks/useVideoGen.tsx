@@ -237,7 +237,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
                 const timeProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
                 const merged = Math.max(prev.progress, timeProgress, stepProg ?? 0);
-                const clampMax = 0.95;
+                const clampMax = 0.85;
                 return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(clampMax, merged || 0)) };
               });
             }
@@ -276,8 +276,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const clampMax = 0.95;
-          const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
+          const clampMax = 0.85;
+          const timeBasedProgress = Math.min(0.85, 0.15 + elapsed * 0.006);
           const serverProg = serverProgRef.current;
           const safeServer = (serverProg !== null && !isNaN(serverProg) && isFinite(serverProg)) ? serverProg : null;
           const baseProgress = Math.max(prev.progress, timeBasedProgress);
@@ -290,7 +290,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       creepTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const creepCeiling = 0.9;
+          const creepCeiling = 0.85;
           if (prev.progress >= creepCeiling) return prev;
           const serverProg = serverProgRef.current;
           const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, creepCeiling) : creepCeiling;
@@ -304,7 +304,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       hardGuardTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const guardCeiling = 0.9;
+          const guardCeiling = 0.85;
           if (prev.progress >= guardCeiling) return prev;
           const forced = Math.min(prev.progress + 0.10, guardCeiling);
           const serverProg = serverProgRef.current;
@@ -514,7 +514,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const sp = polling.serverProgress;
     serverProgRef.current = sp;
     if (sp !== null && !isNaN(sp) && isFinite(sp) && sp > 0 && isGenerating) {
-      const clamped = Math.max(0, Math.min(0.98, sp));
+      const clamped = Math.max(0, Math.min(0.85, sp));
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (isNaN(clamped) || clamped <= prev.progress) return prev;
