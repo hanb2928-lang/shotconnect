@@ -34,7 +34,6 @@ const STEP_ICONS: Record<string, string> = {
   plan: '🎬',
   submit: '📤',
   render: '🎞️',
-  finalize: '✨',
 };
 
 const RENDERING_MESSAGES = [
@@ -63,7 +62,7 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
   const percentSV = useSharedValue(0);
   const [creepFloor, setCreepFloor] = useState(0);
 
-  const creepCap = 90;
+  const creepCap = 85;
 
   useEffect(() => {
     if (!isRendering) {
