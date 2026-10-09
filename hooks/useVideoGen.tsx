@@ -224,7 +224,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       timer = setInterval(() => {
         const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
         setVideoProgress((prev) => {
-          if (!prev) return prev;
+          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           const isFinalizing = prev.serverStep === 'finalizing';
           const clampMax = isFinalizing ? 0.98 : 0.95;
           const timeBasedProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
