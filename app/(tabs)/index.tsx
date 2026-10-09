@@ -79,6 +79,8 @@ async function getStereoMod() {
 import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
 import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
+import { captureSnapshot, clearSnapshot, rollbackToSnapshot, classifyFailure, getRetryStrategy } from '@/lib/selfHeal';
+import { useOrphanJobRecovery, rememberActiveScan, forgetActiveScan } from '@/hooks/useOrphanJobRecovery';
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -257,8 +259,30 @@ function CameraScreenInner() {
   const [workflowMountKey, setWorkflowMountKey] = useState(0);
   const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>({ overallProgress: 0, currentStep: -1, steps: [], result: null, error: null });
   const [stereoOverlayVisible, setStereoOverlayVisible] = useState(false);
+  const [bgResilienceToast, setBgResilienceToast] = useState(false);
+  const wasBgDuringPipelineRef = useRef(false);
+  const bgResilienceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selfHealToast, setSelfHealToast] = useState<string | null>(null);
+  const [coverChoiceVisible, setCoverChoiceVisible] = useState(false);
+  const [orphanRecoveryToast, setOrphanRecoveryToast] = useState<string | null>(null);
+  const orphanRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [coverOptions, setCoverOptions] = useState<string[]>([]);
+  const [selectedCoverIndex, setSelectedCoverIndex] = useState(0);
+  const coverChoiceScanIdRef = useRef<string | null>(null);
 
   useBeforeUnloadGuard(processing || autoSaving || stereoOverlayVisible);
+
+  useOrphanJobRecovery(useCallback((scan) => {
+    if (!isMountedRef.current) return;
+    if (stereoOverlayRef.current || autoSavingRef.current || processingRef.current) return;
+    setOrphanRecoveryToast('이전 AI 작업이 완료되었습니다. 결과를 불러올게요!');
+    if (orphanRecoveryTimerRef.current) clearTimeout(orphanRecoveryTimerRef.current);
+    orphanRecoveryTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) setOrphanRecoveryToast(null);
+      orphanRecoveryTimerRef.current = null;
+    }, 4000);
+    router.push({ pathname: '/result/[id]', params: { id: scan.id } });
+  }, [router]));
 
   useEffect(() => {
     const tag = 'camera-processing';
@@ -445,6 +469,13 @@ function CameraScreenInner() {
         if (stereoAbortRef.current) { stereoAbortRef.current.abort(); stereoAbortRef.current = null; }
         if (autoAnalysisAbortRef.current) { autoAnalysisAbortRef.current.abort(); autoAnalysisAbortRef.current = null; }
         releasePipelineLock();
+        if (bgResilienceTimerRef.current) {
+          clearTimeout(bgResilienceTimerRef.current);
+          bgResilienceTimerRef.current = null;
+        }
+        wasBgDuringPipelineRef.current = false;
+        clearSnapshot();
+        forgetActiveScan();
         if (typeof stopAutoSaveAnimation === 'function') {
           stopAutoSaveAnimation();
         }
@@ -459,8 +490,23 @@ function CameraScreenInner() {
         if (isMountedRef.current) {
           // Forced remount cycle prevents Camera HAL FD leak on background→foreground
           scheduleCameraReactivation();
+          // Show reassurance toast if user returned while pipeline was running
+          if (wasBgDuringPipelineRef.current && (stereoOverlayRef.current || autoSavingRef.current || processingRef.current)) {
+            wasBgDuringPipelineRef.current = false;
+            setBgResilienceToast(true);
+            if (bgResilienceTimerRef.current) clearTimeout(bgResilienceTimerRef.current);
+            bgResilienceTimerRef.current = setTimeout(() => {
+              if (isMountedRef.current) setBgResilienceToast(false);
+              bgResilienceTimerRef.current = null;
+            }, 4000);
+          }
         }
       } else {
+        // Track that app went to background while a pipeline was active,
+        // so we can show a reassurance toast on foreground return.
+        if (stereoOverlayRef.current || autoSavingRef.current || processingRef.current) {
+          wasBgDuringPipelineRef.current = true;
+        }
         deactivateCamera();
         if (bufferReleaseTimerRef.current) {
           clearTimeout(bufferReleaseTimerRef.current);
@@ -475,6 +521,10 @@ function CameraScreenInner() {
       if (cameraRemountTimerRef.current) {
         clearTimeout(cameraRemountTimerRef.current);
         cameraRemountTimerRef.current = null;
+      }
+      if (bgResilienceTimerRef.current) {
+        clearTimeout(bgResilienceTimerRef.current);
+        bgResilienceTimerRef.current = null;
       }
     };
   }, [scheduleCameraReactivation, deactivateCamera]);
@@ -515,6 +565,7 @@ function CameraScreenInner() {
     setAutoSaveToast(null);
     setError(null);
     startAutoSaveAnimation();
+    captureSnapshot({ screenPhase, captureMode, contentTone, label: 'AI 자동 분석' });
     try {
       // Native heap cooldown before entering AI analysis: photo capture leaves
       // large bitmap buffers on the C++ native heap that ART GC hasn't reclaimed.
@@ -529,20 +580,36 @@ function CameraScreenInner() {
         controller,
       );
       if (genIdRef.current !== genId || !isMountedRef.current) return;
+      clearSnapshot();
+      rememberActiveScan(scanId);
       setAutoSaveToast('숏폼 영상이 보관함에 자동 저장되었습니다!');
       setTimeout(() => { if (isMountedRef.current) setAutoSaveToast(null); }, 3500);
       router.push({ pathname: '/result/[id]', params: { id: scanId } });
     } catch (err) {
       if (!isMountedRef.current || genIdRef.current !== genId) return;
-      const isTimeout = err instanceof Error && (err.message.includes('시간 초과') || err.message.includes('timeout'));
-      if (isTimeout) {
-        try {
-          await setItem('pending_retry_image', base64);
-          await setItem('pending_retry_mime', mimeType);
-        } catch { /* ignore */ }
-        setError('네트워크 연결이 원활하지 않습니다. 사진을 임시 저장했습니다. 연결이 복구되면 다시 시도해 주세요.');
+      const category = classifyFailure(err);
+      const strategy = getRetryStrategy(category, 0);
+      if (strategy.shouldRetry && strategy.triggerMemoryGuard) {
+        setSelfHealToast(strategy.label);
+        await nativeHeapCooldownGuard();
+        if (!isMountedRef.current || genIdRef.current !== genId) return;
+        rollbackToSnapshot();
+        setSelfHealToast(null);
+        setError(friendlyError(err, 'AI 자동 분석 중 오류가 발생했습니다. 압축률을 조정해 다시 시도해주세요.'));
       } else {
-        setError(friendlyError(err, 'AI 자동 분석 중 오류가 발생했습니다. 다시 시도해주세요.'));
+        rollbackToSnapshot();
+        setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
+        setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
+        const isTimeout = err instanceof Error && (err.message.includes('시간 초과') || err.message.includes('timeout'));
+        if (isTimeout) {
+          try {
+            await setItem('pending_retry_image', base64);
+            await setItem('pending_retry_mime', mimeType);
+          } catch { /* ignore */ }
+          setError('네트워크 연결이 원활하지 않습니다. 사진을 임시 저장했습니다. 연결이 복구되면 다시 시도해 주세요.');
+        } else {
+          setError(friendlyError(err, 'AI 자동 분석 중 오류가 발생했습니다. 다시 시도해주세요.'));
+        }
       }
     } finally {
       if (autoAnalysisAbortRef.current === controller) autoAnalysisAbortRef.current = null;
@@ -568,6 +635,7 @@ function CameraScreenInner() {
     if (!acquirePipelineLock('postCapture')) { autoSavingRef.current = false; return; }
     const controller = new AbortController();
     autoAnalysisAbortRef.current = controller;
+    captureSnapshot({ screenPhase, captureMode, contentTone, label: '이미지 업로드' });
     try {
       await nativeHeapCooldownGuard();
       if (!isMountedRef.current || controller.signal.aborted) return;
@@ -599,7 +667,8 @@ function CameraScreenInner() {
 
       let scanId: string | null = null;
       let lastErr: unknown = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
+      let lastCategory: ReturnType<typeof classifyFailure> = 'unknown';
+      for (let attempt = 0; attempt < 3; attempt++) {
         if (controller.signal.aborted) break;
         try {
           scanId = await uploadAndSave();
@@ -607,18 +676,27 @@ function CameraScreenInner() {
         } catch (err) {
           if (controller.signal.aborted || !isMountedRef.current) return;
           lastErr = err;
-          if (attempt === 0) {
-            await new Promise<void>((r) => setTimeout(r, 2000));
-            await nativeHeapCooldownGuard();
-          }
+          lastCategory = classifyFailure(err);
+          const strategy = getRetryStrategy(lastCategory, attempt);
+          if (!strategy.shouldRetry) break;
+          setSelfHealToast(strategy.label);
+          await new Promise<void>((r) => setTimeout(r, strategy.delayMs));
+          if (strategy.triggerMemoryGuard) await nativeHeapCooldownGuard();
+          if (!isMountedRef.current || controller.signal.aborted) return;
         }
       }
+      if (selfHealToast) setSelfHealToast(null);
 
       if (!isMountedRef.current || controller.signal.aborted) return;
       if (!scanId) throw lastErr ?? new Error('업로드에 실패했습니다.');
+      clearSnapshot();
+      rememberActiveScan(scanId);
       router.push({ pathname: '/editor', params: { id: scanId, customPrompt: customPrompt || undefined } });
     } catch (err) {
       if (!isMountedRef.current || controller.signal.aborted) return;
+      rollbackToSnapshot();
+      setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
+      setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.'));
     } finally {
       if (autoAnalysisAbortRef.current === controller) autoAnalysisAbortRef.current = null;
@@ -825,6 +903,7 @@ function CameraScreenInner() {
     }
     const controller = new AbortController();
     stereoAbortRef.current = controller;
+    captureSnapshot({ screenPhase, captureMode, contentTone, label: 'AI 입체컷 생성' });
     let stereoMod;
     try {
       stereoMod = await getStereoMod();
@@ -893,6 +972,9 @@ function CameraScreenInner() {
       releasePipelineLock();
       if (!isMountedRef.current) return;
       setStereoOverlayVisible(false);
+      rollbackToSnapshot();
+      setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
+      setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
@@ -914,13 +996,27 @@ function CameraScreenInner() {
         controller.signal,
       );
       if (isMountedRef.current) {
+        clearSnapshot();
+        rememberActiveScan(scanId);
         setStereoProgress((previous) => ({ ...previous, result: pipelineResult, overallProgress: 1 }));
         stereoOverlayRef.current = false;
         setStereoOverlayVisible(false);
-        router.replace({ pathname: '/result/[id]', params: { id: scanId } });
+        // Show cover thumbnail choice before navigating to result page
+        const coverCandidates = uploadedUrls.slice(0, 3);
+        if (coverCandidates.length >= 2) {
+          coverChoiceScanIdRef.current = scanId;
+          setCoverOptions(coverCandidates);
+          setSelectedCoverIndex(0);
+          setCoverChoiceVisible(true);
+        } else {
+          router.replace({ pathname: '/result/[id]', params: { id: scanId } });
+        }
       }
     } catch (err) {
       if (isMountedRef.current) {
+        rollbackToSnapshot();
+        setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
+        setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
         setStereoProgress((previous) => ({ ...previous, error: friendlyError(err, 'AI 입체컷 생성에 실패했습니다.') }));
       }
     } finally {
@@ -1946,6 +2042,36 @@ function CameraScreenInner() {
         onCaptureImage={handleMultiAngleCapture}
       />
 
+      {/* Self-healing toast */}
+      <Modal visible={!!selfHealToast} transparent animationType="fade">
+        <View style={styles.bgResilienceToastWrap}>
+          <View style={styles.selfHealToastInner}>
+            <AlertCircle size={18} color={theme.colors.warning[400]} strokeWidth={2.5} />
+            <Text style={styles.selfHealToastText}>{selfHealToast}</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Orphan job recovery toast */}
+      <Modal visible={!!orphanRecoveryToast} transparent animationType="fade">
+        <View style={styles.bgResilienceToastWrap}>
+          <View style={styles.orphanRecoveryToastInner}>
+            <Check size={18} color={theme.colors.success[400]} strokeWidth={2.5} />
+            <Text style={styles.orphanRecoveryToastText}>{orphanRecoveryToast}</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Background resilience toast */}
+      <Modal visible={bgResilienceToast} transparent animationType="fade">
+        <View style={styles.bgResilienceToastWrap}>
+          <View style={styles.bgResilienceToastInner}>
+            <Sparkles size={18} color={theme.colors.primary[400]} strokeWidth={2.5} />
+            <Text style={styles.bgResilienceToastText}>백그라운드에서 AI 합성이 안전하게 이어지고 있습니다. 완료되면 즉시 알려드릴게요!</Text>
+          </View>
+        </View>
+      </Modal>
+
       {/* Auto-save toast */}
       <Modal visible={!!autoSaveToast} transparent animationType="fade">
         <View style={styles.autoSaveToastWrap}>
@@ -1999,6 +2125,33 @@ function CameraScreenInner() {
         visible={stereoOverlayVisible}
         progress={stereoProgress}
         onDismiss={() => setStereoOverlayVisible(false)}
+      />
+
+      <CoverChoiceOverlay
+        visible={coverChoiceVisible}
+        coverUrls={coverOptions}
+        selectedIndex={selectedCoverIndex}
+        onSelect={setSelectedCoverIndex}
+        onConfirm={async () => {
+          const sid = coverChoiceScanIdRef.current;
+          setCoverChoiceVisible(false);
+          if (sid) {
+            try {
+              const { supabase } = await import('@/lib/supabase');
+              await supabase.from('scans').update({
+                template_data: { coverIndex: selectedCoverIndex },
+              }).eq('id', sid);
+            } catch { /* non-fatal — proceed to result anyway */ }
+            router.replace({ pathname: '/result/[id]', params: { id: sid } });
+          }
+          coverChoiceScanIdRef.current = null;
+        }}
+        onSkip={() => {
+          const sid = coverChoiceScanIdRef.current;
+          setCoverChoiceVisible(false);
+          if (sid) router.replace({ pathname: '/result/[id]', params: { id: sid } });
+          coverChoiceScanIdRef.current = null;
+        }}
       />
 
       <ProcessingBarrier
@@ -2087,6 +2240,68 @@ function StereoProgressLightweight({
               )}
             </>
           )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Cover Thumbnail Choice Overlay ───
+
+function CoverChoiceOverlay({
+  visible,
+  coverUrls,
+  selectedIndex,
+  onSelect,
+  onConfirm,
+  onSkip,
+}: {
+  visible: boolean;
+  coverUrls: string[];
+  selectedIndex: number;
+  onSelect: (index: number) => void;
+  onConfirm: () => void;
+  onSkip: () => void;
+}) {
+  if (!visible || coverUrls.length === 0) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onSkip}>
+      <View style={styles.coverChoiceOverlay}>
+        <View style={styles.coverChoiceCard}>
+          <Text style={styles.coverChoiceTitle}>가장 시선을 끄는 썸네일 커버를 선택하세요</Text>
+          <Text style={styles.coverChoiceSub}>AI가 추출한 임팩트 컷 3개 중 마케팅에 활용할 대표 커버를 골라주세요</Text>
+
+          <View style={styles.coverChoiceGrid}>
+            {coverUrls.map((url, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[
+                  styles.coverChoiceItem,
+                  selectedIndex === i && styles.coverChoiceItemSelected,
+                ]}
+                onPress={() => onSelect(i)}
+                activeOpacity={0.85}
+              >
+                <Image source={{ uri: url }} style={styles.coverChoiceImage} resizeMode="cover" />
+                {selectedIndex === i && (
+                  <View style={styles.coverChoiceCheckBadge}>
+                    <Check size={14} color="#fff" strokeWidth={3} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.coverChoiceBtnRow}>
+            <TouchableOpacity style={styles.coverChoiceSkipBtn} onPress={onSkip} activeOpacity={0.7}>
+              <Text style={styles.coverChoiceSkipText}>건너뛰기</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.coverChoiceConfirmBtn} onPress={onConfirm} activeOpacity={0.85}>
+              <Text style={styles.coverChoiceConfirmText}>이 커버로 진행</Text>
+              <ArrowRight size={16} color="#fff" strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -2490,6 +2705,79 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.textDim,
     textAlign: 'center',
   },
+  // Self-healing toast
+  selfHealToastInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: theme.colors.dark.surface,
+    borderRadius: theme.radius.full,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    maxWidth: 320,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  selfHealToastText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.warning[400],
+    lineHeight: 18,
+  },
+  orphanRecoveryToastInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: theme.colors.dark.surface,
+    borderRadius: theme.radius.full,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    maxWidth: 320,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  orphanRecoveryToastText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.success[400],
+    lineHeight: 18,
+  },
+  // Background resilience toast
+  bgResilienceToastWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bgResilienceToastInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: theme.colors.dark.surface,
+    borderRadius: theme.radius.full,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    maxWidth: 300,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  bgResilienceToastText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.primary[300],
+    lineHeight: 18,
+  },
   // Auto-save toast
   autoSaveToastWrap: {
     flex: 1,
@@ -2652,5 +2940,100 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: theme.typography.fontFamily.semiBold,
     color: theme.colors.dark.text,
+  },
+  // Cover choice overlay
+  coverChoiceOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(3, 5, 15, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: theme.spacing.lg,
+  },
+  coverChoiceCard: {
+    backgroundColor: theme.colors.dark.surface,
+    borderRadius: theme.radius.xl,
+    padding: theme.spacing.xl,
+    alignItems: 'center',
+    gap: theme.spacing.md,
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 1,
+    borderColor: theme.colors.dark.border,
+    ...theme.shadows.elevated,
+  },
+  coverChoiceTitle: {
+    fontSize: 17,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.dark.text,
+    textAlign: 'center',
+    lineHeight: 23,
+  },
+  coverChoiceSub: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textDim,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  coverChoiceGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    marginVertical: theme.spacing.sm,
+  },
+  coverChoiceItem: {
+    width: 88,
+    height: 120,
+    borderRadius: theme.radius.md,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  coverChoiceItemSelected: {
+    borderColor: theme.colors.primary[400],
+  },
+  coverChoiceImage: {
+    width: '100%',
+    height: '100%',
+  },
+  coverChoiceCheckBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: theme.colors.primary[500],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  coverChoiceBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: theme.spacing.sm,
+  },
+  coverChoiceSkipBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.dark.surfaceLight,
+  },
+  coverChoiceSkipText: {
+    fontSize: 14,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.dark.textDim,
+  },
+  coverChoiceConfirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.primary[600],
+  },
+  coverChoiceConfirmText: {
+    fontSize: 14,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: '#fff',
   },
 });
