@@ -310,7 +310,7 @@ async function createScanWithAnalysis(
   return data.id;
 }
 
-export async function triggerTTS(scanId: string, text: string): Promise<void> {
+export async function triggerTTS(scanId: string, text: string, targetDurationSec?: number): Promise<void> {
   let voice = 'alloy';
   let speed = 1.0;
   let pitch = 0;
@@ -333,7 +333,7 @@ export async function triggerTTS(scanId: string, text: string): Promise<void> {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${supabaseAnonKey}`,
     },
-    body: JSON.stringify({ text, voice, speed, pitch, ttsApiKey }),
+    body: JSON.stringify({ text, voice, speed, pitch, ttsApiKey, targetDurationSec }),
     timeoutMs: 115000,
   });
   if (!response.ok) {

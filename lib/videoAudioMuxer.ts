@@ -73,6 +73,7 @@ export async function muxVideoWithAudio(
   audioUrl: string,
   onProgress?: MuxProgressCallback,
   abortSignal?: AbortSignal,
+  targetDurationSec?: number,
 ): Promise<MuxResult | null> {
   if (typeof window === 'undefined') return null;
   if (typeof document === 'undefined') return null;
@@ -336,7 +337,12 @@ export async function muxVideoWithAudio(
     }
   };
 
-  const durationSec = Math.max(video.duration, audio.duration) || 0;
+  // Use target duration if provided, otherwise fall back to the longer
+  // of the two streams. This ensures the output matches the requested
+  // video length instead of being cut short by -shortest semantics.
+  const durationSec = targetDurationSec && targetDurationSec > 0
+    ? targetDurationSec
+    : Math.max(video.duration, audio.duration) || 0;
   if (!isFinite(durationSec) || durationSec <= 0) {
     audioCtx.close().catch(() => {});
     cleanupMediaElements();
@@ -502,8 +508,8 @@ export async function muxVideoWithAudio(
       flushPostSynthesisMemory().finally(() => resolve(null));
     };
 
-    // Start playback and recording
-    startTime = performance.now();
+    // Start playback and recording — see startPlayback below for the
+    // audio-first lock that prevents capture/playback desync.
 
     const drawFrame = async () => {
       // OOM / zombie-process guard: if consecutive frames take >5s each
@@ -594,13 +600,23 @@ export async function muxVideoWithAudio(
       }
     };
 
-    // Guard: if video.play() or audio.play() rejects (e.g. autoplay
-    // policy), we still proceed — canvas drawImage works on paused
-    // video, and we use the failsafe timer to end recording.
-    recorder.start(100);
-    video.play().catch(() => {});
-    audio.play().catch(() => {});
-    rafId = requestAnimationFrame(drawFrame);
+    // Audio-first rendering lock: wait for both video and audio to actually
+    // begin playing before starting the recorder. This prevents the desync
+    // where the recorder captures video frames before audio playback begins,
+    // causing overlays and narration to be misaligned in the final output.
+    const startPlayback = async () => {
+      const videoPlayPromise = video.play().catch(() => {});
+      const audioPlayPromise = audio.play().catch(() => {});
+      await Promise.all([videoPlayPromise, audioPlayPromise]);
+      // Both play() promises resolved (or were blocked by autoplay policy).
+      // Start the recorder now so capture begins at the same instant as
+      // playback. A single requestAnimationFrame call ensures the first
+      // frame is drawn before the first recorder tick.
+      startTime = performance.now();
+      recorder.start(100);
+      rafId = requestAnimationFrame(drawFrame);
+    };
+    void startPlayback();
 
     // Stop after both video and audio have finished
     const checkEnd = () => {

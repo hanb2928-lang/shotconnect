@@ -13,6 +13,7 @@ interface MuxRequest {
   videoUrl: string;
   audioUrl: string;
   scanId?: string;
+  targetDurationSec?: number;
 }
 
 Deno.serve(async (req: Request) => {
@@ -28,7 +29,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json() as MuxRequest;
-    const { videoUrl, audioUrl, scanId } = body;
+    const { videoUrl, audioUrl, scanId, targetDurationSec } = body;
 
     if (!videoUrl || !audioUrl) {
       return new Response(
@@ -132,9 +133,24 @@ Deno.serve(async (req: Request) => {
       // B-frames, cutting peak RAM usage by ~60% vs default preset.
       // This keeps the WASM process well under the Edge Runtime memory
       // ceiling so the OS never targets it for OOM killing.
-      await ffmpeg.exec([
+      // Build ffmpeg args. When targetDurationSec is provided, use -t to
+      // enforce the output duration and pad audio with silence so the video
+      // isn't cut short. Without a target, fall back to -shortest.
+      const ffmpegArgs: string[] = [
         "-i", "input_video.mp4",
         "-i", "input_audio.mp3",
+      ];
+      if (targetDurationSec && targetDurationSec > 0) {
+        // Pad audio with silence to match the target duration, then cap
+        // the output at exactly targetDurationSec.
+        ffmpegArgs.push(
+          "-af", `apad=whole_dur=${targetDurationSec}`,
+          "-t", String(targetDurationSec),
+        );
+      } else {
+        ffmpegArgs.push("-shortest");
+      }
+      ffmpegArgs.push(
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-tune", "zerolatency",
@@ -142,10 +158,10 @@ Deno.serve(async (req: Request) => {
         "-vf", "scale=-2:720",
         "-c:a", "aac",
         "-b:a", "128k",
-        "-shortest",
         "-movflags", "+faststart",
         "output.mp4",
-      ]);
+      );
+      await ffmpeg.exec(ffmpegArgs);
 
       if (execTimedOut) {
         throw new Error("FFmpeg 실행 시간이 초과되었습니다 (OOM 또는 폰트 로딩 실패 가능).");

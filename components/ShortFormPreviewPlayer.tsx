@@ -439,6 +439,26 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
 
   useEffect(() => {
     if (!isPlaying) return;
+    // On web, sync overlay timing to the video's actual currentTime for
+    // frame-accurate overlay switching. On native, fall back to the 250ms
+    // interval timer since we can't directly read the native video's time.
+    if (Platform.OS === 'web' && webVideoRef.current) {
+      const video = webVideoRef.current;
+      const onTimeUpdate = () => {
+        if (isFinite(video.currentTime) && video.currentTime > 0) {
+          setCurrentSec(Math.min(video.currentTime, totalDuration));
+        }
+      };
+      const onEnded = () => {
+        setCurrentSec(0);
+      };
+      video.addEventListener('timeupdate', onTimeUpdate);
+      video.addEventListener('ended', onEnded);
+      return () => {
+        video.removeEventListener('timeupdate', onTimeUpdate);
+        video.removeEventListener('ended', onEnded);
+      };
+    }
     intervalRef.current = setInterval(() => {
       setCurrentSec((prev) => {
         const next = prev + TICK_MS / 1000;
@@ -454,7 +474,7 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
         intervalRef.current = null;
       }
     };
-  }, [isPlaying, stop]);
+  }, [isPlaying, stop, totalDuration]);
 
   // Restart narration and BGM when the timer loops back to 0
   const prevSecRef = useRef(0);

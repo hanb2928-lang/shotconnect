@@ -878,14 +878,14 @@ export default function ResultScreen() {
   const handleJobUpdateRef = useRef<((job: RenderJob) => void) | null>(null);
   const appStateHandlersRef = useRef<Set<(nextState: string) => void>>(new Set());
 
-  const triggerTtsGeneration = useCallback(async (scanId: string): Promise<boolean> => {
+  const triggerTtsGeneration = useCallback(async (scanId: string, durationSec?: number): Promise<boolean> => {
     const tdDirect = scan?.template_data as { hook?: string; platformVariants?: Record<string, { hook?: string }> } | undefined;
     const platformHook = tdDirect?.platformVariants?.[activePlatform]?.hook;
     const dp0 = scan?.detected_products?.[0] as { templateData?: { hook?: string }; oneLiner?: string; productName?: string } | undefined;
     const sharedCaption = inlineEdit.captionText || activeHookRef.current || scan?.summary || '시선 집중! 지금 바로 확인하세요';
     const hookText = sanitizeVideoText(platformHook || tdDirect?.hook || sharedCaption || scan?.one_liner || dp0?.templateData?.hook || dp0?.oneLiner || dp0?.productName || scan?.product_name || sharedCaption) || sharedCaption;
     try {
-      await triggerTTS(scanId, hookText);
+      await triggerTTS(scanId, hookText, durationSec);
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'TTS 나레이션 생성에 실패했습니다.';
@@ -1047,7 +1047,7 @@ export default function ResultScreen() {
 
     // Trigger TTS generation in parallel with video generation so narration is ready when video completes
     if (!isCleanVideoMode) {
-      triggerTtsGeneration(scan.id).then((ok) => {
+      triggerTtsGeneration(scan.id, requestedDurationSec).then((ok) => {
         if (ok && mountedRef.current) {
           setTtsUrl(null);
           Promise.resolve(
@@ -2046,7 +2046,7 @@ export default function ResultScreen() {
             // Update progress state directly — this does NOT re-run this
             // effect because muxProgress is NOT in the dependency array.
             if (!cancelled) setMuxProgress(p.progress);
-          }, abortController.signal);
+          }, abortController.signal, Math.max(Math.round(selectedDurationMs / 1000), 3));
           if (!result || cancelled) {
             result?.revoke();
             return;
@@ -2111,6 +2111,7 @@ export default function ResultScreen() {
               videoUrl: generatedVideoUrl,
               audioUrl: ttsUrl,
               scanId: scan?.id,
+              targetDurationSec: Math.max(Math.round(selectedDurationMs / 1000), 3),
             },
           });
 
@@ -2951,7 +2952,7 @@ export default function ResultScreen() {
         bgmOverride,
         productVision ?? undefined,
         (settings?.default_caption_tone as ContentTone) ?? 'casual',
-        Math.max(3, selectedDurationMs / 1000),
+        Math.max(3, Math.round(selectedDurationMs / 1000)),
       );
     },
     [targetPlatform, inlineEdit.aiPrompt, inlineEdit.bgmMood, activeOneLiner, scan?.summary, activeHook, activeProductName, affiliatePlatforms, productVision, settings?.default_caption_tone, selectedDurationMs],
@@ -3099,7 +3100,7 @@ export default function ResultScreen() {
         featureCopy: productVision.visualFeatures.slice(0, 3).join(' · ') || secondary,
         ctaCopy: tertiary,
         subtitleCopy: secondary,
-      }, Math.max(3, selectedDurationMs / 1000));
+      }, Math.max(3, Math.round(selectedDurationMs / 1000)));
     }
     const hookText = activeHook || activeOneLiner || sanitizeVideoText(scan?.summary) || sanitizeVideoProductName(scan?.product_name) || sanitizeVideoText(scan?.one_liner) || '시선 집중! 지금 바로 확인하세요';
     const ctaText = shortUrl ? `자세히 보기 ${shortUrl}` : '지금 확인하세요';
@@ -3111,7 +3112,7 @@ export default function ResultScreen() {
       featureCopy: featureText,
       ctaCopy: ctaText,
       subtitleCopy: featureText,
-    }, Math.max(3, selectedDurationMs / 1000));
+    }, Math.max(3, Math.round(selectedDurationMs / 1000)));
   }, [productVision, isCleanVideoMode, activeHook, activeOneLiner, scan?.summary, scan?.product_name, scan?.one_liner, activeCaption, inlineEdit.captionText, shortUrl, selectedDurationMs]);
 
   const trendingSuggestions = getTrendingSuggestions(trendingHashtags, [...activeHashtags, ...addedHashtags]);
