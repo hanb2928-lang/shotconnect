@@ -1116,8 +1116,9 @@ export default function ResultScreen() {
       const draftProgressTimer = setInterval(() => {
         if (!mountedRef.current) return;
         const elapsed = Math.round((Date.now() - draftStartTime) / 1000);
-        // Asymptotic progress curve — approaches 0.92 but never reaches 1.0
-        const simulated = Math.min(0.08 + 0.84 * (1 - Math.exp(-elapsed / 45)), 0.92);
+        // Asymptotic progress curve — approaches 0.97 so the user sees near-complete
+        // progress while waiting for the server-side webhook/poll to deliver the result.
+        const simulated = Math.min(0.08 + 0.89 * (1 - Math.exp(-elapsed / 30)), 0.97);
         setVideoGenProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           // Never regress progress — the server/poll/Realtime may have set it higher
@@ -1164,7 +1165,7 @@ export default function ResultScreen() {
             setVideoGenProgress((prev) => {
               if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
               const serverProgress = typeof result.progress === 'number' && Number.isFinite(result.progress)
-                ? Math.max(0, Math.min(0.85, result.progress))
+                ? Math.max(0, Math.min(0.99, result.progress))
                 : prev.progress;
               const stepLabelMap: Record<string, string> = {
                 analyzing: '다각도 컷 분석 중...',

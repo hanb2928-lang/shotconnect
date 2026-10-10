@@ -816,7 +816,7 @@ function waitForVideoCompletion(
         await Promise.all([checkDb(), checkScanVideoUrl()]);
         if (!settled) {
           const elapsedSec = monotonicElapsedSec(startTime);
-          const timeProgress = Math.min(0.15 + (elapsedSec / 180) * 0.8, 0.85);
+          const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.97);
           const healthHint = channelHealth === ChannelHealth.HEALTHY
             ? ''
             : ' (실시간 연결 불안정 — 폴링으로 대체 중)';
@@ -1354,7 +1354,7 @@ export function subscribeVideoJob(
             } else {
               const stepProgress = stepToProgress(row.step);
               const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-              const timeProgress = Math.min(0.15 + (elapsedSec / 180) * 0.8, 0.85);
+              const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.97);
               const effectiveProgress = stepProgress != null
                 ? Math.max(stepProgress, timeProgress)
                 : timeProgress;
