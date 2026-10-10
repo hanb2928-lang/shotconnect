@@ -9,6 +9,7 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import { theme } from '@/lib/theme';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 
 interface SkeletonProps {
   width?: number | string;
@@ -19,6 +20,7 @@ interface SkeletonProps {
 
 export function Skeleton({ width = '100%', height = 16, borderRadius = 8, style }: SkeletonProps) {
   const opacity = useSharedValue(0.3);
+  const registerPause = usePauseAnimationsOnBackground();
 
   useEffect(() => {
     opacity.value = withRepeat(
@@ -26,8 +28,9 @@ export function Skeleton({ width = '100%', height = 16, borderRadius = 8, style 
       -1,
       true,
     );
+    registerPause(opacity);
     return () => cancelAnimation(opacity);
-  }, [opacity]);
+  }, [opacity, registerPause]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,

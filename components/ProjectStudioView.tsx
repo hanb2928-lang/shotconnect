@@ -30,6 +30,7 @@ import {
 import { theme } from '@/lib/theme';
 import { useProjectPhase, type ProjectStep } from '@/hooks/useProjectPhase';
 import { LoadingScreen } from '@/components/LoadingScreen';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 
 interface ProjectStudioViewProps {
   jobId: string | null;
@@ -130,6 +131,7 @@ function IdleState({ onBack }: { onBack?: () => void }) {
 
 function UploadingState() {
   const shimmer = useSharedValue(0);
+  const registerPause = usePauseAnimationsOnBackground();
 
   useEffect(() => {
     shimmer.value = withRepeat(
@@ -140,8 +142,9 @@ function UploadingState() {
       -1,
       false,
     );
+    registerPause(shimmer);
     return () => { cancelAnimation(shimmer); };
-  }, [shimmer]);
+  }, [shimmer, registerPause]);
 
   const barStyle = useAnimatedStyle(() => ({
     opacity: 0.4 + shimmer.value * 0.6,

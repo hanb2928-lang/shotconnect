@@ -9,6 +9,7 @@ import Animated, {
   Easing,
   cancelAnimation,
 } from 'react-native-reanimated';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 
 type CrawlingBabyProps = {
   size?: number;
@@ -27,6 +28,7 @@ export function CrawlingBaby({
 }: CrawlingBabyProps) {
   const bodyBob = useSharedValue(0);
   const translateX = useSharedValue(0);
+  const registerPause = usePauseAnimationsOnBackground();
 
   useEffect(() => {
     const halfCycle = speed / 2;
@@ -50,11 +52,13 @@ export function CrawlingBaby({
       false,
     );
 
+    registerPause(bodyBob, translateX);
+
     return () => {
       cancelAnimation(bodyBob);
       cancelAnimation(translateX);
     };
-  }, [bodyBob, translateX, speed, crawlWidth]);
+  }, [bodyBob, translateX, speed, crawlWidth, registerPause]);
 
   const containerStyle = useAnimatedStyle(() => ({
     transform: [

@@ -22,6 +22,7 @@ import {
   type VideoGenStep,
 } from '@/lib/videoGenSteps';
 import type { VideoGenProgress } from '@/lib/aiVideoPipeline';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 
 interface VideoGenStepTrackerProps {
   progress: VideoGenProgress | null;
@@ -139,9 +140,12 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
     }
   }, [activeIdx, progress?.phase, pulseSV]);
 
+  const registerPause = usePauseAnimationsOnBackground();
+
   useEffect(() => {
+    registerPause(pulseSV, barWidthSV, percentSV);
     return () => { cancelAnimation(pulseSV); };
-  }, [pulseSV]);
+  }, [pulseSV, barWidthSV, percentSV, registerPause]);
 
   useEffect(() => {
     if (!isRendering) {

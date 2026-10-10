@@ -16,6 +16,7 @@ import { useAffiliateToast } from '@/components/AffiliateToast';
 import { getShareDisclosureForPlatforms } from '@/lib/disclosure';
 import { getUserSettings } from '@/lib/settings';
 import * as Clipboard from 'expo-clipboard';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 
 interface SocialShortFormShareProps {
   shareText: string;
@@ -48,10 +49,12 @@ export function SocialShortFormShare({
   const babyBounce = useSharedValue(0);
   const sparkleRot = useSharedValue(0);
   const introOpacity = useSharedValue(0);
+  const registerPause = usePauseAnimationsOnBackground();
 
   useEffect(() => {
     let mounted = true;
     getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {});
+    registerPause(expandAnim, babyBounce, sparkleRot, introOpacity);
     return () => {
       mounted = false;
       cancelAnimation(expandAnim);
@@ -59,7 +62,7 @@ export function SocialShortFormShare({
       cancelAnimation(sparkleRot);
       cancelAnimation(introOpacity);
     };
-  }, []);
+  }, [registerPause, expandAnim, babyBounce, sparkleRot, introOpacity]);
 
   const toggleExpand = useCallback(() => {
     const next = !expanded;

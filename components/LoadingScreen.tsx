@@ -11,6 +11,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { theme } from '@/lib/theme';
 import { CrawlingBaby } from '@/components/CrawlingBaby';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 
 type LoadingScreenProps = {
   message?: string;
@@ -23,6 +24,7 @@ export function LoadingScreen({ message = '불러오는 중...', fullScreen = tr
   const wave1 = useSharedValue(0);
   const wave2 = useSharedValue(0);
   const wave3 = useSharedValue(0);
+  const registerPause = usePauseAnimationsOnBackground();
 
   useEffect(() => {
     pulseScale.value = withRepeat(
@@ -47,6 +49,8 @@ export function LoadingScreen({ message = '불러오는 중...', fullScreen = tr
     wave2.value = withRepeat(withTiming(1, { ...waveConfig, duration: 1800 }), -1, false);
     wave3.value = withRepeat(withTiming(1, { ...waveConfig, duration: 2000 }), -1, false);
 
+    registerPause(pulseScale, pulseOpacity, wave1, wave2, wave3);
+
     return () => {
       cancelAnimation(pulseScale);
       cancelAnimation(pulseOpacity);
@@ -54,7 +58,7 @@ export function LoadingScreen({ message = '불러오는 중...', fullScreen = tr
       cancelAnimation(wave2);
       cancelAnimation(wave3);
     };
-  }, [pulseScale, pulseOpacity, wave1, wave2, wave3]);
+  }, [pulseScale, pulseOpacity, wave1, wave2, wave3, registerPause]);
 
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],

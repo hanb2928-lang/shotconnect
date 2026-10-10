@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Platform } from 'react-native';
 import Animated, { useSharedValue, withRepeat, withSequence, withTiming, cancelAnimation } from 'react-native-reanimated';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 import { theme } from '@/lib/theme';
 import { Camera, RotateCcw, Zap, X, Image as ImageIcon, Sparkles, Check, ShieldAlert, Video, Square } from 'lucide-react-native';
 import { cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
@@ -86,6 +87,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   const isRecordingRef = useRef(false);
   const trackListenersRef = useRef<Array<{ track: MediaStreamTrack; handler: () => void }>>([]);
   const pulseScale = useSharedValue(1);
+  const registerPause = usePauseAnimationsOnBackground();
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -463,8 +465,9 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   }, [autoSaving, pulseScale]);
 
   useEffect(() => {
+    registerPause(pulseScale);
     return () => { cancelAnimation(pulseScale); };
-  }, [pulseScale]);
+  }, [pulseScale, registerPause]);
 
   return (
     <View style={styles.container}>

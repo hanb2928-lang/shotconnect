@@ -14,6 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Layers, User, Scan, Sparkles, Check } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
+import { usePauseAnimationsOnBackground } from '@/hooks/usePauseAnimationsOnBackground';
 
 interface VirtualFittingLoadingOverlayProps {
   visible: boolean;
@@ -43,6 +44,7 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
   const stageProgressSV = useSharedValue(0);
   const pulseSV = useSharedValue(0);
   const scanLineSV = useSharedValue(0);
+  const registerPause = usePauseAnimationsOnBackground();
 
   useEffect(() => {
     if (!visible) return;
@@ -63,6 +65,8 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
       -1,
       true,
     );
+
+    registerPause(pulseSV, scanLineSV, progressSV, stageProgressSV);
 
     let elapsed = 0;
     const stageTimers: ReturnType<typeof setTimeout>[] = [];
@@ -88,7 +92,7 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
       cancelAnimation(progressSV);
       cancelAnimation(stageProgressSV);
     };
-  }, [visible]);
+  }, [visible, registerPause]);
 
   if (!visible) return null;
 
