@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 
 export type ProjectStep = 'idle' | 'uploading' | 'rendering' | 'completed' | 'failed';
 
@@ -30,6 +31,36 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
     const isSoft = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
     const useScanId = isSoft && scanId;
 
+    const setupChannel = () => {
+      if (cancelled || channelRef.current) return;
+      const channel = supabase
+        .channel(`project-phase-${jobId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'video_jobs',
+            filter: useScanId ? `scan_id=eq.${scanId}` : `task_id=eq.${jobId}`,
+          },
+          (payload) => {
+            if (cancelled) return;
+            const updated = payload.new as VideoJobRow;
+            setStep(updated.step);
+            setData(updated);
+          },
+        )
+        .subscribe();
+      channelRef.current = channel;
+    };
+
+    const teardownChannel = () => {
+      if (channelRef.current) {
+        try { supabase.removeChannel(channelRef.current); } catch { /* ignore */ }
+        channelRef.current = null;
+      }
+    };
+
     (async () => {
       if (cancelled) return;
 
@@ -58,35 +89,25 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
 
       if (cancelled) return;
 
-      const channel = supabase
-        .channel(`project-phase-${jobId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'video_jobs',
-            filter: useScanId ? `scan_id=eq.${scanId}` : `task_id=eq.${jobId}`,
-          },
-          (payload) => {
-            if (cancelled) return;
-            const updated = payload.new as VideoJobRow;
-            setStep(updated.step);
-            setData(updated);
-          },
-        )
-        .subscribe();
-
-      channelRef.current = channel;
+      setupChannel();
     })();
+
+    // Remove the Realtime channel on background to prevent the socket
+    // from attempting reconnect storms while the OS is suspending the
+    // process. Re-subscribe on foreground to resume live updates.
+    const unsubAppState = registerAppStateHandler('deferred', (nextState: string) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        teardownChannel();
+      } else if (nextState === 'active') {
+        setupChannel();
+      }
+    });
 
     return () => {
       cancelled = true;
+      unsubAppState();
       if (timeoutId) clearTimeout(timeoutId);
-      if (channelRef.current) {
-        try { supabase.removeChannel(channelRef.current); } catch { /* ignore */ }
-        channelRef.current = null;
-      }
+      teardownChannel();
     };
   }, [jobId, scanId]);
 
