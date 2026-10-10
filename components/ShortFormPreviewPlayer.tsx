@@ -8,6 +8,13 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+  runOnJS,
+} from 'react-native-reanimated';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 
 import {
@@ -597,14 +604,34 @@ useEffect(() => {
     document.head.appendChild(style);
   }, []);
 
-  const activeSegment = getActiveSegment(editPlan?.segments ?? [], currentSec);
-  const activeCopyOverlay = copyOverlays ? getActiveCopyOverlay(copyOverlays, currentSec) : null;
-  const isDisclosureActive =
-    editPlan?.disclosureEnabled &&
-    currentSec >= (editPlan?.disclosureOverlay?.startSec ?? 99) &&
-    currentSec < (editPlan?.disclosureOverlay?.endSec ?? 99);
+  const activeSegment = useMemo(
+    () => getActiveSegment(editPlan?.segments ?? [], currentSec),
+    [editPlan?.segments, currentSec],
+  );
+  const activeCopyOverlay = useMemo(
+    () => copyOverlays ? getActiveCopyOverlay(copyOverlays, currentSec) : null,
+    [copyOverlays, currentSec],
+  );
+  const isDisclosureActive = useMemo(
+    () =>
+      editPlan?.disclosureEnabled &&
+      currentSec >= (editPlan?.disclosureOverlay?.startSec ?? 99) &&
+      currentSec < (editPlan?.disclosureOverlay?.endSec ?? 99),
+    [editPlan?.disclosureEnabled, editPlan?.disclosureOverlay, currentSec],
+  );
   const progressPercent = (currentSec / totalDuration) * 100;
   const isBgmActive = currentSec > 0 && currentSec < totalDuration;
+
+  const progressWidthShared = useSharedValue(0);
+  useEffect(() => {
+    progressWidthShared.value = withTiming(progressPercent, {
+      duration: 250,
+      easing: Easing.linear,
+    });
+  }, [progressPercent, progressWidthShared]);
+  const animatedProgressStyle = useAnimatedStyle(() => ({
+    width: `${progressWidthShared.value}%`,
+  }));
 
   const responsiveHeight = Math.min(screenHeight * 0.45, screenWidth * 0.55 * (16 / 9));
   const responsiveWidth = responsiveHeight * (9 / 16);
@@ -812,7 +839,7 @@ useEffect(() => {
           </TouchableOpacity>
           <View style={styles.progressTrack}>
             <View style={styles.progressBackground} />
-            <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+            <Animated.View style={[styles.progressFill, animatedProgressStyle]} />
             {(editPlan?.segments ?? []).map((seg) => (
               <View
                 key={seg.index}
