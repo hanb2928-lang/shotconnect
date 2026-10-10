@@ -9,7 +9,8 @@ export type JobType =
   | 'generate-copy'
   | 'generate-review'
   | 'generate-comic-scenario'
-  | 'render-video';
+  | 'render-video'
+  | 'texture-synthesis';
 
 export type JobStatus = 'queued' | 'processing' | 'done' | 'error';
 

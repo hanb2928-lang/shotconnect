@@ -38,6 +38,7 @@ import {
   GenerationModePanel,
   type GenMode,
 } from '@/components/GenerationModePanel';
+import { TextureUploader } from '@/components/TextureUploader';
 import { PreviewExportTray } from '@/components/PreviewExportTray';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
 import { supabase } from '@/lib/supabase';
@@ -752,6 +753,13 @@ function SynthesisScreenInner() {
           onNativeProductPick={handleNativeProductPick}
           onNativeModelPick={handleNativeModelPick}
         />
+
+        {modelImage?.uri && (
+          <TextureUploader
+            modelImageUrl={modelImage.uri}
+            productName={productImages[0]?.id}
+          />
+        )}
 
         <GenerationModePanel
           mode={genMode}

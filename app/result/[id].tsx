@@ -125,7 +125,7 @@ import { AiSoloDirectorCard } from '@/components/AiSoloDirectorCard';
 import { buildShortFormEditPlan, type ContentTone } from '@/lib/shortFormEditEngine';
 import { getBgmTemplateForMood } from '@/lib/bgmEngine';
 import { buildNarrativePlan, getNarrativeSummary, type NarrativePlan } from '@/lib/humanRealityNarrativeEngine';
-import { submitVideoJobAsync, subscribeVideoJob, upgradeVideoToHd, subscribeHdUpgrade, recoverVideoJob, type VideoGenProgress } from '@/lib/aiVideoPipeline';
+import { submitVideoJobAsync, subscribeVideoJob, upgradeVideoToHd, subscribeHdUpgrade, recoverVideoJob, generateIdempotencyKey, type VideoGenProgress } from '@/lib/aiVideoPipeline';
 import { stepToProgress } from '@/lib/videoGenSteps';
 import { analyzeProductVision, type ProductVisionResult } from '@/lib/productVision';
 import {
@@ -1390,7 +1390,8 @@ function ResultScreenInner() {
         }
       }
 
-      type ImageGenResult = { image?: string; mimeType?: string; error?: string };
+      type ImageGenResult = { image?: string; mimeType?: string; error?: string; cached?: boolean };
+      const imageIdempotencyKeys = Array.from({ length: 5 }, () => generateIdempotencyKey());
       const invokeOne = async (idx: number): Promise<ImageGenResult> =>
         safeInvoke<ImageGenResult>(() => supabase.functions.invoke('generate-image', {
           body: {
@@ -1406,6 +1407,7 @@ function ResultScreenInner() {
             platform: targetPlatform,
             customPrompt: inlineEdit.aiPrompt || undefined,
             referenceImage: referenceImageBase64,
+            idempotencyKey: imageIdempotencyKeys[idx],
           },
         }));
 

@@ -148,14 +148,17 @@ export function useResultPolling(
             if (cancelled || settledRef.current) return;
             hybridPoller.onRealtimeEvent();
             try {
-              const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null };
+              const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null; progress: number | null };
               if (!row || typeof row.status !== 'string') return;
               if (row.status === 'SUCCESS' && row.video_url) {
                 handleResult(row.status, row.video_url);
               } else if (row.status === 'FAILED') {
                 handleResult(row.status, null, row.error_message ?? undefined);
               } else {
-                applyProgress(stepToProgress(row.step), row.step ?? null);
+                const numericProgress = typeof row.progress === 'number' && !isNaN(row.progress) && row.progress > 0
+                  ? row.progress
+                  : null;
+                applyProgress(numericProgress, row.step ?? null);
               }
             } catch {
               // Malformed payload — ignore, polling will catch up
@@ -219,19 +222,19 @@ export function useResultPolling(
     // Direct DB force-sync: query video_jobs table as a fallback.
     // For soft-fallback task IDs, look up by scan_id since no real row
     // has the fake task ID.
-    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null } | null> => {
+    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
         let query = supabase
           .from('video_jobs')
-          .select('status, video_url, step');
+          .select('status, video_url, step, progress');
         const { data, error: dbError } = isSoftTaskId && scanId
           ? await query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
           : await query.eq('task_id', jobId).maybeSingle();
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
-        const row = data as { status: string; video_url: string | null; step: string | null };
-        return { status: row.status, videoUrl: row.video_url, step: row.step };
+        const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
+        return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
       } catch {
         return null;
       }
@@ -239,14 +242,14 @@ export function useResultPolling(
 
     // Also check by scan_id if the task_id lookup fails.
     // Returns step so the soft-fallback path can propagate progress.
-    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null } | null> => {
+    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
       if (!scanId) return null;
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
         const { data, error: dbError } = await supabase
           .from('video_jobs')
-          .select('status, video_url, step')
+          .select('status, video_url, step, progress')
           .eq('scan_id', scanId)
           .order('created_at', { ascending: false })
           .limit(1)
@@ -262,13 +265,13 @@ export function useResultPolling(
             .maybeSingle();
           const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
           if (scanFinalUrl) {
-            return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed' };
+            return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed', progress: 1.0 };
           }
           return null;
         }
-        const row = data as { status: string; video_url: string | null; step: string | null };
+        const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
         if (row.status === 'SUCCESS' && row.video_url) {
-          return { status: row.status, videoUrl: row.video_url, step: row.step };
+          return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
         }
         // Non-terminal: also check scans.video_url / muxed_video_url as a fallback.
         const { data: scanData } = await supabase
@@ -278,9 +281,9 @@ export function useResultPolling(
           .maybeSingle();
         const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
         if (scanFinalUrl) {
-          return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed' };
+          return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed', progress: 1.0 };
         }
-        return { status: row.status, videoUrl: row.video_url, step: row.step };
+        return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
       } catch {
         return null;
       }
@@ -329,7 +332,10 @@ export function useResultPolling(
         if (cancelled || settledRef.current) return;
         if (scanResult) {
           if (scanResult.step) {
-            applyProgress(stepToProgress(scanResult.step), scanResult.step);
+            const sp = typeof scanResult.progress === 'number' && !isNaN(scanResult.progress) && scanResult.progress > 0
+              ? scanResult.progress
+              : stepToProgress(scanResult.step);
+            applyProgress(sp, scanResult.step);
           }
           handleResult(scanResult.status, scanResult.videoUrl);
           if (settledRef.current) return;

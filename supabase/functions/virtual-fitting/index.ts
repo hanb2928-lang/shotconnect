@@ -15,6 +15,7 @@ interface VirtualFittingRequest {
   mood?: string;
   sceneStyle?: string;
   customPrompt?: string;
+  idempotencyKey?: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -37,6 +38,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // ─── Idempotency: check for cached result before making paid API call ──
+    if (body.idempotencyKey?.trim()) {
+      const cached = await checkFittingCache(body.idempotencyKey.trim());
+      if (cached) {
+        return new Response(
+          JSON.stringify({ ...cached, cached: true }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     const openaiKey = await resolveOpenAIKey();
     if (!openaiKey) {
       return new Response(
@@ -52,8 +64,15 @@ Deno.serve(async (req: Request) => {
 
     const resultBase64 = await callImageEdit(productDataUrl, modelDataUrl, prompt, openaiKey);
 
+    const fittingResult = { image: resultBase64, mimeType: "image/png" };
+
+    // Persist to idempotency cache so network-drop retries don't fire a second paid call
+    if (body.idempotencyKey?.trim()) {
+      storeFittingCache(body.idempotencyKey.trim(), fittingResult).catch(() => {});
+    }
+
     return new Response(
-      JSON.stringify({ image: resultBase64, mimeType: "image/png" }),
+      JSON.stringify(fittingResult),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
@@ -187,4 +206,57 @@ async function resolveOpenAIKey(): Promise<string | null> {
     }
   }
   return null;
+}
+
+// ─── Idempotency cache helpers (uses ai_content_cache table) ────────────
+async function checkFittingCache(idempotencyKey: string): Promise<Record<string, unknown> | null> {
+  const sUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!sUrl || !sKey) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(
+      `${sUrl}/rest/v1/ai_content_cache?select=result&cache_key=eq.virtual-fitting:${encodeURIComponent(idempotencyKey)}`,
+      {
+        headers: { apikey: sKey, Authorization: `Bearer ${sKey}` },
+        signal: controller.signal,
+      },
+    );
+    clearTimeout(timeoutId);
+    if (!resp.ok) return null;
+    const rows = await resp.json() as Array<{ result: Record<string, unknown> | null }>;
+    if (!rows[0]?.result) return null;
+    return rows[0].result;
+  } catch {
+    return null;
+  }
+}
+
+async function storeFittingCache(idempotencyKey: string, result: Record<string, unknown>): Promise<void> {
+  const sUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!sUrl || !sKey) return;
+  try {
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await fetch(`${sUrl}/rest/v1/ai_content_cache`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: sKey,
+        Authorization: `Bearer ${sKey}`,
+        Prefer: "resolution=merge-duplicates",
+      },
+      body: JSON.stringify({
+        cache_key: `virtual-fitting:${idempotencyKey}`,
+        task_type: "virtual-fitting",
+        input_hash: idempotencyKey,
+        result,
+        model_used: "gpt-image-1",
+        expires_at: expiresAt,
+      }),
+    });
+  } catch {
+    // cache write failure is non-fatal
+  }
 }

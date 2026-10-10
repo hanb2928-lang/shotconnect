@@ -1045,6 +1045,7 @@ async function updateRunwayTaskId(scanId: string, internalJobId: string, runwayT
 }
 
 async function findJobByIdempotencyKey(idempotencyKey: string): Promise<{ taskId: string; status: string } | null> {
+  if (!idempotencyKey?.trim()) return null;
   if (!supabaseUrl || !serviceRoleKey) return null;
   try {
     const controller = new AbortController();
@@ -1217,9 +1218,12 @@ const RUNWAY_STATUS_TO_STEP: Record<string, string> = {
 
 async function updateVideoJobStep(scanId: string, taskId: string, step: string): Promise<void> {
   if (!supabaseUrl || !serviceRoleKey) return;
+  const progress = STEP_TO_PROGRESS_NUM[step] ?? null;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const body: Record<string, unknown> = { step };
+    if (progress !== null) body.progress = progress;
     await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=not.in.(SUCCESS,FAILED)`, {
       method: "PATCH",
       headers: {
@@ -1228,7 +1232,7 @@ async function updateVideoJobStep(scanId: string, taskId: string, step: string):
         "Content-Type": "application/json",
         Prefer: "return=minimal",
       },
-      body: JSON.stringify({ step }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -1236,6 +1240,22 @@ async function updateVideoJobStep(scanId: string, taskId: string, step: string):
     // non-fatal
   }
 }
+
+const STEP_TO_PROGRESS_NUM: Record<string, number> = {
+  idle: 0.05,
+  analyzing: 0.05,
+  hooking: 0.15,
+  planning: 0.25,
+  submitting: 0.35,
+  rendering: 0.85,
+  completed: 1.0,
+  failed: 0,
+  pending: 0.35,
+  processing: 0.85,
+  running: 0.85,
+  throttled: 0.45,
+  queued: 0.38,
+};
 
 async function fetchScanImageUrl(scanId: string): Promise<string | null> {
   if (!supabaseUrl || !serviceRoleKey) return null;

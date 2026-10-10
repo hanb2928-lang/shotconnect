@@ -27,6 +27,7 @@ interface GenerateImageRequest {
   platform?: string;
   customLinks?: string[];
   comicMode?: boolean;
+  idempotencyKey?: string;
 }
 
 type IndustryKey =
@@ -170,6 +171,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // ─── Idempotency: check for cached result before making paid API call ──
+    if (body.idempotencyKey?.trim()) {
+      const cached = await checkImageCache(body.idempotencyKey.trim());
+      if (cached) {
+        return new Response(
+          JSON.stringify({ ...cached, cached: true }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     const openaiKey = await resolveOpenAIKey();
 
     if (!openaiKey) {
@@ -297,15 +309,22 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const imageResult = {
+      image: imageBase64,
+      mimeType: "image/png",
+      revisedPrompt: result.data?.[0]?.revised_prompt ?? body.prompt,
+      expandedPrompt: expandedPrompt !== body.prompt ? expandedPrompt : undefined,
+      industry: preset.label,
+      seed: body.seed ?? undefined,
+    };
+
+    // Persist to idempotency cache so network-drop retries don't fire a second paid call
+    if (body.idempotencyKey?.trim()) {
+      storeImageCache(body.idempotencyKey.trim(), imageResult).catch(() => {});
+    }
+
     return new Response(
-      JSON.stringify({
-        image: imageBase64,
-        mimeType: "image/png",
-        revisedPrompt: result.data?.[0]?.revised_prompt ?? body.prompt,
-        expandedPrompt: expandedPrompt !== body.prompt ? expandedPrompt : undefined,
-        industry: preset.label,
-        seed: body.seed ?? undefined,
-      }),
+      JSON.stringify(imageResult),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
@@ -481,4 +500,53 @@ function base64ToBlob(base64: string): Blob {
     bytes[i] = binary.charCodeAt(i);
   }
   return new Blob([bytes], { type: "image/jpeg" });
+}
+
+// ─── Idempotency cache helpers (uses ai_content_cache table) ────────────
+async function checkImageCache(idempotencyKey: string): Promise<Record<string, unknown> | null> {
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/ai_content_cache?select=result&cache_key=eq.generate-image:${encodeURIComponent(idempotencyKey)}`,
+      {
+        headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+        signal: controller.signal,
+      },
+    );
+    clearTimeout(timeoutId);
+    if (!resp.ok) return null;
+    const rows = await resp.json() as Array<{ result: Record<string, unknown> | null }>;
+    if (!rows[0]?.result) return null;
+    return rows[0].result;
+  } catch {
+    return null;
+  }
+}
+
+async function storeImageCache(idempotencyKey: string, result: Record<string, unknown>): Promise<void> {
+  if (!supabaseUrl || !serviceRoleKey) return;
+  try {
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await fetch(`${supabaseUrl}/rest/v1/ai_content_cache`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        Prefer: "resolution=merge-duplicates",
+      },
+      body: JSON.stringify({
+        cache_key: `generate-image:${idempotencyKey}`,
+        task_type: "generate-image",
+        input_hash: idempotencyKey,
+        result,
+        model_used: "gpt-image-1",
+        expires_at: expiresAt,
+      }),
+    });
+  } catch {
+    // cache write failure is non-fatal
+  }
 }

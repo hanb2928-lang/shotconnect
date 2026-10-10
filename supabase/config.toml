@@ -106,3 +106,6 @@ verify_jwt = false
 [functions.mux-video-audio]
 verify_jwt = false
 
+[functions.texture-synthesis]
+verify_jwt = false
+

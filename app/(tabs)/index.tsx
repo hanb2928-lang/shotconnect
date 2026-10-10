@@ -76,6 +76,7 @@ async function getStereoMod() {
   return _stereoMod;
 }
 import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
+import { generateIdempotencyKey } from '@/lib/aiVideoPipeline';
 import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 import { captureSnapshot, clearSnapshot, rollbackToSnapshot, classifyFailure, getRetryStrategy } from '@/lib/selfHeal';
@@ -120,6 +121,7 @@ async function runFittingPipeline(
     bgBase64 = '';
     if (signal?.aborted) return;
 
+    const fittingKey = generateIdempotencyKey();
     const { data, error } = await supabase.functions.invoke('virtual-fitting', {
       body: {
         productImage: productUrl,
@@ -129,6 +131,7 @@ async function runFittingPipeline(
         fabricDetail: studioSliders?.fabricDetail,
         blendStrength: studioSliders?.blendStrength,
         smartFit: studioSliders?.smartFit,
+        idempotencyKey: fittingKey,
       },
       signal,
     });

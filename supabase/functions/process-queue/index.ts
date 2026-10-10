@@ -30,6 +30,7 @@ const ALLOWED_JOB_TYPES = new Set([
   "generate-review",
   "generate-comic-scenario",
   "render-video",
+  "texture-synthesis",
 ]);
 
 const JOB_TYPE_TO_FUNCTION_SLUG: Record<string, string> = {
