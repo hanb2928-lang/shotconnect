@@ -5,6 +5,7 @@ import {
   getBundledTrackForIdOrCategory,
   hasBundledTracksForCategory,
   bundledTrackToBgmTemplate,
+  BUNDLED_BGM_TRACKS,
   type BundledBgmTrack,
 } from './bundledBgm';
 import { aiCachedCall } from './aiCache';
@@ -12,6 +13,7 @@ import { hashObject } from './contentHash';
 import { cleanBase64, base64ToUint8Array } from './base64';
 import { supabase } from './supabase';
 import { safeInvoke } from './apiClient';
+import { preloadBgmTrack, preloadAllBgmTracks, getCachedBgmBuffer } from './assetPreloader';
 
 /**
  * Web Audio API BGM engine — supports both bundled audio files and FM synthesis fallback.
@@ -286,6 +288,7 @@ export class BgmPlayer {
   private wowFlutterLfo: OscillatorNode | null = null;
   private wowFlutterGain: GainNode | null = null;
   private bundledAudioEl: HTMLAudioElement | null = null;
+  private bundledSourceNode: AudioBufferSourceNode | null = null;
   private currentBundledTrack: BundledBgmTrack | null = null;
   private usingBundledFile = false;
 
@@ -363,6 +366,17 @@ export class BgmPlayer {
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   }
 
+  /**
+   * Pre-fetches and decodes all bundled BGM tracks into AudioBuffers so
+   * playback starts with zero network latency.  Safe to call multiple times
+   * — already-cached tracks are skipped.
+   */
+  async preloadAllBundledTracks(): Promise<void> {
+    const ctx = this.getOrCreateContext();
+    if (!ctx) return;
+    await preloadAllBgmTracks(ctx);
+  }
+
   start(
     bgmTemplateId: string,
     bpm?: number,
@@ -383,19 +397,38 @@ export class BgmPlayer {
     // Try bundled audio file first — zero network latency, studio-grade quality
     if (Platform.OS === 'web' && hasBundledTracksForCategory(category)) {
       const track = getBundledTrackForIdOrCategory(bgmTemplateId, category);
-      const uri = resolveBundledTrackUri(track);
+      const cachedBuffer = getCachedBgmBuffer(track.id);
       try {
         if (this.bundledAudioEl) {
           this.bundledAudioEl.pause();
           this.bundledAudioEl = null;
         }
+        if (cachedBuffer) {
+          // Play from preloaded AudioBuffer — zero fetch latency
+          const sourceNode = ctx.createBufferSource();
+          sourceNode.buffer = cachedBuffer;
+          sourceNode.loop = true;
+          sourceNode.connect(this.dryGain);
+          sourceNode.connect(this.reverbConvolver);
+          sourceNode.start();
+          this.bundledSourceNode = sourceNode;
+          this.currentBundledTrack = track;
+          this.usingBundledFile = true;
+          this.isPlaying = true;
+          this.masterGain.gain.cancelScheduledValues(ctx.currentTime);
+          this.masterGain.gain.setValueAtTime(0, ctx.currentTime);
+          this.masterGain.gain.linearRampToValueAtTime(this.volume, ctx.currentTime + 0.4);
+          return;
+        }
+        // Fallback: stream via HTMLAudioElement (fetches from network)
+        const uri = resolveBundledTrackUri(track);
         const audio = new Audio(uri);
         audio.loop = true;
         audio.volume = this.volume;
         audio.crossOrigin = 'anonymous';
-        const sourceNode = ctx.createMediaElementSource(audio);
-        sourceNode.connect(this.dryGain);
-        sourceNode.connect(this.reverbConvolver);
+        const mediaSource = ctx.createMediaElementSource(audio);
+        mediaSource.connect(this.dryGain);
+        mediaSource.connect(this.reverbConvolver);
         audio.play().catch(() => {
           // Bundled file failed — fall back to FM synthesis
           this.usingBundledFile = false;
@@ -674,6 +707,10 @@ export class BgmPlayer {
     if (this.usingBundledFile && this.bundledAudioEl) {
       this.bundledAudioEl.pause();
     }
+    if (this.usingBundledFile && this.bundledSourceNode) {
+      try { this.bundledSourceNode.stop(); } catch { /* already stopped */ }
+      this.bundledSourceNode = null;
+    }
     if (this.schedulerTimer) { clearInterval(this.schedulerTimer); this.schedulerTimer = null; }
     if (this.masterGain && this.audioCtx) {
       this.masterGain.gain.cancelScheduledValues(this.audioCtx.currentTime);
@@ -696,6 +733,20 @@ export class BgmPlayer {
     if (this.usingBundledFile && this.bundledAudioEl) {
       this.bundledAudioEl.play().catch(() => {});
       return;
+    }
+    if (this.usingBundledFile && this.currentBundledTrack) {
+      // Restart from cached AudioBuffer after pause/stop
+      const cachedBuffer = getCachedBgmBuffer(this.currentBundledTrack.id);
+      if (cachedBuffer && this.dryGain && this.reverbConvolver) {
+        const sourceNode = ctx.createBufferSource();
+        sourceNode.buffer = cachedBuffer;
+        sourceNode.loop = true;
+        sourceNode.connect(this.dryGain);
+        sourceNode.connect(this.reverbConvolver);
+        sourceNode.start();
+        this.bundledSourceNode = sourceNode;
+        return;
+      }
     }
     if (this.schedulerTimer) { clearInterval(this.schedulerTimer); this.schedulerTimer = null; }
     this.nextNoteTime = ctx.currentTime + 0.05;
@@ -723,6 +774,10 @@ export class BgmPlayer {
       this.bundledAudioEl.pause();
       this.bundledAudioEl = null;
     }
+    if (this.bundledSourceNode) {
+      try { this.bundledSourceNode.stop(); } catch { /* already stopped */ }
+      this.bundledSourceNode = null;
+    }
     this.usingBundledFile = false;
     this.currentBundledTrack = null;
     if (this.schedulerTimer) { clearInterval(this.schedulerTimer); this.schedulerTimer = null; }
@@ -746,6 +801,7 @@ export class BgmPlayer {
   dispose(): void {
     this.stop();
     if (this.bundledAudioEl) { this.bundledAudioEl.pause(); this.bundledAudioEl = null; }
+    if (this.bundledSourceNode) { try { this.bundledSourceNode.stop(); } catch { /* ignore */ } this.bundledSourceNode = null; }
     if (this.wowFlutterLfo) { try { this.wowFlutterLfo.stop(); } catch { /* ignore */ } this.wowFlutterLfo = null; this.wowFlutterGain = null; }
     if (this.audioCtx) {
       try { this.audioCtx.close(); } catch { /* ignore */ }

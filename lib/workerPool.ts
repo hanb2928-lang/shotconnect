@@ -7,7 +7,6 @@ type WorkerTask =
   | { type: 'luminance'; video: HTMLVideoElement; region: 'top' | 'center' | 'bottom' }
   | { type: 'cropSubject'; dataUrl: string };
 
-let workerInstance: Worker | null = null;
 let workerAvailable = false;
 
 try {
@@ -15,6 +14,10 @@ try {
 } catch {
   workerAvailable = false;
 }
+
+const POOL_SIZE = Math.min(4, typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+  ? Math.max(1, Math.floor(navigator.hardwareConcurrency / 2))
+  : 2);
 
 const workerCode = `
 self.onmessage = async (e) => {
@@ -113,59 +116,84 @@ self.onmessage = async (e) => {
 };
 `;
 
-const blobUrlCache: string | null = null;
+interface PoolWorker {
+  worker: Worker;
+  pending: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+}
 
-function getWorker(): Worker | null {
-  if (!workerAvailable) return null;
-  if (workerInstance) return workerInstance;
+let pool: PoolWorker[] = [];
+let blobUrlCache: string | null = null;
+let rrIndex = 0;
+
+function createPoolWorker(blobUrl: string): PoolWorker | null {
   try {
-    const blob = new Blob([workerCode], { type: 'application/javascript' });
-    const url = blobUrlCache ?? URL.createObjectURL(blob);
-    workerInstance = new Worker(url);
-    return workerInstance;
+    const worker = new Worker(blobUrl);
+    const pw: PoolWorker = { worker, pending: new Map() };
+    worker.onmessage = (e: MessageEvent) => {
+      const { id, result, error } = e.data;
+      const task = pw.pending.get(id);
+      if (task) {
+        pw.pending.delete(id);
+        if (error) task.reject(new Error(error));
+        else task.resolve(result);
+      }
+    };
+    worker.onerror = () => {
+      pw.pending.forEach((task) => task.reject(new Error('Worker error')));
+      pw.pending.clear();
+    };
+    return pw;
   } catch {
     return null;
   }
 }
 
-const pendingTasks = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-let nextTaskId = 0;
-
-function dispatchToWorker<T>(payload: Record<string, unknown>, transfer?: Transferable[]): Promise<T> {
-  const worker = getWorker();
-  if (!worker) return Promise.reject(new Error('Worker pool unavailable'));
-  const id = ++nextTaskId;
-  return new Promise<T>((resolve, reject) => {
-    pendingTasks.set(id, { resolve: resolve as (v: unknown) => void, reject });
-    worker.postMessage({ id, ...payload }, transfer ?? []);
-  });
-}
-
-if (workerAvailable) {
+function initPool(): void {
+  if (pool.length > 0 || !workerAvailable) return;
   try {
-    const worker = getWorker();
-    if (worker) {
-      worker.onmessage = (e: MessageEvent) => {
-        const { id, result, error } = e.data;
-        const task = pendingTasks.get(id);
-        if (task) {
-          pendingTasks.delete(id);
-          if (error) task.reject(new Error(error));
-          else task.resolve(result);
-        }
-      };
-      worker.onerror = () => {
-        pendingTasks.forEach((task) => task.reject(new Error('Worker error')));
-        pendingTasks.clear();
-      };
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    blobUrlCache = URL.createObjectURL(blob);
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const pw = createPoolWorker(blobUrlCache);
+      if (pw) pool.push(pw);
+    }
+    if (pool.length === 0) {
+      workerAvailable = false;
     }
   } catch {
     workerAvailable = false;
   }
 }
 
+if (workerAvailable) {
+  initPool();
+}
+
+function getPoolWorker(): PoolWorker | null {
+  if (!workerAvailable || pool.length === 0) return null;
+  const pw = pool[rrIndex % pool.length];
+  rrIndex = (rrIndex + 1) % pool.length;
+  return pw;
+}
+
+function dispatchToWorker<T>(payload: Record<string, unknown>, transfer?: Transferable[]): Promise<T> {
+  const pw = getPoolWorker();
+  if (!pw) return Promise.reject(new Error('Worker pool unavailable'));
+  const id = ++nextTaskId;
+  return new Promise<T>((resolve, reject) => {
+    pw.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+    pw.worker.postMessage({ id, ...payload }, transfer ?? []);
+  });
+}
+
+let nextTaskId = 0;
+
 export function isWorkerPoolAvailable(): boolean {
-  return workerAvailable && getWorker() !== null;
+  return workerAvailable && pool.length > 0;
+}
+
+export function getWorkerPoolSize(): number {
+  return pool.length;
 }
 
 export async function compressImageInWorker(
@@ -182,6 +210,17 @@ export async function encodeBase64InWorker(buffer: ArrayBuffer): Promise<string>
 
 export async function cropToSubjectInWorker(dataUrl: string): Promise<string> {
   return dispatchToWorker<string>({ type: 'cropSubject', payload: { dataUrl } });
+}
+
+export async function compressImageBatchInWorker(
+  images: { dataUrl: string; maxDimension: number; quality: number }[],
+): Promise<string[]> {
+  if (!isWorkerPoolAvailable()) {
+    return Promise.reject(new Error('Worker pool unavailable'));
+  }
+  return Promise.all(
+    images.map((img) => compressImageInWorker(img.dataUrl, img.maxDimension, img.quality)),
+  );
 }
 
 export async function sampleLuminanceInWorker(

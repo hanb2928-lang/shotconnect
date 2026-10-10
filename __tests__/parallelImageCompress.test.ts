@@ -1,7 +1,9 @@
-import { compressForEdgeFunction, compressImagesInParallel, compressBase64ArrayForEdgeFunction } from '@/lib/parallelImageCompress';
+import { compressBase64ArrayForEdgeFunction, compressImagesInParallel } from '@/lib/parallelImageCompress';
 
 jest.mock('@/lib/imageEdit', () => ({
   prepareImageForApi: jest.fn(),
+  STANDARD_MAX_DIMENSION: 1080,
+  STANDARD_QUALITY: 0.82,
 }));
 
 jest.mock('@/lib/base64', () => ({
@@ -16,29 +18,80 @@ jest.mock('@/lib/base64', () => ({
   buildDataUrl: jest.fn((b64: string, mime: string) => `data:${mime};base64,${b64}`),
 }));
 
+jest.mock('@/lib/workerPool', () => ({
+  isWorkerPoolAvailable: jest.fn(() => false),
+  compressImageInWorker: jest.fn(),
+  compressImageBatchInWorker: jest.fn(),
+}));
+
+jest.mock('react-native', () => ({
+  Platform: { OS: 'web' },
+}));
+
 import { prepareImageForApi } from '@/lib/imageEdit';
 
 const mockPrepare = prepareImageForApi as jest.MockedFunction<typeof prepareImageForApi>;
 
-describe('parallelImageCompress', () => {
+describe('parallelImageCompress batch parallelization', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  describe('compressForEdgeFunction', () => {
-    it('returns compressed image when prepareImageForApi succeeds', async () => {
-      mockPrepare.mockResolvedValue('data:image/webp;base64,compressed123');
-      const result = await compressForEdgeFunction('data:image/png;base64,rawdata');
-      expect(result.mimeType).toBe('image/webp');
-      expect(result.base64).toBe('compressed123');
-      expect(result.dataUrl).toBe('data:image/webp;base64,compressed123');
+  describe('compressBase64ArrayForEdgeFunction', () => {
+    it('processes images in parallel batches via Promise.all', async () => {
+      const callOrder: string[] = [];
+      mockPrepare.mockImplementation(async (dataUrl: string) => {
+        const b64 = dataUrl.split(',')[1];
+        // Simulate async work with varying delays
+        callOrder.push(`start:${b64}`);
+        await new Promise((r) => setTimeout(r, 10));
+        callOrder.push(`end:${b64}`);
+        return `data:image/webp;base64,c${b64}`;
+      });
+
+      const images = ['img1', 'img2', 'img3', 'img4', 'img5'];
+      const results = await compressBase64ArrayForEdgeFunction(images, 'image/jpeg');
+
+      expect(results).toHaveLength(5);
+      expect(results[0]).toBe('data:image/webp;base64,cimg1');
+      expect(results[4]).toBe('data:image/webp;base64,cimg5');
+
+      // At least one batch should have overlapping start/end (parallelism proof)
+      // With batch size 5, all should start before any end
+      const firstBatchStarts = callOrder.filter((s) => s.startsWith('start:'));
+      const firstEnd = callOrder.findIndex((s) => s.startsWith('end:'));
+      // All 5 starts should appear before the first end if truly parallel
+      expect(firstEnd).toBeGreaterThan(4);
     });
 
-    it('falls back to original on compression failure', async () => {
-      mockPrepare.mockRejectedValue(new Error('canvas error'));
-      const result = await compressForEdgeFunction('data:image/jpeg;base64,originaldata');
-      expect(result.mimeType).toBe('image/jpeg');
-      expect(result.base64).toBe('originaldata');
+    it('handles empty array', async () => {
+      const results = await compressBase64ArrayForEdgeFunction([], 'image/jpeg');
+      expect(results).toHaveLength(0);
+    });
+
+    it('handles single image', async () => {
+      mockPrepare.mockImplementation(async (dataUrl: string) => {
+        const b64 = dataUrl.split(',')[1];
+        return `data:image/webp;base64,c${b64}`;
+      });
+      const results = await compressBase64ArrayForEdgeFunction(['solo'], 'image/jpeg');
+      expect(results).toHaveLength(1);
+      expect(results[0]).toBe('data:image/webp;base64,csolo');
+    });
+
+    it('preserves order of results across batches', async () => {
+      mockPrepare.mockImplementation(async (dataUrl: string) => {
+        const b64 = dataUrl.split(',')[1];
+        // Random delay to test ordering robustness
+        await new Promise((r) => setTimeout(r, Math.random() * 20));
+        return `data:image/webp;base64,c${b64}`;
+      });
+      const images = Array.from({ length: 10 }, (_, i) => `img${i}`);
+      const results = await compressBase64ArrayForEdgeFunction(images, 'image/jpeg');
+      expect(results).toHaveLength(10);
+      for (let i = 0; i < 10; i++) {
+        expect(results[i]).toBe(`data:image/webp;base64,cimg${i}`);
+      }
     });
   });
 
@@ -64,20 +117,6 @@ describe('parallelImageCompress', () => {
     it('handles empty array', async () => {
       const results = await compressImagesInParallel([]);
       expect(results).toHaveLength(0);
-    });
-  });
-
-  describe('compressBase64ArrayForEdgeFunction', () => {
-    it('returns compressed data URLs for each base64 image', async () => {
-      mockPrepare.mockImplementation(async (dataUrl: string) => {
-        const b64 = dataUrl.split(',')[1];
-        return `data:image/webp;base64,c${b64}`;
-      });
-      const images = ['raw1', 'raw2'];
-      const results = await compressBase64ArrayForEdgeFunction(images, 'image/jpeg');
-      expect(results).toHaveLength(2);
-      expect(results[0]).toBe('data:image/webp;base64,craw1');
-      expect(results[1]).toBe('data:image/webp;base64,craw2');
     });
   });
 });

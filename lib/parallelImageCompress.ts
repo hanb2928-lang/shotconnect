@@ -80,13 +80,27 @@ export async function compressBase64ArrayForEdgeFunction(
   maxDimension = EDGE_FN_MAX_DIMENSION,
   quality = EDGE_FN_QUALITY,
 ): Promise<string[]> {
-  // Process one at a time on native to avoid building all data URLs + all
-  // compressed results simultaneously, which doubles memory for N images.
+  if (base64Images.length === 0) return [];
+
+  // On web, process in parallel batches via Promise.all so multiple images
+  // compress concurrently across the worker pool — up to 2x faster for
+  // multi-cut uploads and 3D auto-capture batches.
+  // On native, process in smaller batches to avoid memory pressure from
+  // holding all data URLs + compressed results simultaneously.
+  const batchSize = Platform.OS === 'web' ? PARALLEL_BATCH_SIZE : 2;
   const results: string[] = [];
-  for (let i = 0; i < base64Images.length; i++) {
-    const dataUrl = buildDataUrl(base64Images[i], mimeType);
-    const compressed = await compressForEdgeFunction(dataUrl, maxDimension, quality);
-    results.push(compressed.dataUrl);
+
+  for (let i = 0; i < base64Images.length; i += batchSize) {
+    const batch = base64Images.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map((b64) => {
+        const dataUrl = buildDataUrl(b64, mimeType);
+        return compressForEdgeFunction(dataUrl, maxDimension, quality).then(
+          (c) => c.dataUrl,
+        );
+      }),
+    );
+    results.push(...batchResults);
   }
   return results;
 }

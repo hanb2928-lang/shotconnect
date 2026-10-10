@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import type { EditSegment, ShortFormEditPlan } from './shortFormEditEngine';
+import { getOrComputeSubtitleStyle } from './assetPreloader';
 
 export type LuminanceLevel = 'dark' | 'bright' | 'medium';
 
@@ -31,6 +32,16 @@ export function classifyLuminance(luminance: number): LuminanceLevel {
 }
 
 export function getCaptionStyle(
+  luminance: LuminanceLevel,
+  position: EditSegment['position'],
+  containerWidth: number,
+): CaptionStyle {
+  return getOrComputeSubtitleStyle(luminance, position, containerWidth, () =>
+    computeCaptionStyle(luminance, position, containerWidth),
+  );
+}
+
+function computeCaptionStyle(
   luminance: LuminanceLevel,
   position: EditSegment['position'],
   containerWidth: number,
