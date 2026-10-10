@@ -9,8 +9,6 @@ const STALE_JOB_MS = 30 * 60 * 1000;
 
 export interface ActiveTextureJob {
   jobId: string;
-  modelImageUrl: string;
-  textureSourceUrl: string;
   mode: string;
   progress: number;
   startedAt: number;
@@ -24,8 +22,6 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function isValidActiveTextureJob(raw: unknown): raw is ActiveTextureJob {
   if (!isPlainObject(raw)) return false;
   if (typeof raw.jobId !== 'string' || raw.jobId.length === 0) return false;
-  if (typeof raw.modelImageUrl !== 'string') return false;
-  if (typeof raw.textureSourceUrl !== 'string') return false;
   if (typeof raw.mode !== 'string') return false;
   if (typeof raw.progress !== 'number' || !isFinite(raw.progress)) return false;
   if (typeof raw.startedAt !== 'number' || !isFinite(raw.startedAt)) return false;
@@ -35,8 +31,6 @@ function isValidActiveTextureJob(raw: unknown): raw is ActiveTextureJob {
 
 export async function saveActiveTextureJob(
   jobId: string,
-  modelImageUrl: string,
-  textureSourceUrl: string,
   mode: string,
 ): Promise<void> {
   if (clearGeneration > saveGeneration) return;
@@ -44,8 +38,6 @@ export async function saveActiveTextureJob(
   const now = Date.now();
   const data: ActiveTextureJob = {
     jobId,
-    modelImageUrl,
-    textureSourceUrl,
     mode,
     progress: 0,
     startedAt: now,

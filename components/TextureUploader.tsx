@@ -78,7 +78,7 @@ export function TextureUploader({
   // When jobId or progress changes, persist to local storage
   useEffect(() => {
     if (jobId && status === 'processing') {
-      saveActiveTextureJob(jobId, modelImageUrl ?? '', textureSourceUrl ?? '', mode);
+      saveActiveTextureJob(jobId, mode);
     }
   }, [jobId, status, modelImageUrl, textureSourceUrl, mode]);
 

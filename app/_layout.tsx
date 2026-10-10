@@ -46,6 +46,7 @@ import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
 import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { supabase } from '@/lib/supabase';
 import { armFlushWindow } from '@/lib/foregroundFlushGuard';
 
 installGlobalErrorHandlers();
@@ -188,11 +189,17 @@ export default function RootLayout() {
     const unsubFlush = registerAppStateHandler('immediate', (nextState: string) => {
       if (nextState === 'active') armFlushWindow();
     });
+    const unsubSocketReset = registerAppStateHandler('deferred', (nextState: string) => {
+      if (nextState === 'active') {
+        try { supabase.removeAllChannels(); } catch { /* ignore */ }
+      }
+    });
     const sub = AppState.addEventListener('change', (nextState: string) => {
       dispatchAppStateChange(nextState);
     });
     return () => {
       unsubFlush();
+      unsubSocketReset();
       sub.remove();
       cancelPendingDeferred();
     };

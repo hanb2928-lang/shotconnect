@@ -77,13 +77,20 @@ function processDeferredQueue(): void {
   deferredTimer = null;
   const task = deferredQueue.shift();
   if (!task) return;
+  const scheduleNext = () => {
+    if (deferredQueue.length > 0) {
+      deferredTimer = setTimeout(processDeferredQueue, 0);
+    }
+  };
   try {
-    task();
+    const result = task() as unknown;
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      (result as Promise<unknown>).then(scheduleNext, scheduleNext);
+    } else {
+      scheduleNext();
+    }
   } catch {
-    // Handler errors are non-fatal.
-  }
-  if (deferredQueue.length > 0) {
-    deferredTimer = setTimeout(processDeferredQueue, 0);
+    scheduleNext();
   }
 }
 
@@ -114,7 +121,7 @@ export function dispatchAppStateChange(nextState: string): void {
     if (entry.phase === 'deferred') {
       deferredQueue.push(() => {
         try {
-          entry.fn(nextState);
+          return entry.fn(nextState);
         } catch {
           // Non-fatal.
         }

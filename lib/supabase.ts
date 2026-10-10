@@ -59,23 +59,28 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  * Calling getSession() forces the client to resolve the current session
  * (refreshing if needed) so subsequent DB queries use a valid token.
  */
+let sessionPromise: Promise<void> | null = null;
+
 export async function ensureFreshSession(): Promise<void> {
-  try {
-    const { data } = await supabase.auth.getSession();
-    const session = data.session;
-    if (session?.expires_at) {
-      const nowSec = Math.floor(Date.now() / 1000);
-      // Refresh proactively when within 120s of expiry — the buffer
-      // absorbs small device-clock drift so we don't reject a still-valid
-      // token or miss the refresh window due to skew.
-      if (session.expires_at - nowSec <= 120) {
-        await supabase.auth.refreshSession().catch(() => {});
+  if (sessionPromise) return sessionPromise;
+  sessionPromise = (async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const session = data.session;
+      if (session?.expires_at) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (session.expires_at - nowSec <= 120) {
+          await supabase.auth.refreshSession().catch(() => {});
+        }
       }
+    } catch {
+      // Token refresh failure is non-fatal — the resume fetch will simply
+      // use whatever token is available and retry via the normal poll loop.
+    } finally {
+      sessionPromise = null;
     }
-  } catch {
-    // Token refresh failure is non-fatal — the resume fetch will simply
-    // use whatever token is available and retry via the normal poll loop.
-  }
+  })();
+  return sessionPromise;
 }
 
 export const ANALYSIS_FUNCTION_URL = `${supabaseUrl}/functions/v1/analyze-photo`;
