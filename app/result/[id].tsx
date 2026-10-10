@@ -103,7 +103,7 @@ import { TrendMatchCard } from '@/components/TrendMatchCard';
 import { AffiliatePromptBanner } from '@/components/AffiliatePromptBanner';
 import { AIStyleCard } from '@/components/AIStyleCard';
 import type { StyleRecommendation } from '@/lib/styleRecommend';
-import { getItem, setItem } from '@/lib/storage';
+import { getItem } from '@/lib/storage';
 import { FeatureTileGrid } from '@/components/FeatureTileGrid';
 import type { FeatureCategory, ScanMode, MediaType } from '@/components/FeatureTileGrid';
 import { subscribeToJob } from '@/lib/jobQueue';
@@ -537,7 +537,6 @@ export default function ResultScreen() {
   const muxedBlobUrlRef = useRef<string | null>(null);
   const nativeMuxInFlightRef = useRef(false);
   const muxAbortRef = useRef<AbortController | null>(null);
-  const MUX_SNAPSHOT_KEY = 'mux_snapshot';
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
@@ -877,6 +876,7 @@ export default function ResultScreen() {
   const activeHookRef = useRef('');
   const styleApplyCounter = useRef(0);
   const handleJobUpdateRef = useRef<((job: RenderJob) => void) | null>(null);
+  const appStateHandlersRef = useRef<Set<(nextState: string) => void>>(new Set());
 
   const triggerTtsGeneration = useCallback(async (scanId: string): Promise<boolean> => {
     const tdDirect = scan?.template_data as { hook?: string; platformVariants?: Record<string, { hook?: string }> } | undefined;
@@ -1022,6 +1022,29 @@ export default function ResultScreen() {
       }
     }
 
+    // Hand & Object Physics constraints: prevent AI from generating
+    // physically implausible hand-object interactions (finger morphing,
+    // complex grips, joint warping) that look uncanny in product videos.
+    videoPromptText += '. [Constraint: Hand & Object Physics] Strictly minimize direct gripping or complex hand-object interaction. Prevent finger morphing, warping, or overlapping artifacts. Prioritize clean product-only turnaround shots or simple, rigid hand placements.';
+    videoPromptText += '. [Constraint: Motion Stability] Limit each clip to a single, continuous, and simple camera movement (e.g., slow zoom-in or steady horizontal pan). Do not combine sudden hand movements with rapid camera rotations. Maintain high consistency in product geometry across start and end frames.';
+
+    // Tone-specific dissonance reduction: studio premium tone avoids people
+    // and complex hand actions entirely; raw psychological-stimulus tone
+    // uses fast cuts to hide awkward hand motions and favors direct product
+    // demonstration over close-up hand shots.
+    if (isCleanVideoMode) {
+      videoPromptText += '. [Constraint: Studio Premium Tone] Exclude human figures and complex hand actions entirely. Use clean studio lighting, static or slow-pan product-centric angles, and neutral background to maximize perceived quality and minimize dissonance.';
+    } else {
+      videoPromptText += '. [Constraint: Raw Stimulus Tone] Use fast cut transitions to avoid lingering on awkward hand motions. Favor intuitive product demonstration shots over close-up hand interactions. Keep cuts under 1.5 seconds during hand-adjacent segments.';
+    }
+
+    // Reinforce via negative prompt: append physics artifact terms so the
+    // model actively avoids generating them.
+    const physicsNegativeTerms = 'finger morphing, hand warping, joint deformation, overlapping fingers, distorted hands, impossible grip, finger fusion, frame collapse, multiple simultaneous motions, product geometry shift, sudden camera jerk';
+    const combinedNegative = negativePrompt.trim()
+      ? `${negativePrompt.trim()}, ${physicsNegativeTerms}`
+      : physicsNegativeTerms;
+
     // Trigger TTS generation in parallel with video generation so narration is ready when video completes
     if (!isCleanVideoMode) {
       triggerTtsGeneration(scan.id).then((ok) => {
@@ -1055,7 +1078,7 @@ export default function ResultScreen() {
           productVision: visionData,
           isCleanVideoMode,
           promptStrength,
-          negativePrompt: negativePrompt.trim() || undefined,
+          negativePrompt: combinedNegative || undefined,
           bgStyle: bgStyle === '자동' ? undefined : bgStyle,
           outfitIntensity: outfitIntensity === 3 ? undefined : outfitIntensity,
           zoomSpeed: zoomSpeed === 2 ? undefined : zoomSpeed,
@@ -1188,7 +1211,7 @@ export default function ResultScreen() {
             productVision: visionData,
             isCleanVideoMode,
             promptStrength,
-            negativePrompt: negativePrompt.trim() || undefined,
+            negativePrompt: combinedNegative || undefined,
             bgStyle: bgStyle === '자동' ? undefined : bgStyle,
             outfitIntensity: outfitIntensity === 3 ? undefined : outfitIntensity,
             zoomSpeed: zoomSpeed === 2 ? undefined : zoomSpeed,
@@ -1545,6 +1568,20 @@ export default function ResultScreen() {
     };
   }, []);
 
+  // Single AppState coordinator: one native listener dispatches to all
+  // handlers registered in appStateHandlersRef. This replaces 5 separate
+  // AppState.addEventListener calls that caused a thundering herd on
+  // every foreground transition.
+  useEffect(() => {
+    if (typeof AppState.addEventListener !== 'function') return;
+    const sub = AppState.addEventListener('change', (nextAppState: string) => {
+      appStateHandlersRef.current.forEach((h) => {
+        try { h(nextAppState); } catch { /* handler error is non-fatal */ }
+      });
+    });
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     fetchScan();
   }, [fetchScan]);
@@ -1578,31 +1615,29 @@ export default function ResultScreen() {
   // Re-check TTS URL when app returns to foreground
   useEffect(() => {
     if (!scan || scan.tts_url || ttsUrl) return;
-    let subscription: { remove: () => void } | null = null;
     let ttsFgAbort: AbortController | null = null;
-    if (typeof AppState.addEventListener === 'function') {
-      subscription = AppState.addEventListener('change', (nextAppState: string) => {
-        if (nextAppState === 'active' && mountedRef.current) {
-          ttsFgAbort?.abort();
-          ttsFgAbort = new AbortController();
-          Promise.resolve(
-            supabase
-              .from('scans')
-              .select('tts_url')
-              .eq('id', scan.id)
-              .maybeSingle()
-          ).then(({ data }) => {
-            if (ttsFgAbort?.signal.aborted) return;
-            if (data?.tts_url && mountedRef.current) {
-              setTtsUrl(data.tts_url);
-            }
-          }).catch(() => {});
-        }
-      });
-    }
+    const handler = (nextAppState: string) => {
+      if (nextAppState === 'active' && mountedRef.current) {
+        ttsFgAbort?.abort();
+        ttsFgAbort = new AbortController();
+        Promise.resolve(
+          supabase
+            .from('scans')
+            .select('tts_url')
+            .eq('id', scan.id)
+            .maybeSingle()
+        ).then(({ data }) => {
+          if (ttsFgAbort?.signal.aborted) return;
+          if (data?.tts_url && mountedRef.current) {
+            setTtsUrl(data.tts_url);
+          }
+        }).catch(() => {});
+      }
+    };
+    appStateHandlersRef.current.add(handler);
     return () => {
       ttsFgAbort?.abort();
-      subscription?.remove();
+      appStateHandlersRef.current.delete(handler);
     };
   }, [scan, ttsUrl]);
 
@@ -1917,7 +1952,7 @@ export default function ResultScreen() {
         }
       }
     };
-    const appSub = AppState.addEventListener('change', handleAppState);
+    appStateHandlersRef.current.add(handleAppState);
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -1925,7 +1960,7 @@ export default function ResultScreen() {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
       bgVideoChannelRef.current = null;
-      appSub.remove();
+      appStateHandlersRef.current.delete(handleAppState);
       unsubRecovery();
     };
   }, [scan, activePlatform]);
@@ -1936,14 +1971,14 @@ export default function ResultScreen() {
   // On web: uses client-side Canvas/MediaRecorder muxing.
   // On native: calls the mux-video-audio edge function (server-side ffmpeg.wasm).
   //
-  // Three defenses protect this phase:
-  // 1. Pipeline mutex lock: prevents the 92% muxing phase from overlapping
-  //    with polling timers or UI state updates that could cause re-entrancy.
-  // 2. AppState background disposal: when the app is backgrounded mid-mux,
-  //    the mux is aborted and progress is snapshotted to AsyncStorage. On
-  //    foreground, the snapshot is read and the mux is retried from scratch
-  //    (the server-side idempotency guard ensures no duplicate work).
-  // 3. 720p hard cap: the canvas is always 720p max (see videoAudioMuxer).
+  // CRITICAL: This effect's dependency array must NOT include muxProgress.
+  // Including muxProgress causes React to re-run the effect on every progress
+  // update, which runs the cleanup function (setting cancelled=true, aborting
+  // the mux), then re-enters the effect body which hits `if (isMuxing) return`
+  // (isMuxing is still true because the async mux hasn't reached its finally
+  // block). This leaves isMuxing permanently stuck true and the mux can never
+  // complete. Every AppState foreground handler then restarts the dead mux,
+  // leaking canvas/audio/MediaRecorder resources on each cycle until OOM.
   useEffect(() => {
     if (!generatedVideoUrl || !ttsUrl) return;
     if (isMuxing) return;
@@ -1952,52 +1987,18 @@ export default function ResultScreen() {
 
     let cancelled = false;
 
-    // Defense 3: Acquire pipeline lock to prevent polling/UI overlap.
-    // If the lock is held by another owner (e.g. video generation), skip
-    // — the effect will re-fire when isMuxing flips back to false.
+    // Acquire pipeline lock to prevent polling/UI overlap.
     if (!acquirePipelineLock('mux')) return;
 
-    // Defense 2: AppState listener — abort mux on background, snapshot
-    // progress, and restore on foreground.
     const handleMuxAppState = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
-        // Snapshot current mux state for foreground restore
-        const snapshot = {
-          pairKey,
-          muxProgress,
-          scanId: scan?.id ?? null,
-          savedAt: Date.now(),
-        };
-        setItem(MUX_SNAPSHOT_KEY, JSON.stringify(snapshot)).catch(() => {});
-        // Abort the in-flight mux — the AbortController triggers cleanup
-        // in videoAudioMuxer, releasing canvas, audio context, and worker.
         if (muxAbortRef.current) {
           muxAbortRef.current.abort();
           muxAbortRef.current = null;
         }
-      } else if (nextState === 'active') {
-        // Read snapshot and retry if the pair wasn't completed
-        getItem(MUX_SNAPSHOT_KEY).then((raw) => {
-          if (!raw || cancelled) return;
-          try {
-            const snap = JSON.parse(raw) as { pairKey: string; savedAt: number };
-          // Only retry if the snapshot matches the current pair and is
-          // recent (within 5 minutes). Stale snapshots are cleared.
-          if (snap.pairKey === pairKey && Date.now() - snap.savedAt < 5 * 60 * 1000) {
-            // Reset muxDoneRef so the effect re-fires and retries
-            muxDoneRef.current = null;
-            setIsMuxing(false);
-          }
-          } catch { /* corrupted snapshot */ }
-          // Clear the snapshot regardless
-          setItem(MUX_SNAPSHOT_KEY, '').catch(() => {});
-        }).catch(() => {});
       }
     };
-    let appSub: { remove: () => void } | null = null;
-    if (typeof AppState.addEventListener === 'function') {
-      appSub = AppState.addEventListener('change', handleMuxAppState);
-    }
+    appStateHandlersRef.current.add(handleMuxAppState);
 
     if (Platform.OS === 'web') {
       // Create abort controller for this mux session
@@ -2041,6 +2042,8 @@ export default function ResultScreen() {
 
         try {
           const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
+            // Update progress state directly — this does NOT re-run this
+            // effect because muxProgress is NOT in the dependency array.
             if (!cancelled) setMuxProgress(p.progress);
           }, abortController.signal);
           if (!result || cancelled) {
@@ -2093,12 +2096,6 @@ export default function ResultScreen() {
       })();
     } else {
       // Native: call server-side mux edge function.
-      // Dedup guard: prevent overlapping invocations when the effect
-      // re-fires due to Realtime updates or AppState changes. The
-      // server-side function has its own idempotency check (returns
-      // cached result if muxed_video_url already exists), but this
-      // client-side guard prevents duplicate network round-trips and
-      // race conditions where two concurrent responses update state.
       if (nativeMuxInFlightRef.current) return;
       nativeMuxInFlightRef.current = true;
       muxDoneRef.current = pairKey;
@@ -2120,9 +2117,6 @@ export default function ResultScreen() {
 
           if (invokeError || !data || data.error) {
             const errMsg = data?.error || invokeError?.message || '나레이션 합성에 실패했습니다.';
-            // Don't reset muxDoneRef — this prevents retry storms when
-            // the server is temporarily unavailable. The user can
-            // manually retry by navigating away and back.
             setMuxError(errMsg);
             return;
           }
@@ -2152,9 +2146,9 @@ export default function ResultScreen() {
         muxAbortRef.current.abort();
         muxAbortRef.current = null;
       }
-      if (appSub) appSub.remove();
+      appStateHandlersRef.current.delete(handleMuxAppState);
     };
-  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id, muxProgress]);
+  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id]);
 
   // Realtime subscription on the scans row itself: when the background
   // stereo pipeline (or any other background task) writes text data
@@ -2249,14 +2243,14 @@ export default function ResultScreen() {
         }
       }
     };
-    const appSub = AppState.addEventListener('change', handleAppState);
+    appStateHandlersRef.current.add(handleAppState);
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
-      appSub.remove();
+      appStateHandlersRef.current.delete(handleAppState);
       unsubRecovery();
     };
   }, [scan?.id]);
@@ -2363,32 +2357,30 @@ export default function ResultScreen() {
     if (!scan?.analysis_job_id) return;
     if (analysisStatus !== 'processing') return;
 
-    let subscription: { remove: () => void } | null = null;
     let fgAbort: AbortController | null = null;
-    if (typeof AppState.addEventListener === 'function') {
-      subscription = AppState.addEventListener('change', (nextAppState: string) => {
-        if (nextAppState === 'active' && mountedRef.current) {
-          fgAbort?.abort();
-          fgAbort = new AbortController();
-          Promise.resolve(
-            supabase
-              .from('render_jobs')
-              .select('*')
-              .eq('id', scan.analysis_job_id!)
-              .maybeSingle()
-          ).then(({ data }) => {
-            if (fgAbort?.signal.aborted) return;
-            if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
-              handleJobUpdateRef.current?.(data as RenderJob);
-            }
-          }).catch(() => {});
-        }
-      });
-    }
+    const handler = (nextAppState: string) => {
+      if (nextAppState === 'active' && mountedRef.current) {
+        fgAbort?.abort();
+        fgAbort = new AbortController();
+        Promise.resolve(
+          supabase
+            .from('render_jobs')
+            .select('*')
+            .eq('id', scan.analysis_job_id!)
+            .maybeSingle()
+        ).then(({ data }) => {
+          if (fgAbort?.signal.aborted) return;
+          if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
+            handleJobUpdateRef.current?.(data as RenderJob);
+          }
+        }).catch(() => {});
+      }
+    };
+    appStateHandlersRef.current.add(handler);
 
     return () => {
       fgAbort?.abort();
-      subscription?.remove();
+      appStateHandlersRef.current.delete(handler);
     };
   }, [scan?.analysis_job_id, analysisStatus]);
 

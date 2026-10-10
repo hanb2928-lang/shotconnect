@@ -70,25 +70,10 @@ scheduleIdle(() => {
 // GC sweeps run after the app is fully interactive. They clean up
 // orphaned Blob URLs, temp files, stale IndexedDB media cache, and
 // stale LocalStorage offline cache from previous sessions.
-scheduleIdle(() => {
-  sweepTempFiles().catch(() => {});
-  sweepStaleOfflineCache().catch(() => {});
-  runBootSweep().catch(() => {});
-});
-
-if (Platform.OS === 'web' && typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      sweepTempFiles().catch(() => {});
-      sweepStaleOfflineCache().catch(() => {});
-    }
-  });
-} else if (Platform.OS !== 'web') {
-  const RUNTIME_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
-  setInterval(() => {
-    sweepTempFiles().catch(() => {});
-  }, RUNTIME_SWEEP_INTERVAL_MS);
-}
+// NOTE: The runtime sweep listeners (visibilitychange on web, interval
+// on native) are registered inside RootLayout's useEffect so they have
+// proper cleanup. Registering them at module scope caused listener
+// accumulation across Fast Refresh / module re-evaluations.
 
 SplashScreen.preventAutoHideAsync();
 
@@ -315,6 +300,37 @@ export default function RootLayout() {
     sweepTempFiles().catch(() => {});
     sweepStaleOfflineCache().catch(() => {});
   });
+
+  // Runtime sweeps: register lifecycle-aware cleanup listeners inside a
+  // useEffect so they are properly removed on unmount and never accumulate
+  // across module re-evaluations. On web, a visibilitychange listener
+  // sweeps when the tab is hidden. On native, a 5-minute interval sweeps
+  // temp files periodically.
+  useEffect(() => {
+    // Initial sweep on mount
+    sweepTempFiles().catch(() => {});
+    sweepStaleOfflineCache().catch(() => {});
+    runBootSweep().catch(() => {});
+
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const onHidden = () => {
+        if (document.visibilityState === 'hidden') {
+          sweepTempFiles().catch(() => {});
+          sweepStaleOfflineCache().catch(() => {});
+        }
+      };
+      document.addEventListener('visibilitychange', onHidden);
+      return () => document.removeEventListener('visibilitychange', onHidden);
+    }
+
+    if (Platform.OS !== 'web') {
+      const RUNTIME_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+      const intervalId = setInterval(() => {
+        sweepTempFiles().catch(() => {});
+      }, RUNTIME_SWEEP_INTERVAL_MS);
+      return () => clearInterval(intervalId);
+    }
+  }, []);
 
   // Deep link handling
   useEffect(() => {
