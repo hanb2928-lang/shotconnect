@@ -1042,7 +1042,27 @@ function CameraScreenInner() {
             '카메라 캡처',
           );
           if (!isMountedRef.current) { multiAngleCaptureInProgressRef.current = false; return null; }
-          if (result?.base64) { multiAngleCaptureInProgressRef.current = false; return result; }
+          if (result?.url) {
+            multiAngleCaptureInProgressRef.current = false;
+            // Fetch the uploaded image and convert to base64 for the
+            // multi-angle capture interface. The image was already
+            // uploaded to Storage by captureFrame — this fetch is
+            // lightweight (compressed JPEG, typically <200KB).
+            try {
+              const resp = await fetch(result.url);
+              const blob = await resp.blob();
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(blob);
+              });
+              return { base64: cleanBase64(dataUrl), mimeType: result.mimeType };
+            } catch {
+              multiAngleCaptureInProgressRef.current = false;
+              return null;
+            }
+          }
         } catch {
           // Fall through to file picker
         }
@@ -1269,19 +1289,32 @@ function CameraScreenInner() {
     try {
     const isVideo = mimeType.startsWith('video/');
     if (isVideo) {
+      // payload is now a Storage URL, not base64 — no large binary
+      // traversing the RN bridge. Store the URL directly.
       setPostCaptureBase64(null);
       postCaptureBase64Ref.current = null;
       setPostCaptureMime(mimeType);
       postCaptureMimeRef.current = mimeType;
-      setPostCaptureVideoUri(`data:${mimeType};base64,${payload}`);
-      postCaptureVideoUriRef.current = `data:${mimeType};base64,${payload}`;
+      setPostCaptureVideoUri(payload);
+      postCaptureVideoUriRef.current = payload;
     } else {
+      // payload is a Storage URL for an image. Fetch it, compress, and
+      // store the compressed base64 for the post-capture workflow.
       try {
         const compressed = await new Promise<string>((resolve, reject) => {
           InteractionManager.runAfterInteractions(async () => {
             try {
+              // Fetch the uploaded image and prepare it for API
+              const resp = await fetch(payload);
+              const blob = await resp.blob();
+              const dataUrl = await new Promise<string>((resolve2, reject2) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve2(reader.result as string);
+                reader.onerror = () => reject2(reader.error);
+                reader.readAsDataURL(blob);
+              });
               const r = await prepareImageForApi(
-                buildDataUrl(cleanBase64(payload), mimeType),
+                dataUrl,
                 getDeviceCaptureMaxDim(),
                 isLowEndDevice() ? 0.6 : 0.7,
                 'none' as MoodFilterType,
@@ -1299,10 +1332,26 @@ function CameraScreenInner() {
         postCaptureMimeRef.current = mime;
       } catch {
         if (!isMountedRef.current) return;
-        setPostCaptureBase64(cleanBase64(payload));
-        postCaptureBase64Ref.current = cleanBase64(payload);
-        setPostCaptureMime(mimeType);
-        postCaptureMimeRef.current = mimeType;
+        // Fallback: fetch the URL and use the raw image
+        try {
+          const resp = await fetch(payload);
+          const blob = await resp.blob();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          const b64 = cleanBase64(dataUrl);
+          const mime = getMimeTypeFromDataUrl(dataUrl);
+          setPostCaptureBase64(b64);
+          postCaptureBase64Ref.current = b64;
+          setPostCaptureMime(mime);
+          postCaptureMimeRef.current = mime;
+        } catch {
+          if (isMountedRef.current) setError('촬영 이미지를 불러오지 못했습니다.');
+          return;
+        }
       }
       setPostCaptureVideoUri(null);
       postCaptureVideoUriRef.current = null;

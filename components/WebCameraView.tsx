@@ -5,22 +5,23 @@ import { theme } from '@/lib/theme';
 import { Camera, RotateCcw, Zap, X, Image as ImageIcon, Sparkles, Check, ShieldAlert, Video, Square } from 'lucide-react-native';
 import { cleanBase64, getMimeTypeFromDataUrl } from '@/lib/base64';
 import { debugSaveRawCapture, debugSaveNormalizedCapture } from '@/lib/debugCapture';
-import { startVideoRecording, stopVideoRecording, blobToBase64, type VideoRecordingResult } from '@/lib/videoRecorder';
+import { startVideoRecording, stopVideoRecording, type VideoRecordingResult } from '@/lib/videoRecorder';
 import { getSafeVideoConstraints, clampCaptureDimensions, CAPTURE_MAX_WIDTH } from '@/lib/captureConstraints';
 import { useCameraVisibilityRecovery } from '@/hooks/useCameraVisibilityRecovery';
+import { uploadBytesToStorage, uniqueSuffix } from '@/lib/imageEdit';
 
 export type CaptureModeType = 'single' | 'video';
 
 export interface WebCameraHandle {
-  captureFrame: () => Promise<{ base64: string; mimeType: string } | null>;
+  captureFrame: () => Promise<{ url: string; mimeType: string } | null>;
   isReady: () => boolean;
   startRecording: () => Promise<boolean>;
-  stopRecording: () => Promise<{ base64: string; mimeType: string } | null>;
+  stopRecording: () => Promise<{ url: string; mimeType: string } | null>;
   isRecording: () => boolean;
 }
 
 interface WebCameraViewProps {
-  onCapture: (base64: string, mimeType: string) => void;
+  onCapture: (url: string, mimeType: string) => void;
   onPickImage: () => void;
   isActive: boolean;
   safeTop: number;
@@ -232,7 +233,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     recordingPromiseRef.current = null;
   }, [captureMode]);
 
-  const captureFrame = useCallback(async (): Promise<string | null> => {
+  const captureFrame = useCallback(async (): Promise<{ url: string; mimeType: string } | null> => {
     if (!videoRef.current || !cameraReady || capturingRef.current) return null;
     capturingRef.current = true;
     setCapturing(true);
@@ -252,15 +253,34 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
         ctx.scale(-1, 1);
       }
       ctx.drawImage(video, 0, 0, w, h);
-      const compressed = canvas.toDataURL('image/jpeg', 0.7);
+      // Convert canvas to blob and upload directly to Storage — avoids
+      // base64-encoding the image and passing it through the RN bridge,
+      // which can cause IPC packet pointer invalidation on background.
+      const blob: Blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', 0.7);
+      });
       canvas.width = 0;
       canvas.height = 0;
       if (!mountedRef.current) return null;
-      const b64 = cleanBase64(compressed);
-      const mime = getMimeTypeFromDataUrl(compressed);
-      await debugSaveRawCapture(b64, mime, w, h, 'webcam-raw');
-      await debugSaveNormalizedCapture(b64, mime, w, h, 'webcam-normalized');
-      return `${mime}|${b64}`;
+      const fileName = `camera-${uniqueSuffix()}.jpg`;
+      const url = await uploadBytesToStorage(blob, 'scans', fileName, 'image/jpeg');
+      if (!mountedRef.current) return null;
+      // Keep debug capture for diagnostics — fetch the uploaded URL
+      try {
+        const debugResp = await fetch(url);
+        const debugBlob = await debugResp.blob();
+        const debugDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(debugBlob);
+        });
+        const b64 = cleanBase64(debugDataUrl);
+        const mime = getMimeTypeFromDataUrl(debugDataUrl);
+        await debugSaveRawCapture(b64, mime, w, h, 'webcam-raw');
+        await debugSaveNormalizedCapture(b64, mime, w, h, 'webcam-normalized');
+      } catch { /* debug capture is non-fatal */ }
+      return { url, mimeType: 'image/jpeg' };
     } catch {
       setError('촬영에 실패했습니다. 다시 시도해주세요.');
       return null;
@@ -310,7 +330,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     return true;
   }, [cameraReady, isRecording, facing, startStream, stopStream]);
 
-  const stopRecording = useCallback(async (): Promise<{ base64: string; mimeType: string } | null> => {
+  const stopRecording = useCallback(async (): Promise<{ url: string; mimeType: string } | null> => {
     if (!isRecording || !recorderRef.current || !recordingPromiseRef.current) return null;
     const recorder = recorderRef.current;
     const recordingPromise = recordingPromiseRef.current;
@@ -322,10 +342,10 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     try {
       const result = await recordingPromise;
       if (!mountedRef.current) return null;
-      // Yield before heavy base64 encoding so pending bridge messages
-      // and UI updates can flush — prevents ANR on native.
-      await new Promise<void>((r) => setTimeout(r, 0));
-      const { base64, mimeType } = await blobToBase64(result.blob);
+      // Upload the video blob directly to Storage — avoids base64-encoding
+      // a 40MB+ video and passing it through the RN bridge.
+      const fileName = `video-${uniqueSuffix()}.webm`;
+      const url = await uploadBytesToStorage(result.blob, 'scans', fileName, result.mimeType);
       if (!mountedRef.current) return null;
       isRecordingRef.current = false;
       setIsRecording(false);
@@ -338,7 +358,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
       if (hadAudio > 0) {
         await startStream(facing, false);
       }
-      return { base64, mimeType };
+      return { url, mimeType: result.mimeType };
     } catch {
       isRecordingRef.current = false;
       setIsRecording(false);
@@ -351,12 +371,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   }, [isRecording, facing, startStream]);
 
   useImperativeHandle(ref, () => ({
-    captureFrame: async () => {
-      const result = await captureFrame();
-      if (!result) return null;
-      const [mimeType, base64] = result.split('|');
-      return { base64, mimeType };
-    },
+    captureFrame,
     isReady: () => cameraReady,
     startRecording,
     stopRecording,
@@ -368,7 +383,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     if (isRecording) {
       const result = await stopRecording();
       if (result && mountedRef.current) {
-        onCapture(result.base64, result.mimeType);
+        onCapture(result.url, result.mimeType);
       }
     } else {
       await startRecording();
@@ -387,8 +402,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     }
     const result = await captureFrame();
     if (!result || !mountedRef.current) return;
-    const [mime, b64] = result.split('|');
-    onCapture(b64, mime);
+    onCapture(result.url, result.mimeType);
   }, [cameraReady, autoSaving, captureMode, captureFrame, onCapture, onMultiAnglePress, handleVideoCapture]);
 
   const handleConfirm = useCallback(() => {
