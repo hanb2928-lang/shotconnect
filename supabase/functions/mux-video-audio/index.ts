@@ -14,6 +14,8 @@ interface MuxRequest {
   audioUrl: string;
   scanId?: string;
   targetDurationSec?: number;
+  audioOffsetSec?: number;
+  audioDurationSec?: number;
 }
 
 Deno.serve(async (req: Request) => {
@@ -29,7 +31,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json() as MuxRequest;
-    const { videoUrl, audioUrl, scanId, targetDurationSec } = body;
+    const { videoUrl, audioUrl, scanId, targetDurationSec, audioOffsetSec, audioDurationSec } = body;
 
     if (!videoUrl || !audioUrl) {
       return new Response(
@@ -143,8 +145,49 @@ Deno.serve(async (req: Request) => {
       if (targetDurationSec && targetDurationSec > 0) {
         // Pad audio with silence to match the target duration, then cap
         // the output at exactly targetDurationSec.
+        // If audioOffsetSec is provided, delay the audio start with leading
+        // silence so narration aligns with the correct segment on the
+        // master timeline.
+        const offset = audioOffsetSec && audioOffsetSec > 0 ? audioOffsetSec : 0;
+        // Build audio filter chain: optionally delay audio start (adelay),
+        // optionally stretch/shrink to fit the narration window (atempo),
+        // then pad with silence to match the full target duration (apad).
+        const filterParts: string[] = [];
+        if (offset > 0) {
+          filterParts.push(`adelay=${Math.round(offset * 1000)}|${Math.round(offset * 1000)}`);
+        }
+        // If audioDurationSec is specified, use atempo to time-stretch or
+        // shrink the audio so it fills the narration window exactly. This
+        // prevents chunk timestamp desync in multi-cut shortform merges
+        // where individual TTS clips don't match their segment duration.
+        if (audioDurationSec && audioDurationSec > 0) {
+          const narrationWindow = targetDurationSec - offset;
+          if (narrationWindow > 0) {
+            // atempo accepts 0.5x–2.0x per filter; chain if outside that range
+            let tempo = audioDurationSec / narrationWindow;
+            const tempoFilters: string[] = [];
+            while (tempo > 2.0) {
+              tempoFilters.push("atempo=2.0");
+              tempo /= 2.0;
+            }
+            while (tempo < 0.5) {
+              tempoFilters.push("atempo=0.5");
+              tempo /= 0.5;
+            }
+            if (tempo > 0.85 && tempo < 1.15) {
+              // Within 15% — no adjustment needed
+            } else {
+              tempoFilters.push(`atempo=${tempo.toFixed(4)}`);
+            }
+            if (tempoFilters.length > 0) {
+              filterParts.push(...tempoFilters);
+            }
+          }
+        }
+        filterParts.push(`apad=whole_dur=${targetDurationSec}`);
+        const audioFilter = filterParts.join(",");
         ffmpegArgs.push(
-          "-af", `apad=whole_dur=${targetDurationSec}`,
+          "-af", audioFilter,
           "-t", String(targetDurationSec),
         );
       } else {

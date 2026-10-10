@@ -80,6 +80,8 @@ export interface ClipMergeInput {
   videoUrl: string;
   audioUrl: string;
   targetDurationSec?: number;
+  audioOffsetSec?: number;
+  audioDurationSec?: number;
 }
 
 export interface ClipMergeResult {
@@ -207,7 +209,7 @@ export async function mergeClipsSequentially(
           throw new Error('비디오 메타데이터 로딩 실패 (timeout)');
         }
 
-        const mux = await muxVideoWithAudio(clip.videoUrl, clip.audioUrl, clipProgress, currentAbort?.signal, clip.targetDurationSec);
+        const mux = await muxVideoWithAudio(clip.videoUrl, clip.audioUrl, clipProgress, currentAbort?.signal, clip.targetDurationSec, clip.audioOffsetSec, clip.audioDurationSec);
 
         if (mux) {
           clipResult = { id: clip.id, mux, attempts: attempt + 1 };

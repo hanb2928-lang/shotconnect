@@ -74,6 +74,8 @@ export async function muxVideoWithAudio(
   onProgress?: MuxProgressCallback,
   abortSignal?: AbortSignal,
   targetDurationSec?: number,
+  audioOffsetSec?: number,
+  audioDurationSec?: number,
 ): Promise<MuxResult | null> {
   if (typeof window === 'undefined') return null;
   if (typeof document === 'undefined') return null;
@@ -349,6 +351,27 @@ export async function muxVideoWithAudio(
     return null;
   }
 
+  // Chunk timestamp alignment: if audioDurationSec is provided, adjust the
+  // audio playback rate so the TTS narration fits exactly within its assigned
+  // window on the master timeline (targetDurationSec - audioOffset). Without
+  // this, a TTS clip that's shorter than expected leaves silence at the end
+  // of the segment, and one that's longer overruns into the next segment,
+  // causing caption/narration desync in multi-cut merges.
+  const audioOffset = audioOffsetSec && audioOffsetSec > 0 ? audioOffsetSec : 0;
+  if (audioDurationSec && audioDurationSec > 0 && isFinite(audio.duration) && audio.duration > 0) {
+    const expectedNarrationWindow = durationSec - audioOffset;
+    if (expectedNarrationWindow > 0) {
+      const rate = audio.duration / expectedNarrationWindow;
+      // Clamp playbackRate to 0.5x–2.0x to avoid chipmunk/drag effects
+      const clampedRate = Math.max(0.5, Math.min(2.0, rate));
+      if (clampedRate > 0.85 && clampedRate < 1.15) {
+        // Within 15% of normal — no adjustment needed, natural variation
+      } else {
+        try { audio.playbackRate = clampedRate; } catch { /* non-fatal */ }
+      }
+    }
+  }
+
   return new Promise<MuxResult | null>((resolve) => {
     let rafId: number | null = null;
     let startTime = 0;
@@ -601,20 +624,29 @@ export async function muxVideoWithAudio(
     };
 
     // Audio-first rendering lock: wait for both video and audio to actually
-    // begin playing before starting the recorder. This prevents the desync
-    // where the recorder captures video frames before audio playback begins,
-    // causing overlays and narration to be misaligned in the final output.
+    // begin playing before starting the recorder. If an audioOffsetSec is
+    // provided, the audio playback is delayed until the video reaches that
+    // point on the master timeline — the recorder starts with video only,
+    // and audio kicks in at the offset.
     const startPlayback = async () => {
-      const videoPlayPromise = video.play().catch(() => {});
-      const audioPlayPromise = audio.play().catch(() => {});
-      await Promise.all([videoPlayPromise, audioPlayPromise]);
-      // Both play() promises resolved (or were blocked by autoplay policy).
-      // Start the recorder now so capture begins at the same instant as
-      // playback. A single requestAnimationFrame call ensures the first
-      // frame is drawn before the first recorder tick.
-      startTime = performance.now();
-      recorder.start(100);
-      rafId = requestAnimationFrame(drawFrame);
+      if (audioOffset > 0) {
+        // Start video first, delay audio until the offset is reached
+        await video.play().catch(() => {});
+        startTime = performance.now();
+        recorder.start(100);
+        rafId = requestAnimationFrame(drawFrame);
+        // Schedule audio start at the offset point
+        setTimeout(() => {
+          audio.play().catch(() => {});
+        }, audioOffset * 1000);
+      } else {
+        const videoPlayPromise = video.play().catch(() => {});
+        const audioPlayPromise = audio.play().catch(() => {});
+        await Promise.all([videoPlayPromise, audioPlayPromise]);
+        startTime = performance.now();
+        recorder.start(100);
+        rafId = requestAnimationFrame(drawFrame);
+      }
     };
     void startPlayback();
 

@@ -360,29 +360,42 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
     }
   }, [isPlaying, currentSec, stop, effectiveBgmVolume]);
 
-  // Sync narration audio with video playback — start/stop narration when isPlaying changes
+  // Sync narration audio with video playback — narration starts at audioOffsetSec
+  // on the master timeline (the first segment that has TTS text), not at 0.
+  const narrationStartedRef = useRef(false);
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     if (!narrationAudioRef.current) return;
     const narrAudio = narrationAudioRef.current;
+    const offset = editPlan.audioOffsetSec ?? 0;
     if (isPlaying) {
-      narrAudio.currentTime = 0;
-      narrAudio.volume = 1.0;
-      narrAudio.muted = false;
-      narrAudio.play().catch((e) => {
-        console.error('Narration playback sync failed:', e);
-      });
-      // BGM ducking — 나레이션 재생 중 BGM 볼륨을 30%로 자동 낮춤
-      if (bgmPlayerRef.current && !narrationDuckedRef.current) {
-        narrationDuckedRef.current = true;
-        bgmPlayerRef.current.setVolume(bgmVolume * 0.3);
+      if (offset > 0 && currentSec < offset) {
+        // Before the narration start point — keep narration paused
+        narrationStartedRef.current = false;
+        narrAudio.pause();
+        narrAudio.currentTime = 0;
+        return;
+      }
+      if (!narrationStartedRef.current) {
+        narrationStartedRef.current = true;
+        narrAudio.currentTime = 0;
+        narrAudio.volume = 1.0;
+        narrAudio.muted = false;
+        narrAudio.play().catch((e) => {
+          console.error('Narration playback sync failed:', e);
+        });
+        if (bgmPlayerRef.current && !narrationDuckedRef.current) {
+          narrationDuckedRef.current = true;
+          bgmPlayerRef.current.setVolume(bgmVolume * 0.3);
+        }
       }
     } else {
+      narrationStartedRef.current = false;
       narrAudio.pause();
       narrAudio.currentTime = 0;
       narrationDuckedRef.current = false;
     }
-  }, [isPlaying, bgmVolume]);
+  }, [isPlaying, currentSec, bgmVolume, editPlan.audioOffsetSec]);
 
   // BGM volume restore when narration ends
   useEffect(() => {
@@ -481,6 +494,7 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
   useEffect(() => {
     if (!isPlaying) return;
     if (prevSecRef.current > currentSec && currentSec === 0) {
+      narrationStartedRef.current = false;
       if (narrationAudioRef.current) {
         const narrAudio = narrationAudioRef.current;
         narrAudio.pause();

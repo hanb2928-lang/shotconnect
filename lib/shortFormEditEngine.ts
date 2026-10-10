@@ -161,6 +161,7 @@ export interface ShortFormEditPlan {
   spec: PlatformSpec | undefined;
   safeZone: SafeZoneRect | undefined;
   totalDurationSec: number;
+  audioOffsetSec: number;
   hookOptions: HookOption[];
   selectedHook: string | null;
   customPrompt: string;
@@ -834,12 +835,15 @@ function computeEditPlan(
     ? '굵은 산세리프, 상단 배치, 고대비'
     : '굵은 산세리프, 하단 배치, 한국어 가독성 우선';
 
+  const audioOffsetSec = segments.find((s) => s.ttsNarrationText)?.startSec ?? 0;
+
   return {
     platform,
     platformLabel: label,
     spec,
     safeZone,
     totalDurationSec,
+    audioOffsetSec,
     hookOptions,
     selectedHook: hook,
     customPrompt,

@@ -488,6 +488,7 @@ export default function ResultScreen() {
   const currentVideoTaskIdRef = useRef<string | null>(null);
   const videoGenLockRef = useRef(false);
   const draftProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const videoJobSettledRef = useRef(false);
   const [showAdvancedCamera, setShowAdvancedCamera] = useState(false);
   const [showAdvancedCaption, setShowAdvancedCaption] = useState(false);
   const [showAdvancedAudio, setShowAdvancedAudio] = useState(false);
@@ -601,7 +602,7 @@ export default function ResultScreen() {
 
     if (!stepAdvanceTimerRef.current) {
       stepAdvanceTimerRef.current = setInterval(() => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || videoJobSettledRef.current) return;
         setVideoGenProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error' || prev.phase === 'submitting') return prev;
           const currentStep = prev.serverStep ?? 'analyzing';
@@ -657,7 +658,7 @@ export default function ResultScreen() {
     if (localPollTimerRef.current) return;
 
     localPollTimerRef.current = setInterval(async () => {
-      if (!mountedRef.current || !scan) return;
+      if (!mountedRef.current || !scan || videoJobSettledRef.current) return;
       try {
         // Check scans.video_url / muxed_video_url first — the webhook writes
         // here directly and it's the most reliable completion signal.
@@ -670,6 +671,7 @@ export default function ResultScreen() {
           const scanFinalUrl = (scanData as { muxed_video_url?: string | null; video_url?: string | null }).muxed_video_url
             ?? (scanData as { video_url?: string | null }).video_url;
           if (scanFinalUrl) {
+            videoJobSettledRef.current = true;
             setGeneratedVideoUrl(scanFinalUrl);
             setVideoStage('draft_ready');
             setIsGeneratingVideo(false);
@@ -693,6 +695,7 @@ export default function ResultScreen() {
         if (error || !data) return;
         const row = data as { status: string; step?: string | null; video_url?: string | null; error_message?: string | null };
         if (row.status === 'SUCCESS' && row.video_url) {
+          videoJobSettledRef.current = true;
           setGeneratedVideoUrl(row.video_url);
           setVideoStage('draft_ready');
           setIsGeneratingVideo(false);
@@ -701,6 +704,7 @@ export default function ResultScreen() {
           return;
         }
         if (row.status === 'FAILED') {
+          videoJobSettledRef.current = true;
           setVideoGenError(row.error_message ?? 'AI 영상 생성에 실패했습니다.');
           setVideoStage('failed');
           setIsGeneratingVideo(false);
@@ -908,6 +912,7 @@ export default function ResultScreen() {
     if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
     setIsGeneratingVideo(true);
     setVideoGenError(null);
+    videoJobSettledRef.current = false;
     setVideoGenProgress({ phase: 'submitting', progress: 0.05, message: 'AI 실사 비디오 생성 요청 중...', elapsedSec: 0 });
 
     // Before submitting a new job, check if a previous one already completed
@@ -1114,7 +1119,7 @@ export default function ResultScreen() {
       // the backend job runs, so the UI never freezes in a blank state.
       const draftStartTime = Date.now();
       const draftProgressTimer = setInterval(() => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || videoJobSettledRef.current) return;
         const elapsed = Math.round((Date.now() - draftStartTime) / 1000);
         // Asymptotic progress curve — approaches 0.97 so the user sees near-complete
         // progress while waiting for the server-side webhook/poll to deliver the result.
@@ -1186,6 +1191,8 @@ export default function ResultScreen() {
           return;
         }
         if (result.status === 'SUCCESS' && result.videoUrl) {
+          videoJobSettledRef.current = true;
+          clearDraftProgress();
           setDraftVideoUrl(result.videoUrl);
           setGeneratedVideoUrl(result.videoUrl);
           setVideoStage('draft_ready');
@@ -1266,6 +1273,8 @@ export default function ResultScreen() {
             }
           });
         } else if (result.status === 'FAILED') {
+          videoJobSettledRef.current = true;
+          clearDraftProgress();
           const msg = result.error ?? 'AI 영상 생성에 실패했습니다.';
           setVideoGenError(msg);
           setVideoStage('failed');
@@ -2042,11 +2051,14 @@ export default function ResultScreen() {
         }
 
         try {
+          const targetDur = Math.max(Math.round(selectedDurationMs / 1000), 3);
+          const audioOffset = Math.round(targetDur * 0.2);
+          const audioDur = targetDur - audioOffset;
           const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
             // Update progress state directly — this does NOT re-run this
             // effect because muxProgress is NOT in the dependency array.
             if (!cancelled) setMuxProgress(p.progress);
-          }, abortController.signal, Math.max(Math.round(selectedDurationMs / 1000), 3));
+          }, abortController.signal, targetDur, audioOffset, audioDur);
           if (!result || cancelled) {
             result?.revoke();
             return;
@@ -2106,12 +2118,17 @@ export default function ResultScreen() {
 
       (async () => {
         try {
+          const targetDur = Math.max(Math.round(selectedDurationMs / 1000), 3);
+          const audioOffset = Math.round(targetDur * 0.2);
+          const audioDur = targetDur - audioOffset;
           const { data, error: invokeError } = await supabase.functions.invoke('mux-video-audio', {
             body: {
               videoUrl: generatedVideoUrl,
               audioUrl: ttsUrl,
               scanId: scan?.id,
-              targetDurationSec: Math.max(Math.round(selectedDurationMs / 1000), 3),
+              targetDurationSec: targetDur,
+              audioOffsetSec: audioOffset,
+              audioDurationSec: audioDur,
             },
           });
 
@@ -2150,7 +2167,7 @@ export default function ResultScreen() {
       }
       appStateHandlersRef.current.delete(handleMuxAppState);
     };
-  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id]);
+  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id, selectedDurationMs]);
 
   // Realtime subscription on the scans row itself: when the background
   // stereo pipeline (or any other background task) writes text data
