@@ -46,7 +46,7 @@ export function generateBeatTimeline(
   if (bpm <= 0 || totalDurationSec <= 0) return [];
   const beatInterval = 60 / bpm;
   const beats: BeatMarker[] = [];
-  const cutTimes = segments.map((s) => s.startSec);
+  const cutTimes = [...new Set(segments.filter((s) => s.endSec > s.startSec).map((s) => s.startSec))];
 
   let t = 0;
   let beatIdx = 0;
@@ -100,6 +100,7 @@ export function generateDuckingCurve(
   const events: { time: number; level: number; fade: 'fadeIn' | 'fadeOut' }[] = [];
 
   for (const seg of segments) {
+    if (seg.endSec <= seg.startSec) continue;
     const hasNarration = seg.narrationCue && seg.narrationCue.length > 0;
     if (hasNarration) {
       events.push({ time: seg.startSec, level: DUCK_LEVEL_DB, fade: 'fadeOut' });

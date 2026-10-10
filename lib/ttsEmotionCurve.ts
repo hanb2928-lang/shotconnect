@@ -111,8 +111,10 @@ export function generateEmotionCurve(
     };
   });
 
+  const filtered = segments.filter((s) => s.endSec > s.startSec);
+
   return {
-    segments,
+    segments: filtered,
     totalDurationSec,
     voiceCloningReady: !!prosodyProfile,
     prosodyProfileId: prosodyProfile?.id ?? 'default',
@@ -153,16 +155,19 @@ export function splitTextForEmotionCurve(
   const sentences = fullText.split(/(?<=[.!?。！？])\s+/).filter((s) => s.trim());
   const totalChars = sentences.reduce((sum, s) => sum + s.length, 0) || 1;
 
+  const validSegments = curve.segments.filter((seg) => seg.endSec > seg.startSec);
+
   // Adjust phase boundaries based on speed: faster phases consume text quicker,
   // so they need fewer characters per unit time.
-  const speedAdjustedRatios = curve.segments.map((seg) => {
+  const speedAdjustedRatios = validSegments.map((seg) => {
     const duration = seg.endSec - seg.startSec;
     const adjustedDuration = duration / (seg.speed || 1);
     return adjustedDuration;
   });
   const totalAdjusted = speedAdjustedRatios.reduce((sum, r) => sum + r, 0) || 1;
 
-  return curve.segments.map((segment, idx) => {
+  return validSegments
+    .map((segment, idx) => {
     const adjustedRatio = speedAdjustedRatios[idx] / totalAdjusted;
     const startRatio = idx === 0 ? 0 :
       speedAdjustedRatios.slice(0, idx).reduce((s, r) => s + r, 0) / totalAdjusted;

@@ -124,24 +124,26 @@ function buildTimeBoxingPlan(
   curve: EmotionCurve,
   totalDurationSec: number,
 ): TimeBoxSegment[] {
-  return curve.segments.map((seg) => {
-    const phaseDuration = seg.endSec - seg.startSec;
-    const baseRate = 7.5;
-    const adjustedRate = baseRate * seg.speed;
+  return curve.segments
+    .filter((seg) => seg.endSec > seg.startSec)
+    .map((seg) => {
+      const phaseDuration = seg.endSec - seg.startSec;
+      const baseRate = 7.5;
+      const adjustedRate = baseRate * seg.speed;
 
-    const captionVisibleRatio = PHASE_RATIOS[seg.phase] ?? 0.2;
-    const captionVisibleSec = phaseDuration * Math.min(captionVisibleRatio * 3, 0.9);
+      const captionVisibleRatio = PHASE_RATIOS[seg.phase] ?? 0.2;
+      const captionVisibleSec = phaseDuration * Math.min(captionVisibleRatio * 3, 0.9);
 
-    return {
-      phase: seg.phase,
-      startSec: seg.startSec,
-      endSec: seg.endSec,
-      durationSec: Math.round(phaseDuration * 10) / 10,
-      targetSyllableRate: Math.round(adjustedRate * 10) / 10,
-      captionVisibleSec: Math.round(captionVisibleSec * 10) / 10,
-      description: seg.description,
-    };
-  });
+      return {
+        phase: seg.phase,
+        startSec: seg.startSec,
+        endSec: seg.endSec,
+        durationSec: Math.max(0.1, Math.round(phaseDuration * 10) / 10),
+        targetSyllableRate: Math.round(adjustedRate * 10) / 10,
+        captionVisibleSec: Math.max(0.1, Math.round(captionVisibleSec * 10) / 10),
+        description: seg.description,
+      };
+    });
 }
 
 function buildAudioSyncStrategy(
