@@ -8,6 +8,7 @@ interface QueuedJobState {
   status: JobStatus | 'idle';
   error: string | null;
   result: Record<string, unknown> | null;
+  progress: number | null;
 }
 
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -20,6 +21,7 @@ export function useQueuedJob() {
     status: 'idle',
     error: null,
     result: null,
+    progress: null,
   });
   const subRef = useRef<{ unsubscribe: () => void } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -57,7 +59,7 @@ export function useQueuedJob() {
     userPausedRef.current = false;
     clearAll();
 
-    setState({ jobId: null, status: 'queued', error: null, result: null });
+    setState({ jobId: null, status: 'queued', error: null, result: null, progress: null });
 
     let jobId: string;
     try {
@@ -83,6 +85,7 @@ export function useQueuedJob() {
         status: job.status,
         error: job.error_message,
         result: job.result,
+        progress: job.progress ?? prev.progress,
       }));
       if (job.status === 'done' || job.status === 'error') {
         clearAll();
@@ -214,7 +217,7 @@ export function useQueuedJob() {
   const reset = useCallback(() => {
     submitIdRef.current++;
     clearAll();
-    setState({ jobId: null, status: 'idle', error: null, result: null });
+    setState({ jobId: null, status: 'idle', error: null, result: null, progress: null });
   }, [clearAll]);
 
   const pause = useCallback(() => {

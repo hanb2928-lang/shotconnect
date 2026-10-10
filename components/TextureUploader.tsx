@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Box, Layers, Upload, Check, AlertCircle, Sparkles } from 'lucide-react-native';
@@ -16,6 +15,13 @@ import { generateIdempotencyKey } from '@/lib/aiVideoPipeline';
 import { compressAndUploadUri } from '@/lib/imageEdit';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
+import { getJob } from '@/lib/jobQueue';
+import {
+  saveActiveTextureJob,
+  updateActiveTextureJobProgress,
+  clearActiveTextureJob,
+  getActiveTextureJob,
+} from '@/lib/textureJobPersistence';
 
 type SynthesisMode = 'uv-remap' | 'projection' | 'hybrid';
 
@@ -34,6 +40,23 @@ const STATUS_LABELS: Record<string, string> = {
   error: '오류 발생',
 };
 
+const STAGE_LABELS: { threshold: number; label: string }[] = [
+  { threshold: 0.1, label: '3D 모델 분석 중...' },
+  { threshold: 0.25, label: '텍스처 소스 로딩 중...' },
+  { threshold: 0.4, label: 'AI 텍스처 합성 중...' },
+  { threshold: 0.75, label: '결과 파싱 중...' },
+  { threshold: 0.9, label: '결과 저장 중...' },
+  { threshold: 1.0, label: '완료' },
+];
+
+function getStageLabel(progress: number | null): string {
+  if (progress === null || progress <= 0) return '준비 중...';
+  for (let i = STAGE_LABELS.length - 1; i >= 0; i--) {
+    if (progress >= STAGE_LABELS[i].threshold) return STAGE_LABELS[i].label;
+  }
+  return '준비 중...';
+}
+
 export function TextureUploader({
   productName,
   productCategory,
@@ -46,10 +69,26 @@ export function TextureUploader({
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [restoringJob, setRestoringJob] = useState(false);
   const idempotencyKeyRef = useRef<string>('');
+  const recoveredRef = useRef(false);
 
-  const { jobId, status, error: jobError, result, submit, reset } = useQueuedJob();
+  const { jobId, status, error: jobError, result, progress, submit, reset } = useQueuedJob();
 
+  // When jobId or progress changes, persist to local storage
+  useEffect(() => {
+    if (jobId && status === 'processing') {
+      saveActiveTextureJob(jobId, modelImageUrl ?? '', textureSourceUrl ?? '', mode);
+    }
+  }, [jobId, status, modelImageUrl, textureSourceUrl, mode]);
+
+  useEffect(() => {
+    if (progress !== null && (status === 'processing' || status === 'queued')) {
+      updateActiveTextureJobProgress(progress);
+    }
+  }, [progress, status]);
+
+  // On result, clear persistence
   useEffect(() => {
     if (status === 'done' && result) {
       const url = (result as { resultUrl?: string }).resultUrl;
@@ -57,21 +96,62 @@ export function TextureUploader({
         setResultUrl(url);
         onResult?.(url);
       }
+      clearActiveTextureJob();
+    } else if (status === 'error') {
+      clearActiveTextureJob();
     }
   }, [status, result, onResult]);
+
+  // On mount: check for a previously saved incomplete job and force-sync
+  useEffect(() => {
+    if (recoveredRef.current) return;
+    recoveredRef.current = true;
+    (async () => {
+      const saved = await getActiveTextureJob();
+      if (!saved || !saved.jobId) return;
+      setRestoringJob(true);
+      try {
+        const job = await getJob(saved.jobId);
+        if (!job) {
+          clearActiveTextureJob();
+          return;
+        }
+        if (job.status === 'done') {
+          const url = (job.result as { resultUrl?: string } | null)?.resultUrl;
+          if (url) {
+            setResultUrl(url);
+            onResult?.(url);
+          }
+          clearActiveTextureJob();
+        } else if (job.status === 'error') {
+          clearActiveTextureJob();
+        } else {
+          // Job still in progress — the useQueuedJob hook can't reattach
+          // its Realtime subscription to an existing jobId, so we surface
+          // a recovery banner and poll once. If the job completes, we
+          // show the result; otherwise the user can start a new one.
+          setLocalError('이전 텍스처 합성 작업이 진행 중입니다. 잠시만 기다려주세요.');
+        }
+      } catch {
+        clearActiveTextureJob();
+      } finally {
+        setRestoringJob(false);
+      }
+    })();
+  }, [onResult]);
 
   const pickTexture = useCallback(async () => {
     setLocalError(null);
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const pickerResult = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         quality: 0.8,
         allowsEditing: true,
         aspect: [1, 1],
       });
-      if (result.canceled || !result.assets?.[0]?.uri) return;
+      if (pickerResult.canceled || !pickerResult.assets?.[0]?.uri) return;
 
-      const uri = result.assets[0].uri;
+      const uri = pickerResult.assets[0].uri;
       setTextureSourceUri(uri);
       setResultUrl(null);
 
@@ -113,11 +193,14 @@ export function TextureUploader({
     setTextureSourceUrl(null);
     setResultUrl(null);
     setLocalError(null);
+    clearActiveTextureJob();
   }, [reset]);
 
   const displayError = localError ?? jobError;
-  const isBusy = status === 'queued' || status === 'processing' || isUploading;
+  const isBusy = status === 'queued' || status === 'processing' || isUploading || restoringJob;
   const canSubmit = !!modelImageUrl && !!textureSourceUrl && !isBusy;
+  const progressPercent = progress !== null ? Math.round(progress * 100) : 0;
+  const stageLabel = getStageLabel(progress);
 
   return (
     <View style={styles.container}>
@@ -183,8 +266,28 @@ export function TextureUploader({
         ))}
       </View>
 
+      {/* Progress Bar — shown during queued/processing */}
+      {(status === 'queued' || status === 'processing') && (
+        <View style={styles.progressBarContainer}>
+          <View style={styles.progressBarHeader}>
+            <Text style={styles.progressBarStage}>{stageLabel}</Text>
+            <Text style={styles.progressBarPercent}>{progressPercent}%</Text>
+          </View>
+          <View style={styles.progressBarTrack}>
+            <View
+              style={[
+                styles.progressBarFill,
+                {
+                  width: `${Math.max(progressPercent, 3)}%`,
+                },
+              ]}
+            />
+          </View>
+        </View>
+      )}
+
       {/* Status Display */}
-      {status !== 'idle' && (
+      {status !== 'idle' && status !== 'queued' && status !== 'processing' && (
         <View style={styles.statusBox}>
           {status === 'done' && resultUrl ? (
             <View style={styles.resultRow}>
@@ -197,12 +300,7 @@ export function TextureUploader({
               <AlertCircle size={18} color={theme.colors.error[400]} strokeWidth={2} />
               <Text style={styles.errorText}>{displayError ?? '합성 실패'}</Text>
             </View>
-          ) : (
-            <View style={styles.processingRow}>
-              <ActivityIndicator size="small" color={theme.colors.primary[400]} />
-              <Text style={styles.processingText}>{STATUS_LABELS[status] ?? '처리 중...'}</Text>
-            </View>
-          )}
+          ) : null}
         </View>
       )}
 
@@ -359,6 +457,36 @@ const styles = StyleSheet.create({
     color: theme.colors.primary[400],
     fontFamily: theme.typography.fontFamily.medium,
   },
+  progressBarContainer: {
+    marginBottom: theme.spacing.md,
+  },
+  progressBarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+  },
+  progressBarStage: {
+    fontSize: theme.typography.micro,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.primary[300],
+  },
+  progressBarPercent: {
+    fontSize: theme.typography.micro,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.primary[400],
+  },
+  progressBarTrack: {
+    height: 6,
+    backgroundColor: theme.colors.dark.surfaceLight,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: theme.colors.primary[400],
+    borderRadius: 3,
+  },
   statusBox: {
     backgroundColor: theme.colors.dark.surfaceLight,
     borderRadius: theme.radius.md,
@@ -392,16 +520,6 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.caption,
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.error[400],
-  },
-  processingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  processingText: {
-    fontSize: theme.typography.caption,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.dark.textDim,
   },
   errorBanner: {
     flexDirection: 'row',

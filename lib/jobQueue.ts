@@ -27,6 +27,7 @@ export interface RenderJob {
   started_at: string | null;
   completed_at: string | null;
   attempts: number;
+  progress: number | null;
 }
 
 const POLL_INITIAL_MS = 3000;

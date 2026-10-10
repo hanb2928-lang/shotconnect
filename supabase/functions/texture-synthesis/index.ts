@@ -17,6 +17,8 @@ interface TextureSynthesisRequest {
   synthesisMode?: "uv-remap" | "projection" | "hybrid";
   outputFormat?: "png" | "webp";
   idempotencyKey?: string;
+  // Set by process-queue worker so we can update progress on the job row
+  jobId?: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -63,13 +65,18 @@ Deno.serve(async (req: Request) => {
     const productName = body.productName ?? "제품";
     const category = body.productCategory ?? "general";
     const outputFormat = body.outputFormat ?? "png";
+    const jobId = body.jobId;
 
+    // Stage 1: Download model image
+    await updateJobProgress(jobId, 0.1);
     const prompt = buildTexturePrompt(productName, category, mode);
 
     const formData = new FormData();
     const modelBlob = await fetchAsBlob(body.modelImageUrl);
     formData.append("image", modelBlob, "model.png");
 
+    // Stage 2: Download texture source
+    await updateJobProgress(jobId, 0.25);
     const textureBlob = await fetchAsBlob(body.textureSourceUrl);
     formData.append("image", textureBlob, "texture.png");
 
@@ -79,6 +86,9 @@ Deno.serve(async (req: Request) => {
     formData.append("quality", "high");
     formData.append("output_format", outputFormat);
     formData.append("n", "1");
+
+    // Stage 3: AI synthesis in progress
+    await updateJobProgress(jobId, 0.4);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000);
@@ -100,6 +110,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Stage 4: Parsing result
+    await updateJobProgress(jobId, 0.75);
+
     const data = await response.json();
     const imageB64 = data?.data?.[0]?.b64_json;
     if (!imageB64) {
@@ -109,13 +122,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Persist to storage
+    // Stage 5: Uploading result to storage
+    await updateJobProgress(jobId, 0.9);
     const resultUrl = await uploadTextureResult(imageB64, outputFormat);
 
     // Cache the result
     if (body.idempotencyKey?.trim()) {
       await storeTextureCache(body.idempotencyKey.trim(), resultUrl);
     }
+
+    // Stage 6: Done
+    await updateJobProgress(jobId, 1.0);
 
     return new Response(
       JSON.stringify({
@@ -134,6 +151,31 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+async function updateJobProgress(jobId: string | undefined, progress: number): Promise<void> {
+  if (!jobId || !supabaseUrl || !serviceRoleKey) return;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    await fetch(
+      `${supabaseUrl}/rest/v1/render_jobs?id=eq.${encodeURIComponent(jobId)}&status=neq.done`,
+      {
+        method: "PATCH",
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ progress }),
+        signal: controller.signal,
+      },
+    );
+    clearTimeout(timeoutId);
+  } catch {
+    // non-fatal — progress updates are best-effort
+  }
+}
 
 function buildTexturePrompt(productName: string, category: string, mode: string): string {
   const modeDesc = mode === "uv-remap"

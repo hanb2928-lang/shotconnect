@@ -581,7 +581,7 @@ async function processJob(job: RenderJob): Promise<Record<string, unknown>> {
         apikey: serviceRoleKey,
       },
       signal: controller.signal,
-      body: JSON.stringify(job.payload),
+      body: JSON.stringify({ ...job.payload, jobId: job.id }),
     });
 
     if (!resp.ok) {
