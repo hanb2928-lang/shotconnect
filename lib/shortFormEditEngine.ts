@@ -4,6 +4,7 @@ import { type EmotionPhase } from '@/lib/psychologyEngine';
 import { getBgmTemplateForMood, type BgmCategory } from '@/lib/bgmEngine';
 import { aiCachedCall } from '@/lib/aiCache';
 import type { ProductVisionResult } from '@/lib/productVision';
+import { distributeProportionalMs, msToSec, secToMs, validateTimelineInvariant } from '@/lib/timelineInvariant';
 
 export type ContentTone = 'casual' | 'professional' | 'emotional' | 'humorous' | 'studio_premium' | 'raw_trigger';
 
@@ -706,67 +707,47 @@ function computeEditPlan(
   const visionFeatureHint = productVision?.visualFeatures?.slice(0, 2).join(' · ') ?? '';
 
   const d = totalDurationSec;
-  // Compute proportional boundaries, then clamp each to [prev+1, d] to
-  // prevent ghost segments (endSec > d) and zero-length segments that
-  // crash downstream rendering at short durations (e.g. 3s).
-  const rawHookEnd = Math.round(d * 0.2);
-  const rawNeedEnd = Math.round(d * 0.47);
-  const rawTransformEnd = Math.round(d * 0.73);
-  const rawCtaEnd = Math.round(d * 0.87);
+  const totalMs = secToMs(d);
+  // Ratios for the 4 story phases: hook 20%, need 27%, transform 26%, cta 14%.
+  // The remaining ~13% goes to the disclosure overlay tail.
+  const phaseRatios = [0.20, 0.27, 0.26, 0.14];
+  const boundaries = distributeProportionalMs(totalMs, phaseRatios);
 
-  const hookEnd = Math.min(Math.max(1, rawHookEnd), d);
-  const needEnd = Math.min(Math.max(hookEnd + 1, rawNeedEnd), d);
-  const transformEnd = Math.min(Math.max(needEnd + 1, rawTransformEnd), d);
-  const ctaEnd = Math.min(Math.max(transformEnd + 1, rawCtaEnd), d);
+  // Invariant check: boundaries must sum exactly to totalMs.
+  const invariantError = validateTimelineInvariant(boundaries, totalMs);
+  if (invariantError) {
+    console.warn(`[shortFormEditEngine] 타임라인 불변량 위반: ${invariantError}`);
+  }
 
-  // If clamping collapsed segments (e.g. d=3 can only fit 3 segments),
-  // drop trailing segments that would have zero or negative duration.
-  const segmentDefs: Array<Omit<EditSegment, 'index' | 'startSec' | 'endSec'> & { startSec: number; endSec: number }> = [
-    {
-      startSec: 0,
-      endSec: hookEnd,
-      label: '시선 포착',
-      purpose: '상위 1% 후킹: 0~3초 시선 강탈, 화면 전환 없음, 오디오 빌드업으로 이탈 방지',
-      textOverlay: story.gazeHook,
-      position: 'center',
-      storyPhase: 'gaze_hook',
-      narrationCue: story.narrationCues.gazeHook,
-    },
-    {
-      startSec: hookEnd,
-      endSec: needEnd,
-      label: '서사 전개',
-      purpose: '왜 이 제품이 필요한지 리얼리티 서사로 연결, 다각도 입체 컷 전환',
-      textOverlay: story.needDiscovery,
-      position: 'top',
-      storyPhase: 'need_discovery',
-      narrationCue: story.narrationCues.needDiscovery,
-      emotionalBenefitText: emotionalBenefit,
-      ttsNarrationText: ttsNarration,
-    },
-    {
-      startSec: needEnd,
-      endSec: transformEnd,
-      label: '변화·몰입',
-      purpose: '사용 후 일상적 변화를 감성적으로 전달, 디테일 클로즈업 전환',
-      textOverlay: visionFeatureHint || story.transformation,
-      position: 'center',
-      storyPhase: 'transformation',
-      narrationCue: story.narrationCues.transformation,
-      emotionalBenefitText: emotionalBenefit,
-      ttsNarrationText: ttsNarration,
-    },
-    {
-      startSec: transformEnd,
-      endSec: ctaEnd,
-      label: 'CTA',
-      purpose: '시청자를 향한 직접적 행동 유도, 감정 최고점에서 클로징',
-      textOverlay: disclosureEnabled ? story.ctaCall : segmentTexts.cta,
-      position: 'bottom',
-      storyPhase: 'cta_call',
-      narrationCue: story.narrationCues.ctaCall,
-    },
-  ];
+  const segLabels = ['시선 포착', '서사 전개', '변화·몰입', 'CTA'] as const;
+  const segPurposes = [
+    '상위 1% 후킹: 0~3초 시선 강탈, 화면 전환 없음, 오디오 빌드업으로 이탈 방지',
+    '왜 이 제품이 필요한지 리얼리티 서사로 연결, 다각도 입체 컷 전환',
+    '사용 후 일상적 변화를 감성적으로 전달, 디테일 클로즈업 전환',
+    '시청자를 향한 직접적 행동 유도, 감정 최고점에서 클로징',
+  ] as const;
+  const segPositions = ['center', 'top', 'center', 'bottom'] as const;
+  const segStoryPhases = ['gaze_hook', 'need_discovery', 'transformation', 'cta_call'] as const;
+  const segTexts = [story.gazeHook, story.needDiscovery, visionFeatureHint || story.transformation, disclosureEnabled ? story.ctaCall : segmentTexts.cta];
+  const segNarrationCues = [story.narrationCues.gazeHook, story.narrationCues.needDiscovery, story.narrationCues.transformation, story.narrationCues.ctaCall];
+  const segExtra = [
+    {},
+    { emotionalBenefitText: emotionalBenefit, ttsNarrationText: ttsNarration },
+    { emotionalBenefitText: emotionalBenefit, ttsNarrationText: ttsNarration },
+    {},
+  ] as const;
+
+  const segmentDefs: Array<Omit<EditSegment, 'index' | 'startSec' | 'endSec'> & { startSec: number; endSec: number }> = boundaries.map((b, i) => ({
+    startSec: msToSec(b.startMs),
+    endSec: msToSec(b.endMs),
+    label: segLabels[i],
+    purpose: segPurposes[i],
+    textOverlay: segTexts[i],
+    position: segPositions[i],
+    storyPhase: segStoryPhases[i],
+    narrationCue: segNarrationCues[i],
+    ...segExtra[i],
+  }));
 
   const segments: EditSegment[] = segmentDefs
     .filter((s) => s.endSec > s.startSec)

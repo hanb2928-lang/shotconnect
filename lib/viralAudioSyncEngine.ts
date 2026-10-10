@@ -2,6 +2,7 @@ import { DurationPreset, getTierForDuration, DURATION_PRESETS } from './duration
 import { EmotionCurve, EmotionPhase, generateEmotionCurve, PHASE_RATIOS } from './ttsEmotionCurve';
 import { ProsodyProfile, buildProsodyInstructions, getProsodyAdjustedSpeed } from './prosodyProfile';
 import { MicroSyncTimeline, generateSyncTimeline } from './microSyncRenderer';
+import { secToMs, validateTimelineInvariant } from './timelineInvariant';
 
 export type PlatformKey = 'shorts' | 'tiktok' | 'reels' | 'naverclip';
 export type ContentPurpose = 'monetization' | 'adConversion';
@@ -187,6 +188,17 @@ export function buildViralAudioSyncProfile(
   const tier = getTierForDuration(totalDurationMs);
   const durationPreset = DURATION_PRESETS.find((p) => p.value === totalDurationMs);
   const emotionCurve = generateEmotionCurve(totalDurationSec, prosodyProfile);
+
+  // Invariant check: verify the emotion curve segments sum to the expected total.
+  const curveMs = emotionCurve.segments.map((s) => ({
+    startMs: secToMs(s.startSec),
+    endMs: secToMs(s.endSec),
+  }));
+  const invariantError = validateTimelineInvariant(curveMs, secToMs(totalDurationSec));
+  if (invariantError) {
+    console.warn(`[viralAudioSyncEngine] 타임라인 불변량 위반: ${invariantError}`);
+  }
+
   const syncTimeline = generateSyncTimeline(scriptText, totalDurationSec);
   const timeBoxingPlan = buildTimeBoxingPlan(emotionCurve, totalDurationSec);
   const voGuidelines = buildVoGuidelines(platform, purpose, prosodyProfile);

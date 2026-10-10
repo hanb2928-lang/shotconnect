@@ -1,4 +1,5 @@
 import { type ProsodyProfile, getProsodyAdjustedSpeed, buildProsodyInstructions, insertBreathMarkers, insertMicroPauses } from '@/lib/prosodyProfile';
+import { distributeProportionalMs, msToSec, secToMs, validateTimelineInvariant } from '@/lib/timelineInvariant';
 
 export type EmotionPhase = 'attention' | 'interest' | 'desire' | 'conviction' | 'action';
 
@@ -85,12 +86,18 @@ export function generateEmotionCurve(
   prosodyProfile?: ProsodyProfile,
 ): EmotionCurve {
   const phases: EmotionPhase[] = ['attention', 'interest', 'desire', 'conviction', 'action'];
-  let acc = 0;
-  const segments: EmotionSegment[] = phases.map((phase) => {
-    const ratio = PHASE_RATIOS[phase];
-    const start = acc;
-    const end = Math.min(acc + totalDurationSec * ratio, totalDurationSec);
-    acc = end;
+  const ratios = phases.map((p) => PHASE_RATIOS[p]);
+  const totalMs = secToMs(totalDurationSec);
+  const boundaries = distributeProportionalMs(totalMs, ratios);
+
+  // Invariant check: boundaries must sum exactly to totalMs.
+  const invariantError = validateTimelineInvariant(boundaries, totalMs);
+  if (invariantError) {
+    console.warn(`[ttsEmotionCurve] 타임라인 불변량 위반: ${invariantError}`);
+  }
+
+  const segments: EmotionSegment[] = boundaries.map((b, i) => {
+    const phase = phases[i];
     const base = EMOTION_PHASES[phase];
     const speed = prosodyProfile
       ? getProsodyAdjustedSpeed(prosodyProfile, base.speed)
@@ -106,15 +113,13 @@ export function generateEmotionCurve(
       ...base,
       speed,
       instructions: `${PHASE_GUIDES[phase]}\n${instructions}`,
-      startSec: start,
-      endSec: end,
+      startSec: msToSec(b.startMs),
+      endSec: msToSec(b.endMs),
     };
   });
 
-  const filtered = segments.filter((s) => s.endSec > s.startSec);
-
   return {
-    segments: filtered,
+    segments,
     totalDurationSec,
     voiceCloningReady: !!prosodyProfile,
     prosodyProfileId: prosodyProfile?.id ?? 'default',
