@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -415,7 +416,7 @@ function RotatingLoader({ size, color, strokeWidth = 2 }: { size: number; color:
   );
 }
 
-export default function ResultScreen() {
+function ResultScreenInner() {
   const router = useRouter();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { id, customPrompt: routeCustomPrompt } = useLocalSearchParams<{ id: string; customPrompt?: string }>();
@@ -7165,3 +7166,11 @@ iconButton: {
     color: '#fff',
   },
 });
+
+export default function ResultScreen() {
+  return (
+    <SafeLazyLoad>
+      <ResultScreenInner />
+    </SafeLazyLoad>
+  );
+}

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -91,7 +92,7 @@ const PERSONA_TONES = [
 
 type SortMode = 'date' | 'views' | 'title' | 'pinned';
 
-export default function AssetsScreen() {
+function AssetsScreenInner() {
   const router = useRouter();
   const tabBarHeight = useTabBarHeight();
   const safeTop = useSafeTop();
@@ -1157,3 +1158,11 @@ const styles = StyleSheet.create({
   statusSaveBtn: { alignItems: 'center', justifyContent: 'center', paddingVertical: theme.spacing.md, borderRadius: theme.radius.md, backgroundColor: theme.colors.warning[500] },
   statusSaveBtnText: { fontSize: theme.typography.body, fontFamily: theme.typography.fontFamily.bold, color: '#fff' },
 });
+
+export default function AssetsScreen() {
+  return (
+    <SafeLazyLoad>
+      <AssetsScreenInner />
+    </SafeLazyLoad>
+  );
+}

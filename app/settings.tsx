@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import { useRouter } from 'expo-router';
 import {
   View,
@@ -61,7 +62,7 @@ import {
 } from '@/lib/affiliatePlatformManager';
 import { fetchRecentLogs, SESSION_ID } from '@/lib/errorLogger';
 
-export default function SettingsScreen() {
+function SettingsScreenInner() {
   const insets = useSafeAreaInsets();
   const mounted = useMountedRef();
   const { t, language, setLanguage } = useI18n();
@@ -4200,5 +4201,13 @@ function PushTestButton() {
         </Text>
       )}
     </View>
+  );
+}
+
+export default function SettingsScreen() {
+  return (
+    <SafeLazyLoad>
+      <SettingsScreenInner />
+    </SafeLazyLoad>
   );
 }

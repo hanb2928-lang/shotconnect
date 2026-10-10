@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -235,7 +236,7 @@ async function performUpload(finalBase64: string): Promise<string> {
   throw new Error(`이미지 업로드 실패: ${lastError?.message ?? '알 수 없는 오류'}`);
 }
 
-export default function SynthesisScreen() {
+function SynthesisScreenInner() {
   const router = useRouter();
   const safeTop = useSafeTop();
   const insets = useSafeAreaInsets();
@@ -906,3 +907,11 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
 });
+
+export default function SynthesisScreen() {
+  return (
+    <SafeLazyLoad>
+      <SynthesisScreenInner />
+    </SafeLazyLoad>
+  );
+}

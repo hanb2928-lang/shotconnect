@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -79,7 +80,7 @@ const STORE_HOOK_CHIPS = [
   { key: 'combo', label: '꿀조합 발견! 같이 시키면 최고', icon: Sparkles, color: theme.colors.success[400] },
 ] as const;
 
-export default function MarketingScreen() {
+function MarketingScreenInner() {
   const router = useRouter();
   const safeTop = useSafeTop();
   const tabBarHeight = useTabBarHeight();
@@ -660,3 +661,11 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
   },
 });
+
+export default function MarketingScreen() {
+  return (
+    <SafeLazyLoad>
+      <MarketingScreenInner />
+    </SafeLazyLoad>
+  );
+}

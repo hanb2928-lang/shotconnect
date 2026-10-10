@@ -89,6 +89,19 @@ jest.mock('@/components/BootFallback', () => ({
   BootFallback: 'BootFallback',
 }));
 
+jest.mock('@/hooks/useNetworkStatus', () => ({
+  isOnline: () => (global as any).navigator?.onLine ?? true,
+  onNetworkRecovery: (cb: () => void) => {
+    (global as any).__networkRecoveryListeners = (global as any).__networkRecoveryListeners || [];
+    (global as any).__networkRecoveryListeners.push(cb);
+    return () => {
+      const list: (() => void)[] = (global as any).__networkRecoveryListeners || [];
+      const i = list.indexOf(cb);
+      if (i >= 0) list.splice(i, 1);
+    };
+  },
+}));
+
 const React = require('react');
 const TestRenderer = require('react-test-renderer');
 const { act } = TestRenderer;

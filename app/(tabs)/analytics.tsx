@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -93,7 +94,7 @@ const FUNNEL_STAGES = [
   { key: 'revenue', label: '수익 발생', icon: DollarSign, color: theme.colors.success[400] },
 ];
 
-export default function AnalyticsScreen() {
+function AnalyticsScreenInner() {
   const router = useRouter();
   const tabBarHeight = useTabBarHeight();
   const safeTop = useSafeTop();
@@ -1463,3 +1464,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+
+export default function AnalyticsScreen() {
+  return (
+    <SafeLazyLoad>
+      <AnalyticsScreenInner />
+    </SafeLazyLoad>
+  );
+}

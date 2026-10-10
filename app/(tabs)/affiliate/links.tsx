@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -43,7 +44,7 @@ const PLATFORM_OPTIONS = [
   { key: 'Other', label: '기타', icon: Link2, color: '#64748b' },
 ] as const;
 
-export default function LinksScreen() {
+function LinksScreenInner() {
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
   const mounted = useMountedRef();
@@ -601,3 +602,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
 });
+
+export default function LinksScreen() {
+  return (
+    <SafeLazyLoad>
+      <LinksScreenInner />
+    </SafeLazyLoad>
+  );
+}

@@ -4,6 +4,7 @@ import { AlertTriangle, RefreshCw, WifiOff, Wifi, PackageX } from 'lucide-react-
 import { theme } from '@/lib/theme';
 import { logFatal, addBreadcrumb } from '@/lib/errorLogger';
 import { BootFallback } from '@/components/BootFallback';
+import { isOnline, onNetworkRecovery } from '@/hooks/useNetworkStatus';
 
 interface Props {
   children: React.ReactNode;
@@ -25,9 +26,11 @@ const RETRY_COOLDOWN_MS = 3000;
  * deployment. Browsers cache the old HTML which references hashed
  * chunk filenames that no longer exist on the server (404), causing
  * a ChunkLoadError or dynamic import failure.
+ *
+ * On native this never applies — chunk loading does not exist.
  */
 function isChunkLoadError(error: Error | null): boolean {
-  if (!error) return false;
+  if (!error || Platform.OS !== 'web') return false;
   const msg = error.message || '';
   const name = error.name || '';
   if (name === 'ChunkLoadError') return true;
@@ -40,9 +43,7 @@ function isChunkLoadError(error: Error | null): boolean {
 
 /**
  * Forces a hard reload that bypasses browser cache by appending a
- * timestamp query parameter. This ensures the browser fetches the
- * latest index HTML rather than serving a stale cached copy that
- * references non-existent chunk files.
+ * timestamp query parameter. Web-only.
  */
 function cacheBustingReload(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -66,8 +67,11 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private lastRetryAt = 0;
+  // Web-only DOM listeners
   private onlineListener: (() => void) | null = null;
   private offlineListener: (() => void) | null = null;
+  // Cross-platform network recovery unsubscribe (native + web probe)
+  private unsubscribeRecovery: (() => void) | null = null;
 
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error, autoRetried: false, isChunkError: isChunkLoadError(error) };
@@ -88,6 +92,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidMount() {
+    // Read initial network state via cross-platform utility
+    this.setState({ isOffline: !isOnline() });
     this.attachNetworkListeners();
   }
 
@@ -96,32 +102,38 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   private attachNetworkListeners() {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    const nav = navigator as any;
-    this.setState({ isOffline: !nav.onLine });
-
-    this.onlineListener = () => {
+    // Cross-platform: subscribe to network recovery events (works on native & web)
+    this.unsubscribeRecovery = onNetworkRecovery(() => {
       this.setState({ isOffline: false });
       if (this.state.hasError && !this.state.autoRetried) {
         this.setState({ autoRetried: true });
         this.autoRetry();
       }
-    };
-    this.offlineListener = () => {
-      this.setState({ isOffline: true });
-    };
+    });
 
-    window.addEventListener('online', this.onlineListener);
-    window.addEventListener('offline', this.offlineListener);
+    // Web-only: additionally hook DOM events for instant offline detection
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      this.onlineListener = () => {
+        this.setState({ isOffline: false });
+      };
+      this.offlineListener = () => {
+        this.setState({ isOffline: true });
+      };
+      window.addEventListener('online', this.onlineListener);
+      window.addEventListener('offline', this.offlineListener);
+    }
   }
 
   private detachNetworkListeners() {
-    if (this.onlineListener && typeof window !== 'undefined') {
-      window.removeEventListener('online', this.onlineListener);
+    this.unsubscribeRecovery?.();
+    this.unsubscribeRecovery = null;
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (this.onlineListener) window.removeEventListener('online', this.onlineListener);
+      if (this.offlineListener) window.removeEventListener('offline', this.offlineListener);
     }
-    if (this.offlineListener && typeof window !== 'undefined') {
-      window.removeEventListener('offline', this.offlineListener);
-    }
+    this.onlineListener = null;
+    this.offlineListener = null;
   }
 
   handleReset = () => {

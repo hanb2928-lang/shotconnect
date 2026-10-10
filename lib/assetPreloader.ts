@@ -15,6 +15,10 @@
  * All caches are in-memory only (L1).  BGM/SFX AudioBuffers are large and
  * session-scoped, so persistent disk storage is intentionally skipped —
  * the OS HTTP cache already covers re-fetch avoidance across sessions.
+ *
+ * BGM and SFX caches use true LRU eviction: every read updates `lastAccessed`,
+ * and when either the entry-count cap or the memory-byte cap is exceeded the
+ * least-recently-accessed entry is evicted first.
  */
 
 import { Platform } from 'react-native';
@@ -25,29 +29,52 @@ import {
 } from './bundledBgm';
 import type { CaptionStyle } from './captionStyling';
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Estimates the heap footprint of a decoded AudioBuffer (Float32 per channel). */
+function estimateAudioBufferBytes(buffer: AudioBuffer): number {
+  return buffer.length * buffer.numberOfChannels * 4;
+}
+
+/** Monotonic counter for strict LRU ordering (Date.now lacks sub-ms resolution). */
+let lruCounter = 0;
+function nextLruTick(): number {
+  return ++lruCounter;
+}
+
 // ─── BGM AudioBuffer cache ───────────────────────────────────────────────────
 
 interface BgmCacheEntry {
   buffer: AudioBuffer;
   track: BundledBgmTrack;
-  createdAt: number;
+  lastAccessed: number;
+  bytes: number;
 }
 
 const bgmBufferCache = new Map<string, BgmCacheEntry>();
 const bgmFetchPromises = new Map<string, Promise<AudioBuffer | null>>();
 const BGM_CACHE_MAX = 12;
+const BGM_MEMORY_CAP_BYTES = 80 * 1024 * 1024; // 80 MB
+
+let bgmCacheBytes = 0;
 
 function evictBgmCache(): void {
-  if (bgmBufferCache.size <= BGM_CACHE_MAX) return;
-  let oldestKey: string | null = null;
-  let oldestTime = Infinity;
-  for (const [key, entry] of bgmBufferCache) {
-    if (entry.createdAt < oldestTime) {
-      oldestTime = entry.createdAt;
-      oldestKey = key;
+  while (bgmBufferCache.size > BGM_CACHE_MAX || bgmCacheBytes > BGM_MEMORY_CAP_BYTES) {
+    if (bgmBufferCache.size === 0) break;
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [key, entry] of bgmBufferCache) {
+      if (entry.lastAccessed < oldestTime) {
+        oldestTime = entry.lastAccessed;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey) {
+      const removed = bgmBufferCache.get(oldestKey);
+      if (removed) bgmCacheBytes -= removed.bytes;
+      bgmBufferCache.delete(oldestKey);
     }
   }
-  if (oldestKey) bgmBufferCache.delete(oldestKey);
 }
 
 async function fetchAndDecodeAudio(
@@ -67,7 +94,7 @@ async function fetchAndDecodeAudio(
 /**
  * Returns a cached AudioBuffer for the given BGM track, or fetches+decodes
  * it on first access.  Subsequent calls for the same track ID return the
- * cached buffer synchronously (via a resolved promise).
+ * cached buffer synchronously (via a resolved promise) and update LRU state.
  */
 export async function preloadBgmTrack(
   ctx: AudioContext,
@@ -76,7 +103,10 @@ export async function preloadBgmTrack(
   if (Platform.OS !== 'web') return null;
 
   const cached = bgmBufferCache.get(track.id);
-  if (cached) return cached.buffer;
+  if (cached) {
+    cached.lastAccessed = nextLruTick();
+    return cached.buffer;
+  }
 
   const existing = bgmFetchPromises.get(track.id);
   if (existing) return existing;
@@ -84,11 +114,14 @@ export async function preloadBgmTrack(
   const promise = fetchAndDecodeAudio(ctx, resolveBundledTrackUri(track)).then(
     (buffer) => {
       if (buffer) {
+        const bytes = estimateAudioBufferBytes(buffer);
         bgmBufferCache.set(track.id, {
           buffer,
           track,
-          createdAt: Date.now(),
+          lastAccessed: nextLruTick(),
+          bytes,
         });
+        bgmCacheBytes += bytes;
         evictBgmCache();
       }
       bgmFetchPromises.delete(track.id);
@@ -112,7 +145,12 @@ export async function preloadAllBgmTracks(ctx: AudioContext): Promise<void> {
 }
 
 export function getCachedBgmBuffer(trackId: string): AudioBuffer | null {
-  return bgmBufferCache.get(trackId)?.buffer ?? null;
+  const entry = bgmBufferCache.get(trackId);
+  if (entry) {
+    entry.lastAccessed = nextLruTick();
+    return entry.buffer;
+  }
+  return null;
 }
 
 export function isBgmTrackPreloaded(trackId: string): boolean {
@@ -123,24 +161,34 @@ export function isBgmTrackPreloaded(trackId: string): boolean {
 
 interface SfxCacheEntry {
   buffer: AudioBuffer;
-  createdAt: number;
+  lastAccessed: number;
+  bytes: number;
 }
 
 const sfxBufferCache = new Map<string, SfxCacheEntry>();
 const sfxFetchPromises = new Map<string, Promise<AudioBuffer | null>>();
 const SFX_CACHE_MAX = 20;
+const SFX_MEMORY_CAP_BYTES = 15 * 1024 * 1024; // 15 MB
+
+let sfxCacheBytes = 0;
 
 function evictSfxCache(): void {
-  if (sfxBufferCache.size <= SFX_CACHE_MAX) return;
-  let oldestKey: string | null = null;
-  let oldestTime = Infinity;
-  for (const [key, entry] of sfxBufferCache) {
-    if (entry.createdAt < oldestTime) {
-      oldestTime = entry.createdAt;
-      oldestKey = key;
+  while (sfxBufferCache.size > SFX_CACHE_MAX || sfxCacheBytes > SFX_MEMORY_CAP_BYTES) {
+    if (sfxBufferCache.size === 0) break;
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [key, entry] of sfxBufferCache) {
+      if (entry.lastAccessed < oldestTime) {
+        oldestTime = entry.lastAccessed;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey) {
+      const removed = sfxBufferCache.get(oldestKey);
+      if (removed) sfxCacheBytes -= removed.bytes;
+      sfxBufferCache.delete(oldestKey);
     }
   }
-  if (oldestKey) sfxBufferCache.delete(oldestKey);
 }
 
 /**
@@ -156,14 +204,23 @@ export async function preloadSfx(
   if (Platform.OS !== 'web') return null;
 
   const cached = sfxBufferCache.get(id);
-  if (cached) return cached.buffer;
+  if (cached) {
+    cached.lastAccessed = nextLruTick();
+    return cached.buffer;
+  }
 
   const existing = sfxFetchPromises.get(id);
   if (existing) return existing;
 
   const promise = fetchAndDecodeAudio(ctx, uri).then((buffer) => {
     if (buffer) {
-      sfxBufferCache.set(id, { buffer, createdAt: Date.now() });
+      const bytes = estimateAudioBufferBytes(buffer);
+      sfxBufferCache.set(id, {
+        buffer,
+        lastAccessed: nextLruTick(),
+        bytes,
+      });
+      sfxCacheBytes += bytes;
       evictSfxCache();
     }
     sfxFetchPromises.delete(id);
@@ -185,7 +242,12 @@ export async function preloadSfxBatch(
 }
 
 export function getCachedSfxBuffer(id: string): AudioBuffer | null {
-  return sfxBufferCache.get(id)?.buffer ?? null;
+  const entry = sfxBufferCache.get(id);
+  if (entry) {
+    entry.lastAccessed = nextLruTick();
+    return entry.buffer;
+  }
+  return null;
 }
 
 export function isSfxPreloaded(id: string): boolean {
@@ -250,11 +312,15 @@ export function getCachedSubtitleStyle(
 export function clearBgmCache(): void {
   bgmBufferCache.clear();
   bgmFetchPromises.clear();
+  bgmCacheBytes = 0;
+  lruCounter = 0;
 }
 
 export function clearSfxCache(): void {
   sfxBufferCache.clear();
   sfxFetchPromises.clear();
+  sfxCacheBytes = 0;
+  lruCounter = 0;
 }
 
 export function clearAllAssetCaches(): void {
@@ -267,10 +333,14 @@ export function getAssetCacheStats(): {
   bgmTracks: number;
   sfxClips: number;
   subtitleStyles: number;
+  bgmMemoryBytes: number;
+  sfxMemoryBytes: number;
 } {
   return {
     bgmTracks: bgmBufferCache.size,
     sfxClips: sfxBufferCache.size,
     subtitleStyles: subtitleStyleCache.size,
+    bgmMemoryBytes: bgmCacheBytes,
+    sfxMemoryBytes: sfxCacheBytes,
   };
 }

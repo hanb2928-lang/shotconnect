@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -78,7 +79,7 @@ interface DaySlide {
   isToday: boolean;
 }
 
-export default function WarmupScreen() {
+function WarmupScreenInner() {
   const { width: screenWidth } = useWindowDimensions();
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
@@ -1156,3 +1157,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+export default function WarmupScreen() {
+  return (
+    <SafeLazyLoad>
+      <WarmupScreenInner />
+    </SafeLazyLoad>
+  );
+}

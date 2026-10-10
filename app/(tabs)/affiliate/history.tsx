@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -25,7 +26,7 @@ type ScanListItem = Pick<Scan, 'id' | 'image_url' | 'title' | 'summary' | 'produ
 
 const CACHE_KEY = 'scan_history';
 
-export default function HistoryScreen() {
+function HistoryScreenInner() {
   const router = useRouter();
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
@@ -383,3 +384,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+
+export default function HistoryScreen() {
+  return (
+    <SafeLazyLoad>
+      <HistoryScreenInner />
+    </SafeLazyLoad>
+  );
+}

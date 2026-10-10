@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -167,7 +168,7 @@ async function saveImageToGallery(base64: string, mimeType: string, fileName: st
 }
 
 
-export default function EditorScreen() {
+function EditorScreenInner() {
   const router = useRouter();
   const { id, customPrompt } = useLocalSearchParams<{ id: string; customPrompt?: string }>();
   const insets = useSafeAreaInsets();
@@ -1636,3 +1637,11 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
+
+export default function EditorScreen() {
+  return (
+    <SafeLazyLoad>
+      <EditorScreenInner />
+    </SafeLazyLoad>
+  );
+}

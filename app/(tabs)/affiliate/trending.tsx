@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -124,7 +125,7 @@ const TREND_ICON = {
 const productCache = new Map<Marketplace, { data: TrendingCategory[]; ts: number }>();
 const PRODUCT_CACHE_TTL = 5 * 60 * 1000;
 
-export default function TrendingScreen() {
+function TrendingScreenInner() {
   const tabBarHeight = useSubTabBarHeight();
   const router = useRouter();
   const safeTop = useSafeTop();
@@ -1360,3 +1361,11 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.textDim,
   },
 });
+
+export default function TrendingScreen() {
+  return (
+    <SafeLazyLoad>
+      <TrendingScreenInner />
+    </SafeLazyLoad>
+  );
+}

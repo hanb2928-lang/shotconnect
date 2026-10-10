@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -42,7 +43,7 @@ const TEMPLATES = [
   { id: 'shortform', title: '숏폼 스크립트', desc: '15~30초 후킹 스크립트', icon: Sparkles, color: theme.colors.warning[400] },
 ];
 
-export default function AssetsScreen() {
+function AssetsScreenInner() {
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
   const mounted = useMountedRef();
@@ -579,3 +580,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+export default function AssetsScreen() {
+  return (
+    <SafeLazyLoad>
+      <AssetsScreenInner />
+    </SafeLazyLoad>
+  );
+}

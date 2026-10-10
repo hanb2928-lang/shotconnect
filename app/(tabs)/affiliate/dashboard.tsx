@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -15,7 +16,7 @@ import { fetchDashboardSummary, type DashboardSummary } from '@/lib/affiliateDas
 import { ErrorRetryBanner } from '@/components/ErrorRetryBanner';
 import { friendlyError } from '@/lib/errors';
 
-export default function DashboardScreen() {
+function DashboardScreenInner() {
   const tabBarHeight = useSubTabBarHeight();
   const safeTop = useSafeTop();
   const mounted = useMountedRef();
@@ -438,3 +439,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.xl,
   },
 });
+
+export default function DashboardScreen() {
+  return (
+    <SafeLazyLoad>
+      <DashboardScreenInner />
+    </SafeLazyLoad>
+  );
+}

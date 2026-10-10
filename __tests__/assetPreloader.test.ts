@@ -275,4 +275,118 @@ describe('assetPreloader', () => {
       expect(stats.subtitleStyles).toBe(0);
     });
   });
+
+  describe('LRU eviction', () => {
+    function makeTrack(id: string) {
+      return { id, category: 'cinematic' as const, assetPath: id, title: id, durationSec: 30, highlightStartSec: 5, highlightDurationSec: 10, bpm: 90, energyCurve: [] } as any;
+    }
+
+    it('BGM cache evicts least-recently-accessed entry when count cap exceeded', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)),
+      });
+      const ctx = makeMockAudioContext();
+
+      // Load 3 tracks (cap is 12, so no eviction yet)
+      await preloadBgmTrack(ctx, makeTrack('t1'));
+      await preloadBgmTrack(ctx, makeTrack('t2'));
+      await preloadBgmTrack(ctx, makeTrack('t3'));
+      expect(getAssetCacheStats().bgmTracks).toBe(3);
+
+      // Access t1 to make it most-recently-used
+      getCachedBgmBuffer('t1');
+
+      // Now load enough to trigger eviction. We need to exceed 12 entries.
+      // Tracks t2 and t3 were accessed least recently (t1 was just touched).
+      for (let i = 4; i <= 14; i++) {
+        await preloadBgmTrack(ctx, makeTrack(`t${i}`));
+      }
+
+      const stats = getAssetCacheStats();
+      expect(stats.bgmTracks).toBeLessThanOrEqual(12);
+      // t1 was most recently accessed, so it should survive
+      expect(isBgmTrackPreloaded('t1')).toBe(true);
+    });
+
+    it('SFX cache evicts least-recently-accessed entry when count cap exceeded', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)),
+      });
+      const ctx = makeMockAudioContext();
+
+      // Load 3 SFX (cap is 20)
+      await preloadSfx(ctx, 's1', './sfx/s1.mp3');
+      await preloadSfx(ctx, 's2', './sfx/s2.mp3');
+      await preloadSfx(ctx, 's3', './sfx/s3.mp3');
+
+      // Touch s1 to make it most-recently-used
+      getCachedSfxBuffer('s1');
+
+      // Load enough to exceed cap of 20
+      for (let i = 4; i <= 22; i++) {
+        await preloadSfx(ctx, `s${i}`, `./sfx/s${i}.mp3`);
+      }
+
+      const stats = getAssetCacheStats();
+      expect(stats.sfxClips).toBeLessThanOrEqual(20);
+      // s1 was touched most recently, should survive
+      expect(isSfxPreloaded('s1')).toBe(true);
+    });
+
+    it('getCachedBgmBuffer updates LRU access time', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)),
+      });
+      const ctx = makeMockAudioContext();
+
+      // Fill cache to near capacity (12 entries)
+      for (let i = 1; i <= 12; i++) {
+        await preloadBgmTrack(ctx, makeTrack(`t${i}`));
+      }
+      expect(getAssetCacheStats().bgmTracks).toBe(12);
+
+      // Touch t1 to make it most-recently-used
+      getCachedBgmBuffer('t1');
+
+      // Load 2 more to trigger eviction — t2 and t3 (oldest) should be evicted
+      await preloadBgmTrack(ctx, makeTrack('t13'));
+      await preloadBgmTrack(ctx, makeTrack('t14'));
+
+      expect(isBgmTrackPreloaded('t1')).toBe(true);
+      expect(isBgmTrackPreloaded('t2')).toBe(false);
+    });
+
+    it('getAssetCacheStats reports memory bytes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(1024)),
+      });
+      const ctx = makeMockAudioContext();
+
+      await preloadBgmTrack(ctx, makeTrack('t1'));
+      const stats = getAssetCacheStats();
+      expect(stats.bgmMemoryBytes).toBeGreaterThan(0);
+    });
+
+    it('clearAllAssetCaches resets memory byte counters', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(1024)),
+      });
+      const ctx = makeMockAudioContext();
+
+      await preloadBgmTrack(ctx, makeTrack('t1'));
+      await preloadSfx(ctx, 'boom', './sfx/boom.mp3');
+      expect(getAssetCacheStats().bgmMemoryBytes).toBeGreaterThan(0);
+
+      clearAllAssetCaches();
+
+      const stats = getAssetCacheStats();
+      expect(stats.bgmMemoryBytes).toBe(0);
+      expect(stats.sfxMemoryBytes).toBe(0);
+    });
+  });
 });

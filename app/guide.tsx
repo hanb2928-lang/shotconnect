@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -39,7 +40,7 @@ function getIcon(key: string): LucideIcon {
   return ICON_MAP[key] ?? Info;
 }
 
-export default function GuideScreen() {
+function GuideScreenInner() {
   const insets = useSafeAreaInsets();
   const { language } = useI18n();
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -583,3 +584,11 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xl,
   },
 });
+
+export default function GuideScreen() {
+  return (
+    <SafeLazyLoad>
+      <GuideScreenInner />
+    </SafeLazyLoad>
+  );
+}

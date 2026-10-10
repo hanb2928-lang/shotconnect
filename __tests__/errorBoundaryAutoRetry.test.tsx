@@ -71,10 +71,24 @@ jest.mock('@/lib/theme', () => ({
 
 jest.mock('@/lib/errorLogger', () => ({
   logFatal: jest.fn(),
+  addBreadcrumb: jest.fn(),
 }));
 
 jest.mock('@/components/BootFallback', () => ({
   BootFallback: 'BootFallback',
+}));
+
+jest.mock('@/hooks/useNetworkStatus', () => ({
+  isOnline: () => (global as any).navigator?.onLine ?? true,
+  onNetworkRecovery: (cb: () => void) => {
+    (global as any).__networkRecoveryListeners = (global as any).__networkRecoveryListeners || [];
+    (global as any).__networkRecoveryListeners.push(cb);
+    return () => {
+      const list: (() => void)[] = (global as any).__networkRecoveryListeners || [];
+      const i = list.indexOf(cb);
+      if (i >= 0) list.splice(i, 1);
+    };
+  },
 }));
 
 const React = require('react');
@@ -111,10 +125,17 @@ function getAllTexts(testRenderer: any): string[] {
 describe('ErrorBoundary auto-retry-on-online', () => {
   let testRenderer: any;
 
+  function fireOnline() {
+    onlineListeners.forEach((cb) => cb());
+    const rec: (() => void)[] = (global as any).__networkRecoveryListeners || [];
+    rec.slice().forEach((cb) => cb());
+  }
+
   beforeEach(() => {
     navigatorOnLine = true;
     onlineListeners.length = 0;
     offlineListeners.length = 0;
+    (global as any).__networkRecoveryListeners = [];
     jest.clearAllMocks();
   });
 
@@ -232,7 +253,7 @@ describe('ErrorBoundary auto-retry-on-online', () => {
 
     act(() => {
       navigatorOnLine = true;
-      onlineListeners.forEach((cb) => cb());
+      fireOnline();
     });
 
     const texts = getAllTexts(testRenderer);
@@ -268,7 +289,7 @@ describe('ErrorBoundary auto-retry-on-online', () => {
     });
     act(() => {
       navigatorOnLine = true;
-      onlineListeners.forEach((cb) => cb());
+      fireOnline();
     });
     expect(getAllTexts(testRenderer)).toContain('OK');
 
@@ -297,7 +318,7 @@ describe('ErrorBoundary auto-retry-on-online', () => {
     });
     act(() => {
       navigatorOnLine = true;
-      onlineListeners.forEach((cb) => cb());
+      fireOnline();
     });
     expect(getAllTexts(testRenderer)).toContain('OK');
   });

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -13,7 +14,7 @@ import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { ArchiveSection } from '@/components/ArchiveSection';
 
-export default function VideosScreen() {
+function VideosScreenInner() {
   const router = useRouter();
   const safeTop = useSafeTop();
   const tabBarHeight = useTabBarHeight();
@@ -64,3 +65,11 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.textDim,
   },
 });
+
+export default function VideosScreen() {
+  return (
+    <SafeLazyLoad>
+      <VideosScreenInner />
+    </SafeLazyLoad>
+  );
+}

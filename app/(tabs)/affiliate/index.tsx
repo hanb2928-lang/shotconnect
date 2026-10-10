@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
   Text,
@@ -230,7 +231,7 @@ const STYLE_PRESETS: { label: string; value: string; icon: typeof Zap }[] = [
   { label: '강렬한 임팩트', value: '강렬하고 시선을 끄는 임팩트 연출', icon: Flame },
 ];
 
-export default function AffiliateScreen() {
+function AffiliateScreenInner() {
   const router = useRouter();
   const safeTop = useSafeTop();
   const tabBarHeight = useSubTabBarHeight();
@@ -5106,3 +5107,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+
+export default function AffiliateScreen() {
+  return (
+    <SafeLazyLoad>
+      <AffiliateScreenInner />
+    </SafeLazyLoad>
+  );
+}

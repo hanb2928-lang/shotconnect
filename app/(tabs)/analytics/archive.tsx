@@ -1,11 +1,12 @@
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChevronLeft } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
+import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import { theme } from '@/lib/theme';
 import { ArchiveSection } from '@/components/ArchiveSection';
 import { useSafeTop } from '@/hooks/useSafeTop';
 
-export default function ArchiveScreen() {
+function ArchiveScreenInner() {
   const router = useRouter();
   const safeTop = useSafeTop();
 
@@ -51,3 +52,11 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.text,
   },
 });
+
+export default function ArchiveScreen() {
+  return (
+    <SafeLazyLoad>
+      <ArchiveScreenInner />
+    </SafeLazyLoad>
+  );
+}
