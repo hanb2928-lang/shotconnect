@@ -146,7 +146,7 @@ import { useWebPush } from '@/hooks/useWebPush';
 import { DirectShareBridge } from '@/components/DirectShareBridge';
 import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
-import { probeUrlAccessible } from '@/lib/videoAudioMuxer';
+import { probeUrlAccessible } from '@/lib/urlProbe';
 import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { CachedImage } from '@/components/CachedImage';

@@ -106,8 +106,44 @@ export function useSoundPunch() {
 
   useEffect(() => {
     mountedRef.current = true;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden && refs.current.mediaRecorder) {
+        const r = refs.current;
+        if (r.rafId) {
+          cancelAnimationFrame(r.rafId);
+          r.rafId = null;
+        }
+        if (r.mediaStream) {
+          r.mediaStream.getTracks().forEach((t) => {
+            try { t.stop(); } catch { /* codec already reclaimed */ }
+          });
+        }
+        if (r.sourceNode) {
+          try { r.sourceNode.disconnect(); } catch { /* ignore */ }
+        }
+        if (r.audioContext) {
+          try { r.audioContext.close(); } catch { /* ignore */ }
+        }
+        if (r.recognition) {
+          try { r.recognition.stop(); } catch { /* ignore */ }
+        }
+        r.analyser = null;
+        r.mediaStream = null;
+        r.mediaRecorder = null;
+        r.sourceNode = null;
+        r.audioContext = null;
+        r.recognition = null;
+        r.recognitionActive = false;
+        setState((prev) => ({ ...prev, isRecording: false, amplitude: 0 }));
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       mountedRef.current = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       cleanup();
     };
   }, [cleanup]);
