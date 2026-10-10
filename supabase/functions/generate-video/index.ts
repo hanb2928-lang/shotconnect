@@ -74,7 +74,7 @@ interface GenerateVideoRequest {
 
 const MAX_RETRIES = 3; // Max retry attempts for transient API errors (4 total attempts)
 const RETRY_INITIAL_DELAY_MS = 1500; // Base delay for first retry, doubled each attempt
-const RUNWAY_SUBMIT_TIMEOUT_MS = 20000;
+const RUNWAY_SUBMIT_TIMEOUT_MS = 45000;
 const RUNWAY_POLL_TIMEOUT_MS = 10000;
 const EDGE_WALL_CLOCK_BUDGET_MS = 120000;
 const ZOMBIE_JOB_TIMEOUT_MS = 600000; // 10 minutes — jobs exceeding this in PENDING/PROCESSING are auto-failed
@@ -1293,7 +1293,7 @@ async function submitRunwayTask(
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === "AbortError") {
-      throw new Error("Runway 생성 요청 시간이 초과되었습니다 (30초).");
+      throw new Error("Runway 생성 요청 시간이 초과되었습니다 (45초). 네트워크 상태를 확인하고 다시 시도해주세요.");
     }
     throw err;
   }
@@ -2168,6 +2168,12 @@ async function submitWithRetry(fn: () => Promise<string>, maxRetries: number): P
       return await fn();
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
+      // Non-retryable errors: 401 (bad key), 400 (bad request), 404 (bad endpoint)
+      // — no amount of retrying will fix these, so fail immediately.
+      const msg = lastErr.message;
+      if (/HTTP 40[14]/.test(msg) || /HTTP 400/.test(msg)) {
+        throw lastErr;
+      }
       // Exponential backoff: 1.5s, 3s, 6s, 12s — stop if next delay exceeds deadline
       const backoffDelay = RETRY_INITIAL_DELAY_MS * Math.pow(2, attempt);
       if (attempt < maxRetries && Date.now() + backoffDelay < deadline) {

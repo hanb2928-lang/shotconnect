@@ -23,6 +23,41 @@ interface MuxRequest {
 // retry) share a single FFmpeg run instead of spawning duplicates.
 const inflightMux = new Map<string, Promise<Response>>();
 
+// Global concurrency cap: each FFmpeg WASM instance allocates ~150–250 MB
+// of heap. The Edge Runtime has a hard memory ceiling per isolate, so
+// unbounded concurrent encodes will trigger OOM kills. This semaphore
+// ensures at most MAX_CONCURRENT_MUX jobs run simultaneously; the rest
+// queue and wait their turn.
+const MAX_CONCURRENT_MUX = 2;
+let activeMuxCount = 0;
+const muxWaitQueue: Array<() => void> = [];
+
+const acquireMuxSlot = async (): Promise<void> => {
+  if (activeMuxCount < MAX_CONCURRENT_MUX) {
+    activeMuxCount++;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    muxWaitQueue.push(() => {
+      activeMuxCount++;
+      resolve();
+    });
+  });
+};
+
+const releaseMuxSlot = () => {
+  activeMuxCount--;
+  if (muxWaitQueue.length > 0) {
+    const next = muxWaitQueue.shift()!;
+    next();
+  }
+};
+
+// Reject inputs larger than this to prevent memory exhaustion from
+// oversized video/audio files. 80 MB per file is generous for a
+// 15–60 s clip at 720p ultrafast.
+const MAX_INPUT_BYTES = 80 * 1024 * 1024;
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -83,6 +118,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const muxWork = async (): Promise<Response> => {
+    // Acquire a concurrency slot before downloading/encoding to prevent
+    // unbounded FFmpeg WASM instances from exhausting Edge Runtime memory.
+    await acquireMuxSlot();
+
+    try {
     // Download both files
     const [videoResp, audioResp] = await Promise.all([
       fetch(videoUrl),
@@ -104,6 +144,14 @@ Deno.serve(async (req: Request) => {
 
     const videoBlob = await videoResp.blob();
     const audioBlob = await audioResp.blob();
+
+    // Size guard: reject inputs that would blow the memory budget.
+    if (videoBlob.size > MAX_INPUT_BYTES || audioBlob.size > MAX_INPUT_BYTES) {
+      return new Response(
+        JSON.stringify({ error: `입력 파일이 너무 큽니다 (최대 ${MAX_INPUT_BYTES / 1024 / 1024}MB).` }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Use ffmpeg.wasm to mux video + audio into a single MP4.
     // All FFmpeg operations are wrapped in try-catch with guaranteed
@@ -289,6 +337,9 @@ Deno.serve(async (req: Request) => {
       await cleanupFfmpeg();
       try { ffmpeg.terminate(); } catch { /* already terminated */ }
       throw ffmpegErr;
+    }
+    } finally {
+      releaseMuxSlot();
     }
     }; // end muxWork
 
