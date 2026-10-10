@@ -33,6 +33,7 @@ interface SoundPunchRefs {
   lastPunchTime: number;
   recognition: any;
   recognitionActive: boolean;
+  suspendedOnBackground: boolean;
 }
 
 const PEAK_THRESHOLD = 2.8;
@@ -66,6 +67,7 @@ export function useSoundPunch() {
     lastPunchTime: 0,
     recognition: null,
     recognitionActive: false,
+    suspendedOnBackground: false,
   });
   const isStartingRef = useRef(false);
   const lastStateUpdateRef = useRef(0);
@@ -108,11 +110,17 @@ export function useSoundPunch() {
     mountedRef.current = true;
 
     const handleVisibilityChange = () => {
-      if (document.hidden && refs.current.mediaRecorder) {
-        const r = refs.current;
+      const r = refs.current;
+      if (document.hidden && r.mediaRecorder) {
+        // Background: suspend AudioContext (reversible) instead of close (destructive).
+        // iOS Safari requires a user gesture to create a new AudioContext, so
+        // closing would make it impossible to resume recording on foreground.
         if (r.rafId) {
           cancelAnimationFrame(r.rafId);
           r.rafId = null;
+        }
+        if (r.mediaRecorder && r.mediaRecorder.state !== 'inactive') {
+          try { r.mediaRecorder.stop(); } catch { /* ignore */ }
         }
         if (r.mediaStream) {
           r.mediaStream.getTracks().forEach((t) => {
@@ -122,20 +130,39 @@ export function useSoundPunch() {
         if (r.sourceNode) {
           try { r.sourceNode.disconnect(); } catch { /* ignore */ }
         }
-        if (r.audioContext) {
-          try { r.audioContext.close(); } catch { /* ignore */ }
+        if (r.audioContext && r.audioContext.state === 'running') {
+          try { r.audioContext.suspend(); } catch { /* ignore */ }
+          r.suspendedOnBackground = true;
         }
         if (r.recognition) {
           try { r.recognition.stop(); } catch { /* ignore */ }
+          r.recognitionActive = false;
         }
         r.analyser = null;
         r.mediaStream = null;
         r.mediaRecorder = null;
         r.sourceNode = null;
-        r.audioContext = null;
         r.recognition = null;
-        r.recognitionActive = false;
         setState((prev) => ({ ...prev, isRecording: false, amplitude: 0 }));
+      } else if (!document.hidden && r.suspendedOnBackground && r.audioContext) {
+        // Foreground: resume the suspended AudioContext with a timeout guard
+        // to prevent deadlock if the browser blocks resume (e.g. iOS without
+        // user gesture). The user will need to press record again to restart
+        // the mic stream, but the context itself is preserved.
+        const resumePromise = r.audioContext.resume();
+        const timeoutPromise = new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('resume timeout')), 3000),
+        );
+        Promise.race([resumePromise, timeoutPromise])
+          .then(() => {
+            r.suspendedOnBackground = false;
+          })
+          .catch(() => {
+            // Resume failed or timed out — close the context to free resources.
+            try { r.audioContext?.close(); } catch { /* ignore */ }
+            r.audioContext = null;
+            r.suspendedOnBackground = false;
+          });
       }
     };
 
