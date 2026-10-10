@@ -29,6 +29,7 @@ export interface VideoGenState {
   resultImageUrl: string | null;
   error: string | null;
   scanId: string | null;
+  backgroundTransition: boolean;
 }
 
 export interface StartGenerationParams {
@@ -56,6 +57,7 @@ interface VideoGenContextValue extends VideoGenState {
   clearResult: () => void;
   retryFromDB: () => Promise<boolean>;
   progressMessage: string;
+  clearBackgroundTransition: () => void;
 }
 
 const VideoGenContext = createContext<VideoGenContextValue | null>(null);
@@ -73,6 +75,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backgroundTransition, setBackgroundTransition] = useState(false);
 
   const scanIdRef = useRef<string | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -402,7 +405,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               setIsGenerating(false);
               setVideoProgress(null);
               serverProgRef.current = null;
-              setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
+              setBackgroundTransition(true);
             } else {
               completionFallbackRef.current = setTimeout(checkCompletionFallback, 10_000);
             }
@@ -453,7 +456,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       setJobId(null);
       setIsGenerating(false);
       setVideoProgress(null);
-      setError('영상 생성 시간이 초과되었습니다. 서버에서 계속 렌더링 중일 수 있어요. 잠시 후 작업 목록에서 완성된 영상을 확인할 수 있습니다.');
+      setBackgroundTransition(true);
     }, GEN_TIMEOUT_MS);
 
     // Pause timers when app goes to background to avoid wasted renders and
@@ -882,6 +885,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       completionFallbackRef.current = null;
     }
     clearActiveVideoJob();
+    setBackgroundTransition(false);
+  }, []);
+
+  const clearBackgroundTransition = useCallback(() => {
+    setBackgroundTransition(false);
   }, []);
 
   const clearResult = useCallback(() => {
@@ -958,11 +966,13 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     resultImageUrl,
     error,
     scanId: scanIdRef.current,
+    backgroundTransition,
     startGeneration,
     clearGeneration,
     clearResult,
     retryFromDB,
     progressMessage: polling.progressMessage,
+    clearBackgroundTransition,
   };
 
   return (

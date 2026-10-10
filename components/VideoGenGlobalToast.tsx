@@ -1,15 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
-import { CheckCircle2, XCircle, X } from 'lucide-react-native';
+import { CheckCircle2, XCircle, X, Clock } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { useVideoGen } from '@/hooks/useVideoGen';
 
 export function VideoGenGlobalToast() {
   const router = useRouter();
-  const { isGenerating, videoProgress, resultVideoUrl, error } = useVideoGen();
+  const { isGenerating, videoProgress, resultVideoUrl, error, backgroundTransition, clearBackgroundTransition } = useVideoGen();
   const [visible, setVisible] = useState(false);
-  const [toastData, setToastData] = useState<{ type: 'completed' | 'error'; message: string } | null>(null);
+  const [toastData, setToastData] = useState<{ type: 'completed' | 'error' | 'background'; message: string } | null>(null);
   const slideAnim = useRef(new Animated.Value(100)).current;
   const prevGeneratingRef = useRef(false);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -28,6 +28,16 @@ export function VideoGenGlobalToast() {
       }
     }
   }, [isGenerating, videoProgress, resultVideoUrl, error]);
+
+  useEffect(() => {
+    if (backgroundTransition) {
+      setToastData({
+        type: 'background',
+        message: '서버 작업량이 많아 안전한 백그라운드 렌더링으로 전환되었습니다. 완료되면 알림을 보내드릴게요.',
+      });
+      setVisible(true);
+    }
+  }, [backgroundTransition]);
 
   useEffect(() => {
     if (visible) {
@@ -54,6 +64,9 @@ export function VideoGenGlobalToast() {
   const dismiss = () => {
     setVisible(false);
     setToastData(null);
+    if (toastData?.type === 'background') {
+      clearBackgroundTransition();
+    }
   };
 
   const handlePress = () => {
@@ -64,6 +77,7 @@ export function VideoGenGlobalToast() {
   if (!visible || !toastData) return null;
 
   const isCompleted = toastData.type === 'completed';
+  const isBackground = toastData.type === 'background';
 
   return (
     <Animated.View
@@ -73,12 +87,14 @@ export function VideoGenGlobalToast() {
       <TouchableOpacity style={styles.content} onPress={handlePress} activeOpacity={0.9}>
         {isCompleted ? (
           <CheckCircle2 size={22} color={theme.colors.success[400]} strokeWidth={2} />
+        ) : isBackground ? (
+          <Clock size={22} color={theme.colors.primary[400]} strokeWidth={2} />
         ) : (
           <XCircle size={22} color={theme.colors.error[400]} strokeWidth={2} />
         )}
         <View style={styles.textWrap}>
           <Text style={styles.title}>
-            {isCompleted ? '영상 생성 완료' : '영상 생성 실패'}
+            {isCompleted ? '영상 생성 완료' : isBackground ? '백그라운드 렌더링 전환' : '영상 생성 실패'}
           </Text>
           <Text style={styles.message} numberOfLines={2}>
             {isCompleted ? '탭하여 합성 화면에서 결과를 확인하세요' : toastData.message}
