@@ -148,6 +148,7 @@ import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { probeUrlAccessible } from '@/lib/videoAudioMuxer';
 import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
+import { registerAppStateHandler, dispatchAppStateChange } from '@/lib/appStateCoordinator';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { safeInvoke } from '@/lib/apiClient';
@@ -880,7 +881,7 @@ export default function ResultScreen() {
   const activeHookRef = useRef('');
   const styleApplyCounter = useRef(0);
   const handleJobUpdateRef = useRef<((job: RenderJob) => void) | null>(null);
-  const appStateHandlersRef = useRef<Set<(nextState: string) => void>>(new Set());
+
 
   const triggerTtsGeneration = useCallback(async (scanId: string, durationSec?: number): Promise<boolean> => {
     const tdDirect = scan?.template_data as { hook?: string; platformVariants?: Record<string, { hook?: string }> } | undefined;
@@ -1610,15 +1611,14 @@ export default function ResultScreen() {
   }, []);
 
   // Single AppState coordinator: one native listener dispatches to all
-  // handlers registered in appStateHandlersRef. This replaces 5 separate
-  // AppState.addEventListener calls that caused a thundering herd on
-  // every foreground transition.
+  // handlers via the serialized appStateCoordinator. This replaces 5
+  // separate AppState.addEventListener calls that caused a thundering
+  // herd on every foreground transition, and serializes deferred bridge
+  // work to prevent microtask queue explosion during background transitions.
   useEffect(() => {
     if (typeof AppState.addEventListener !== 'function') return;
     const sub = AppState.addEventListener('change', (nextAppState: string) => {
-      appStateHandlersRef.current.forEach((h) => {
-        try { h(nextAppState); } catch { /* handler error is non-fatal */ }
-      });
+      dispatchAppStateChange(nextAppState);
     });
     return () => sub.remove();
   }, []);
@@ -1675,10 +1675,10 @@ export default function ResultScreen() {
         }).catch(() => {});
       }
     };
-    appStateHandlersRef.current.add(handler);
+    const unsubHandler = registerAppStateHandler('deferred', handler);
     return () => {
       ttsFgAbort?.abort();
-      appStateHandlersRef.current.delete(handler);
+      unsubHandler();
     };
   }, [scan, ttsUrl]);
 
@@ -1993,7 +1993,7 @@ export default function ResultScreen() {
         }
       }
     };
-    appStateHandlersRef.current.add(handleAppState);
+    const unsubHandler = registerAppStateHandler('deferred', handleAppState);
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -2001,7 +2001,7 @@ export default function ResultScreen() {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
       bgVideoChannelRef.current = null;
-      appStateHandlersRef.current.delete(handleAppState);
+      unsubHandler();
       unsubRecovery();
     };
   }, [scan, activePlatform]);
@@ -2058,7 +2058,7 @@ export default function ResultScreen() {
         }
       }
     };
-    appStateHandlersRef.current.add(handleMuxAppState);
+    const unsubMuxHandler = registerAppStateHandler('deferred', handleMuxAppState);
 
     {
       // Both web and native: offload muxing to the server-side edge function
@@ -2143,7 +2143,7 @@ export default function ResultScreen() {
         muxAbortRef.current.abort();
         muxAbortRef.current = null;
       }
-      appStateHandlersRef.current.delete(handleMuxAppState);
+      unsubMuxHandler();
     };
   }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id, selectedDurationMs]);
 
@@ -2240,14 +2240,14 @@ export default function ResultScreen() {
         }
       }
     };
-    appStateHandlersRef.current.add(handleAppState);
+    const unsubHandler = registerAppStateHandler('deferred', handleAppState);
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
       }
-      appStateHandlersRef.current.delete(handleAppState);
+      unsubHandler();
       unsubRecovery();
     };
   }, [scan?.id]);
@@ -2373,11 +2373,11 @@ export default function ResultScreen() {
         }).catch(() => {});
       }
     };
-    appStateHandlersRef.current.add(handler);
+    const unsubHandler = registerAppStateHandler('deferred', handler);
 
     return () => {
       fgAbort?.abort();
-      appStateHandlersRef.current.delete(handler);
+      unsubHandler();
     };
   }, [scan?.analysis_job_id, analysisStatus]);
 
