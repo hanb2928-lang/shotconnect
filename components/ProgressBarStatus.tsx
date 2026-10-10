@@ -87,6 +87,13 @@ export function ProgressBarStatus({ progressSV, step, text }: ProgressBarStatusP
       const newStage = isComplete ? 3 : Math.min(step, 2);
       const bubbleText = STAGES[newStage].bubble;
 
+      if (isComplete) {
+        cancelAnimation(bodyBob);
+        cancelAnimation(eyeScale);
+        bodyBob.value = withTiming(0, { duration: 300 });
+        eyeScale.value = withTiming(1, { duration: 200 });
+      }
+
       bubbleOpacity.value = withSequence(
         withTiming(0, { duration: 150 }),
         withTiming(1, { duration: 200 }),
@@ -106,19 +113,37 @@ export function ProgressBarStatus({ progressSV, step, text }: ProgressBarStatusP
       }
     }
     prevStep.current = step;
-  }, [step, isComplete, bubbleOpacity, bubbleScale, mouthOpen]);
+  }, [step, isComplete, bubbleOpacity, bubbleScale, mouthOpen, bodyBob, eyeScale]);
 
-  // Pause infinite animations when app goes to background to prevent CPU drain
+  // Cancel infinite animations on background AND on completion to prevent
+  // UI-thread zombie nodes. On foreground return, re-arm only if not complete.
   useEffect(() => {
     const handleAppStateChange = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
         cancelAnimation(bodyBob);
         cancelAnimation(eyeScale);
+      } else if (nextState === 'active' && !isComplete) {
+        bodyBob.value = withRepeat(
+          withSequence(
+            withTiming(-1, { duration: 1000, easing: Easing.inOut(Easing.sin) }),
+            withTiming(0, { duration: 1000, easing: Easing.inOut(Easing.sin) }),
+          ),
+          -1, false,
+        );
+        eyeScale.value = withRepeat(
+          withSequence(
+            withDelay(2000, withTiming(0.2, { duration: 80 })),
+            withTiming(1, { duration: 120 }),
+            withDelay(3000, withTiming(0.2, { duration: 80 })),
+            withTiming(1, { duration: 120 }),
+          ),
+          -1, false,
+        );
       }
     };
     const unsub = registerAppStateHandler('immediate', handleAppStateChange);
     return unsub;
-  }, [bodyBob, eyeScale]);
+  }, [bodyBob, eyeScale, isComplete]);
 
   useEffect(() => {
     return () => {

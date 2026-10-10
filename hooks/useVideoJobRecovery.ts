@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { getActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 
@@ -177,7 +178,7 @@ export function useVideoJobRecovery() {
 
     // Pause recovery checks while backgrounded; resume on foreground.
     const unsubAppState = registerAppStateHandler('deferred', (nextState) => {
-      if (nextState === 'active') runRecovery().catch(() => {});
+      if (nextState === 'active') onFlushComplete(() => { runRecovery().catch(() => {}); });
     });
 
     let cleanupFns: (() => void)[] = [];

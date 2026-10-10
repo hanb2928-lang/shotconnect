@@ -91,6 +91,9 @@ export function ProgressBarBabyRun({ progressSV, step, text }: ProgressBarBabyRu
       cancelAnimation(legLeft);
       cancelAnimation(legRight);
       cancelAnimation(headBob);
+      cancelAnimation(eyeScale);
+      bodyBob.value = withTiming(0, { duration: 300 });
+      headBob.value = withTiming(0, { duration: 300 });
       return;
     }
 
@@ -110,7 +113,8 @@ export function ProgressBarBabyRun({ progressSV, step, text }: ProgressBarBabyRu
     prevStep.current = step;
   }, [step, sparkleOpacity]);
 
-  // Pause infinite animations when app goes to background to prevent CPU drain
+  // Cancel infinite animations on background AND re-arm on foreground return
+  // to prevent UI-thread zombie nodes from stale Reanimated C++ nodes.
   useEffect(() => {
     const handleAppStateChange = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
@@ -120,11 +124,19 @@ export function ProgressBarBabyRun({ progressSV, step, text }: ProgressBarBabyRu
         cancelAnimation(legLeft);
         cancelAnimation(legRight);
         cancelAnimation(headBob);
+      } else if (nextState === 'active' && !isComplete) {
+        const halfCycle = 700;
+        bodyBob.value = withRepeat(withSequence(withTiming(-1.5, { duration: halfCycle, easing: Easing.inOut(Easing.sin) }), withTiming(0, { duration: halfCycle, easing: Easing.inOut(Easing.sin) })), -1, false);
+        armLeft.value = withRepeat(withSequence(withTiming(1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) }), withTiming(-1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) })), -1, false);
+        armRight.value = withRepeat(withSequence(withTiming(-1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) }), withTiming(1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) })), -1, false);
+        legLeft.value = withRepeat(withSequence(withTiming(1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) }), withTiming(-1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) })), -1, false);
+        legRight.value = withRepeat(withSequence(withTiming(-1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) }), withTiming(1, { duration: halfCycle, easing: Easing.inOut(Easing.sin) })), -1, false);
+        headBob.value = withRepeat(withSequence(withTiming(-0.8, { duration: halfCycle, easing: Easing.inOut(Easing.sin) }), withTiming(0, { duration: halfCycle, easing: Easing.inOut(Easing.sin) })), -1, false);
       }
     };
     const unsub = registerAppStateHandler('immediate', handleAppStateChange);
     return unsub;
-  }, [bodyBob, armLeft, armRight, legLeft, legRight, headBob]);
+  }, [bodyBob, armLeft, armRight, legLeft, legRight, headBob, isComplete]);
 
   useEffect(() => {
     return () => {

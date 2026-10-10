@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { getItem, setItem, removeItem } from '@/lib/storage';
 
@@ -150,7 +151,7 @@ export function useOrphanJobRecovery(
     mountedRef.current = true;
 
     const unsubHandler = registerAppStateHandler('deferred', (state) => {
-      if (state === 'active') runRecovery();
+      if (state === 'active') onFlushComplete(() => runRecovery());
     });
     return () => {
       mountedRef.current = false;

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
 import { useResultPolling } from '@/hooks/useResultPolling';
@@ -215,6 +216,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const handleAppState = (nextState: string) => {
       if (nextState === 'active') {
         if (foregroundSyncRef.current) return;
+        // Defer DB sync until the flush window closes to avoid bridge
+        // backpressure from concurrent websocket/polling events.
+        onFlushComplete(() => {
+          if (foregroundSyncRef.current) return;
         // Foreground return: resync job status from DB. Use task_id (not id)
         // since jobId is the Runway/internal task identifier.
         const sync = (async () => {
@@ -300,6 +305,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         foregroundSyncRef.current = sync;
         sync.finally(() => {
           if (foregroundSyncRef.current === sync) foregroundSyncRef.current = null;
+        });
         });
       }
     };
