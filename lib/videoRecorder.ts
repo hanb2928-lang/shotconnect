@@ -86,17 +86,23 @@ export function startVideoRecording(
     let criticalLogged = false;
     let settled = false;
 
-    // Background guard: stop recording immediately when the page is hidden.
-    // The MediaRecorder's internal C++ encoder holds large heap buffers that
-    // cannot be released synchronously from JS. If the OS suspends the process
-    // while encoding is active, the C++ heap teardown races with OS memory
-    // reclamation and crashes at the native driver level. Stopping the recorder
-    // on background transition flushes the encoder's internal state cleanly
-    // before the OS locks the process.
+    // Background guard: when the page is hidden, the OS forcefully reclaims
+    // the hardware codec session. Calling recorder.stop() on the dead C++
+    // encoder triggers a native SIGABRT that bypasses JS try-catch and kills
+    // the process. Do NOT call any MediaRecorder method — just set the flag
+    // and let the browser GC the dead recorder on foreground return.
     const onVisibilityChange = () => {
       if (typeof document === 'undefined') return;
-      if (document.hidden && !settled && recorder.state !== 'inactive') {
-        try { recorder.stop(); } catch {}
+      if (document.hidden && !settled) {
+        settled = true;
+        pressureUnsub();
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        // Resolve with whatever chunks were collected so far — the caller
+        // can decide whether to use the partial recording or re-record.
+        const mimeType = recorder.mimeType || 'video/webm';
+        const blob = new Blob(chunks, { type: mimeType });
+        chunks.length = 0;
+        resolve({ blob, mimeType, durationMs: Date.now() - startTime });
       }
     };
     if (typeof document !== 'undefined') {

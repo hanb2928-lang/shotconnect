@@ -393,27 +393,63 @@ export async function muxVideoWithAudio(
     const FRAME_STALL_THRESHOLD_MS = 5000;
     const MAX_STALLED_FRAMES = 3;
     // Background guard: when the page is hidden (user switches apps or
-    // minimizes the browser), the OS suspends the process and the
-    // MediaRecorder's internal C++ encoder enters an undefined state.
-    // The JS abort signal does NOT propagate into the WebAssembly/native
-    // encoder loop synchronously — the encoder may still be holding large
-    // heap buffers when the OS reclaims process memory, causing a native
-    // driver-level crash.
+    // minimizes the browser), the OS forcefully reclaims the hardware
+    // codec session backing MediaRecorder. By the time this handler runs,
+    // the C++ encoder may already be in an aborted state at the driver
+    // level. Calling ANY MediaRecorder method (stop, pause, requestData,
+    // even reading .state) on a dead encoder triggers a native SIGABRT
+    // that bypasses JS try-catch and kills the process at the kernel level.
     //
-    // We treat background as TERMINAL for any active encoding: immediately
-    // stop the recorder, cancel the RAF loop, and release all resources.
-    // Never attempt to resume an encoder that was active when the OS
-    // suspended the process — recorder.resume() on a backgrounded encoder
-    // triggers a race between the C++ heap teardown and the OS memory
-    // reclamation that crashes at the native driver level.
+    // Strategy: do NOT touch the recorder at all. Set a flag, cancel the
+    // JS-only RAF loop, clean up everything except the recorder, and let
+    // the browser's GC sweep the dead encoder naturally on the next
+    // foreground tick. The caller re-triggers muxing on foreground return
+    // via its dependency array, starting a fresh encoder with clean state.
     const onVisibilityChange = () => {
       if (typeof document === 'undefined') return;
       if (document.hidden && !settled) {
-        // Abort the mux entirely — do NOT pause/resume.
-        // The caller (result page) will re-trigger the mux on foreground
-        // return via its dependency array, starting a fresh encoder with
-        // clean heap state.
-        abortMux('background-transition');
+        settled = true;
+        // Cancel the RAF loop — this is pure JS, no native calls.
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        rafId = null;
+        if (checkEndTimerId !== null) clearTimeout(checkEndTimerId);
+        checkEndTimerId = null;
+        // Pause media elements — these are safe DOM calls, not encoder calls.
+        try { video.pause(); } catch {}
+        try { audio.pause(); } catch {}
+        // Clean up everything except the recorder. Do NOT call
+        // recorder.stop(), recorder.pause(), or read recorder.state.
+        if (typeof document !== 'undefined') {
+          document.removeEventListener('visibilitychange', onVisibilityChange);
+        }
+        if (onAbort && abortSignal) {
+          abortSignal.removeEventListener('abort', onAbort);
+        }
+        if (offscreenWorker) {
+          try { offscreenWorker.postMessage({ type: 'done' }); } catch {}
+          offscreenWorker.terminate();
+          offscreenWorker = null;
+        }
+        if (workerBlobUrl) {
+          URL.revokeObjectURL(workerBlobUrl);
+          unregisterTempFile(workerBlobUrl);
+          workerBlobUrl = null;
+        }
+        try { sourceNode.disconnect(); } catch {}
+        try { sourceNode.disconnect(audioCtx.destination); } catch {}
+        try { audioCtx.close().catch(() => {}); } catch {}
+        try { videoStream.getTracks().forEach((t) => t.stop()); } catch {}
+        try { audioTracks.forEach((t) => t.stop()); } catch {}
+        try { canvas.width = 0; canvas.height = 0; } catch {}
+        chunks.length = 0;
+        if (wakeLockSentinel) {
+          try { void wakeLockSentinel.release?.(); } catch {}
+          wakeLockSentinel = null;
+        }
+        // The recorder is intentionally NOT stopped. It will be GC'd
+        // by the browser on the next foreground tick. Any attempt to
+        // call methods on it now would SIGABRT the process.
+        flushPostSynthesisMemory().finally(() => resolve(null));
       }
     };
     if (typeof document !== 'undefined') {
