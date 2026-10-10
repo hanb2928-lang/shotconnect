@@ -706,14 +706,23 @@ function computeEditPlan(
   const visionFeatureHint = productVision?.visualFeatures?.slice(0, 2).join(' · ') ?? '';
 
   const d = totalDurationSec;
-  const hookEnd = Math.max(1, Math.round(d * 0.2));
-  const needEnd = Math.max(hookEnd + 1, Math.round(d * 0.47));
-  const transformEnd = Math.max(needEnd + 1, Math.round(d * 0.73));
-  const ctaEnd = Math.max(transformEnd + 1, Math.round(d * 0.87));
+  // Compute proportional boundaries, then clamp each to [prev+1, d] to
+  // prevent ghost segments (endSec > d) and zero-length segments that
+  // crash downstream rendering at short durations (e.g. 3s).
+  const rawHookEnd = Math.round(d * 0.2);
+  const rawNeedEnd = Math.round(d * 0.47);
+  const rawTransformEnd = Math.round(d * 0.73);
+  const rawCtaEnd = Math.round(d * 0.87);
 
-  const segments: EditSegment[] = [
+  const hookEnd = Math.min(Math.max(1, rawHookEnd), d);
+  const needEnd = Math.min(Math.max(hookEnd + 1, rawNeedEnd), d);
+  const transformEnd = Math.min(Math.max(needEnd + 1, rawTransformEnd), d);
+  const ctaEnd = Math.min(Math.max(transformEnd + 1, rawCtaEnd), d);
+
+  // If clamping collapsed segments (e.g. d=3 can only fit 3 segments),
+  // drop trailing segments that would have zero or negative duration.
+  const segmentDefs: Array<Omit<EditSegment, 'index' | 'startSec' | 'endSec'> & { startSec: number; endSec: number }> = [
     {
-      index: 0,
       startSec: 0,
       endSec: hookEnd,
       label: '시선 포착',
@@ -724,7 +733,6 @@ function computeEditPlan(
       narrationCue: story.narrationCues.gazeHook,
     },
     {
-      index: 1,
       startSec: hookEnd,
       endSec: needEnd,
       label: '서사 전개',
@@ -737,7 +745,6 @@ function computeEditPlan(
       ttsNarrationText: ttsNarration,
     },
     {
-      index: 2,
       startSec: needEnd,
       endSec: transformEnd,
       label: '변화·몰입',
@@ -750,7 +757,6 @@ function computeEditPlan(
       ttsNarrationText: ttsNarration,
     },
     {
-      index: 3,
       startSec: transformEnd,
       endSec: ctaEnd,
       label: 'CTA',
@@ -762,13 +768,19 @@ function computeEditPlan(
     },
   ];
 
+  const segments: EditSegment[] = segmentDefs
+    .filter((s) => s.endSec > s.startSec)
+    .map((s, i) => ({ ...s, index: i }));
+
+  const lastSegEnd = segments.length > 0 ? segments[segments.length - 1].endSec : 0;
+
   const disclosureText = getDisclosureForPlatforms(affiliatePlatforms, autoDisclosure && disclosureEnabled);
   const disclosureShort = getDisclosureShortForPlatforms(affiliatePlatforms, autoDisclosure && disclosureEnabled);
 
   const disclosureOverlay: DisclosureOverlayPlan = {
-    startSec: ctaEnd,
+    startSec: lastSegEnd,
     endSec: d,
-    durationSec: d - ctaEnd,
+    durationSec: Math.max(0, d - lastSegEnd),
     text: disclosureEnabled ? (disclosureText || '본 영상은 광고/협찬/업체 지원을 받아 제작되었습니다.') : '',
     shortText: disclosureEnabled ? (disclosureShort || '광고·협찬 포함') : '',
     position: 'bottom-center',

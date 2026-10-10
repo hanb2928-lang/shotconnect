@@ -1242,7 +1242,7 @@ async function submitRunwayTask(
       ratio: ratioValue,
     };
     if (resolution) payload.resolution = isSeedance ? "720p" : resolution;
-    if (fps != null) payload.fps = fps;
+    if (fps != null) payload.fps = isSeedance ? Math.min(fps, 24) : fps;
     if (hasImage && promptImage) {
       payload.promptImage = promptImage;
     }
