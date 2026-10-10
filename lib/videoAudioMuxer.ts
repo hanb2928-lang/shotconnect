@@ -392,78 +392,28 @@ export async function muxVideoWithAudio(
     let stalledFrameCount = 0;
     const FRAME_STALL_THRESHOLD_MS = 5000;
     const MAX_STALLED_FRAMES = 3;
-    let pausedForBackground = false;
-
-    // Background/foreground guard: when the page is hidden (user switches
-    // apps or minimizes the browser), requestAnimationFrame stops firing
-    // but MediaRecorder keeps producing dataavailable events, accumulating
-    // Blob chunks in memory. On mobile, the OS OOM killer will terminate
-    // the process. We pause the recorder and media playback on hidden,
-    // and resume on visible to prevent memory blowup.
+    // Background guard: when the page is hidden (user switches apps or
+    // minimizes the browser), the OS suspends the process and the
+    // MediaRecorder's internal C++ encoder enters an undefined state.
+    // The JS abort signal does NOT propagate into the WebAssembly/native
+    // encoder loop synchronously — the encoder may still be holding large
+    // heap buffers when the OS reclaims process memory, causing a native
+    // driver-level crash.
     //
-    // CRITICAL: On mobile, the OS may kill the MediaRecorder encoder
-    // silently while backgrounded — recorder.state transitions to
-    // 'inactive' with no onerror event. Calling resume() on an inactive
-    // recorder throws InvalidStateError, which propagates up through the
-    // visibilitychange event listener and crashes the app because
-    // ErrorBoundary cannot catch errors in DOM event listeners.
+    // We treat background as TERMINAL for any active encoding: immediately
+    // stop the recorder, cancel the RAF loop, and release all resources.
+    // Never attempt to resume an encoder that was active when the OS
+    // suspended the process — recorder.resume() on a backgrounded encoder
+    // triggers a race between the C++ heap teardown and the OS memory
+    // reclamation that crashes at the native driver level.
     const onVisibilityChange = () => {
       if (typeof document === 'undefined') return;
-      if (document.hidden && !settled && recorder.state === 'recording') {
-        pausedForBackground = true;
-        try { recorder.pause(); } catch { /* not supported */ }
-        video.pause();
-        audio.pause();
-        // Check heap pressure on background — if already high, abort
-        const pressure = detectRuntimePressure();
-        if (pressure === 'severe') {
-          setMemoryPressure('severe', 'background-during-mux');
-        }
-      } else if (!document.hidden && pausedForBackground && !settled) {
-        pausedForBackground = false;
-        // If the OS killed the recorder while backgrounded, abort cleanly
-        // instead of calling resume() on a dead recorder (which throws).
-        if (recorder.state === 'inactive') {
-          settled = true;
-          cleanup();
-          flushPostSynthesisMemory().finally(() => resolve(null));
-          return;
-        }
-        // Re-acquire the 2D canvas context — the WebView may have purged
-        // the canvas DOM node during background, making the old ctx a
-        // dangling pointer. Any drawImage call on it would SIGSEGV.
-        if (!useOffscreenDraw) {
-          try {
-            const freshCtx = canvas.getContext('2d');
-            if (freshCtx) ctx = freshCtx;
-            else {
-              // Canvas node was purged and cannot be recreated — abort.
-              settled = true;
-              cleanup();
-              flushPostSynthesisMemory().finally(() => resolve(null));
-              return;
-            }
-          } catch {
-            settled = true;
-            cleanup();
-            flushPostSynthesisMemory().finally(() => resolve(null));
-            return;
-          }
-        }
-        if (recorder.state === 'paused') {
-          try { recorder.resume(); } catch { /* not supported */ }
-        }
-        // AudioContext is suspended by the OS on background; resume it
-        // explicitly or audio playback will be silent / throw on connect.
-        if (audioCtx.state === 'suspended') {
-          audioCtx.resume().catch(() => {});
-        }
-        video.play().catch(() => {});
-        audio.play().catch(() => {});
-        lastFrameTime = performance.now(); // reset stall timer
-        rafId = requestAnimationFrame(drawFrame);
-        // Re-acquire the Wake Lock — the browser auto-releases it on hide
-        void acquireWakeLock();
+      if (document.hidden && !settled) {
+        // Abort the mux entirely — do NOT pause/resume.
+        // The caller (result page) will re-trigger the mux on foreground
+        // return via its dependency array, starting a fresh encoder with
+        // clean heap state.
+        abortMux('background-transition');
       }
     };
     if (typeof document !== 'undefined') {

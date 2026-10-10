@@ -84,6 +84,24 @@ export function startVideoRecording(
     let accumulatedBytes = 0;
     let warnedAtSize = false;
     let criticalLogged = false;
+    let settled = false;
+
+    // Background guard: stop recording immediately when the page is hidden.
+    // The MediaRecorder's internal C++ encoder holds large heap buffers that
+    // cannot be released synchronously from JS. If the OS suspends the process
+    // while encoding is active, the C++ heap teardown races with OS memory
+    // reclamation and crashes at the native driver level. Stopping the recorder
+    // on background transition flushes the encoder's internal state cleanly
+    // before the OS locks the process.
+    const onVisibilityChange = () => {
+      if (typeof document === 'undefined') return;
+      if (document.hidden && !settled && recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch {}
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
 
     recorder.ondataavailable = (e: BlobEvent) => {
       if (e.data && e.data.size > 0) {
@@ -130,7 +148,12 @@ export function startVideoRecording(
     });
 
     recorder.onstop = () => {
+      if (settled) return;
+      settled = true;
       pressureUnsub();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
       const mimeType = recorder.mimeType || 'video/webm';
       const blob = new Blob(chunks, { type: mimeType });
       chunks.length = 0;
@@ -138,7 +161,12 @@ export function startVideoRecording(
     };
 
     recorder.onerror = () => {
+      if (settled) return;
+      settled = true;
       pressureUnsub();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
       reject(new Error('비디오 녹화 중 오류가 발생했습니다.'));
     };
 
