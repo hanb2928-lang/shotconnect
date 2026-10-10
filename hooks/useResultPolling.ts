@@ -93,6 +93,8 @@ export function useResultPolling(
     let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
     // Hoisted early so cleanup() can reference it without TDZ issues.
     let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
+    let softWarnFired = false;
+    let bgEnterTime: number | null = null;
     const pollErrorWindow: number[] = [];
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
@@ -429,20 +431,28 @@ export function useResultPolling(
       }
     };
 
-    // Soft warning at 120 seconds.
-    softWarnTimer = setTimeout(() => {
-      if (!cancelled && !settledRef.current) {
-        setProgressMessage('영상 생성이 조금 오래 걸리고 있어요. 잠시만 기다려주세요...');
-        callbacksRef.current.onSoftWarn?.();
-      }
-    }, SOFT_WARN_MS);
+    const armSoftWarn = (delayMs: number) => {
+      if (softWarnTimer) clearTimeout(softWarnTimer);
+      softWarnTimer = setTimeout(() => {
+        if (!cancelled && !settledRef.current) {
+          softWarnFired = true;
+          setProgressMessage('영상 생성이 조금 오래 걸리고 있어요. 잠시만 기다려주세요...');
+          callbacksRef.current.onSoftWarn?.();
+        }
+      }, delayMs);
+    };
 
-    // Hard timeout at 600 seconds (10 minutes).
-    timeoutTimer = setTimeout(() => {
-      if (!cancelled && !settledRef.current) {
-        settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
-      }
-    }, HARD_TIMEOUT_MS);
+    const armHardTimeout = (delayMs: number) => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      timeoutTimer = setTimeout(() => {
+        if (!cancelled && !settledRef.current) {
+          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+        }
+      }, delayMs);
+    };
+
+    armSoftWarn(SOFT_WARN_MS);
+    armHardTimeout(HARD_TIMEOUT_MS);
 
     // Start polling — first poll fires at 500ms for instant status check,
     // subsequent polls use the adaptive backoff starting at 1500ms.
@@ -504,19 +514,39 @@ export function useResultPolling(
           if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
           resumeBurstCount = 0;
           runResumeBurst();
-          if (!pollTimer) pollTimer = setTimeout(pollOnce, hybridPoller.nextPollDelayMs());
+
+          // Re-arm soft warn and hard timeout with remaining time so
+          // background duration does not count toward the user's wait.
+          if (bgEnterTime !== null) {
+            const bgDuration = Date.now() - bgEnterTime;
+            bgEnterTime = null;
+            const elapsed = Date.now() - startTime - bgDuration;
+            const remainingSoft = SOFT_WARN_MS - elapsed;
+            const remainingHard = HARD_TIMEOUT_MS - elapsed;
+            if (!softWarnFired && remainingSoft > 0) {
+              armSoftWarn(remainingSoft);
+            } else if (!softWarnFired && remainingSoft <= 0) {
+              softWarnFired = true;
+              setProgressMessage('영상 생성이 조금 오래 걸리고 있어요. 잠시만 기다려주세요...');
+              callbacksRef.current.onSoftWarn?.();
+            }
+            if (remainingHard > 0) {
+              armHardTimeout(remainingHard);
+            }
+          }
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
-        // Graceful pause: abort all in-flight network requests and release
-        // the Realtime websocket so the OS can reclaim memory without
-        // triggering orphaned-callback crashes.
+        // Graceful pause: abort all in-flight network requests, clear ALL
+        // timers (including soft warn and hard timeout), and release the
+        // Realtime websocket so the OS can reclaim memory without
+        // triggering orphaned-callback crashes or premature timeouts.
+        bgEnterTime = Date.now();
         pollAbort?.abort();
         forceSyncAbort?.abort();
         if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
-        if (pollTimer) {
-          clearTimeout(pollTimer);
-          pollTimer = null;
-        }
+        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+        if (softWarnTimer) { clearTimeout(softWarnTimer); softWarnTimer = null; }
+        if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
         if (realtimeChannel) {
           try { supabase.removeChannel(realtimeChannel); } catch { /* ignore */ }
           realtimeChannel = null;

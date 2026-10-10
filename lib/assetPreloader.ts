@@ -71,7 +71,10 @@ function evictBgmCache(): void {
     }
     if (oldestKey) {
       const removed = bgmBufferCache.get(oldestKey);
-      if (removed) bgmCacheBytes -= removed.bytes;
+      if (removed) {
+        bgmCacheBytes -= removed.bytes;
+        removed.buffer = null as unknown as AudioBuffer;
+      }
       bgmBufferCache.delete(oldestKey);
     }
   }
@@ -185,7 +188,10 @@ function evictSfxCache(): void {
     }
     if (oldestKey) {
       const removed = sfxBufferCache.get(oldestKey);
-      if (removed) sfxCacheBytes -= removed.bytes;
+      if (removed) {
+        sfxCacheBytes -= removed.bytes;
+        removed.buffer = null as unknown as AudioBuffer;
+      }
       sfxBufferCache.delete(oldestKey);
     }
   }
@@ -310,6 +316,9 @@ export function getCachedSubtitleStyle(
 // ─── Cache management ─────────────────────────────────────────────────────────
 
 export function clearBgmCache(): void {
+  for (const entry of bgmBufferCache.values()) {
+    entry.buffer = null as unknown as AudioBuffer;
+  }
   bgmBufferCache.clear();
   bgmFetchPromises.clear();
   bgmCacheBytes = 0;
@@ -317,6 +326,9 @@ export function clearBgmCache(): void {
 }
 
 export function clearSfxCache(): void {
+  for (const entry of sfxBufferCache.values()) {
+    entry.buffer = null as unknown as AudioBuffer;
+  }
   sfxBufferCache.clear();
   sfxFetchPromises.clear();
   sfxCacheBytes = 0;

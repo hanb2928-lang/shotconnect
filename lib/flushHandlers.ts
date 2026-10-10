@@ -12,6 +12,7 @@ import { releaseAllGLContexts } from '@/lib/glRenderer';
 import { sweepTempFiles } from '@/lib/tempFileManager';
 import { sweepStaleOfflineCache } from '@/lib/offlineCache';
 import { sweepIntermediateTempFiles } from '@/lib/storageLifecycle';
+import { clearBgmCache, clearSfxCache } from '@/lib/assetPreloader';
 
 let registered = false;
 
@@ -46,5 +47,10 @@ export function registerDefaultFlushHandlers(): void {
 
   registerFlushHandler('media-cache-l1', () => {
     mediaCacheClear();
+  });
+
+  registerFlushHandler('bgm-sfx-cache', () => {
+    clearBgmCache();
+    clearSfxCache();
   });
 }

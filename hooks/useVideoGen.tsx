@@ -124,7 +124,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Restore in-progress job from persistent storage on mount
+  // Restore in-progress job from persistent storage on mount.
+  // Force-syncs with the server DB AND scans.video_url to detect jobs that
+  // already completed while the app was closed. Terminal jobs are cleared
+  // from local storage immediately to prevent phantom generating state.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -133,7 +136,34 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       try {
         await ensureFreshSession();
         const isSoft = active.jobId.startsWith('soft-') || active.jobId.startsWith('hd-soft-');
-        let query = supabase.from('video_jobs').select('status');
+
+        // First: check scans.video_url / muxed_video_url — the webhook
+        // writes here directly and it's the most reliable completion signal.
+        // If the result is already there, clear local and show the result
+        // without entering a phantom generating state.
+        if (active.scanId) {
+          const { data: scanData } = await supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', active.scanId)
+            .maybeSingle();
+          if (cancelled) return;
+          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          if (scanFinalUrl) {
+            clearActiveVideoJob();
+            if (active.jobId.startsWith('hd-')) {
+              outputModeRef.current = 'video';
+            }
+            setResultVideoUrl(scanFinalUrl);
+            serverProgRef.current = 1.0;
+            setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+            notifyVideoCompleted();
+            return;
+          }
+        }
+
+        // Second: check video_jobs for the authoritative status.
+        let query = supabase.from('video_jobs').select('status, video_url, error_message');
         const { data, error: dbError } = isSoft && active.scanId
           ? await query.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
           : await query.eq('task_id', active.jobId).maybeSingle();
@@ -143,9 +173,21 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           clearActiveVideoJob();
           return;
         }
-        const status = (data as { status: string }).status;
-        if (status === 'SUCCESS' || status === 'FAILED') {
+        const row = data as { status: string; video_url: string | null; error_message: string | null };
+        if (row.status === 'SUCCESS') {
           clearActiveVideoJob();
+          const finalUrl = row.video_url;
+          if (finalUrl) {
+            setResultVideoUrl(finalUrl);
+            serverProgRef.current = 1.0;
+            setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+            notifyVideoCompleted();
+          }
+          return;
+        }
+        if (row.status === 'FAILED') {
+          clearActiveVideoJob();
+          setError(row.error_message ?? '영상 생성에 실패했습니다.');
           return;
         }
         if (active.scanId) scanIdRef.current = active.scanId;
@@ -155,7 +197,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const restoreProgress = active.progress > 0 ? Math.min(active.progress, 0.9) : 0.5;
         setVideoProgress({ phase: 'generating', progress: restoreProgress, message: '이전 생성 작업을 복구하는 중...', elapsedSec: 0, serverStep: active.step });
       } catch {
-        // DB unreachable — don't resume
+        // DB unreachable — don't resume, local job stays for next restart
       }
     })();
     return () => { cancelled = true; };
@@ -451,13 +493,25 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
 
     startTimers();
 
-    const timeout = setTimeout(() => {
-      jobIdRef.current = null;
-      setJobId(null);
-      setIsGenerating(false);
-      setVideoProgress(null);
-      setBackgroundTransition(true);
-    }, GEN_TIMEOUT_MS);
+    // Hard timeout guard. Paused while backgrounded so that background
+    // duration does not count toward the user's wait — the server keeps
+    // rendering regardless, and the user should not be penalized for
+    // switching apps.
+    let hardTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    let hardTimeoutBgEnter: number | null = null;
+
+    const armHardTimeout = (delayMs: number) => {
+      if (hardTimeoutTimer) clearTimeout(hardTimeoutTimer);
+      hardTimeoutTimer = setTimeout(() => {
+        jobIdRef.current = null;
+        setJobId(null);
+        setIsGenerating(false);
+        setVideoProgress(null);
+        setBackgroundTransition(true);
+      }, delayMs);
+    };
+
+    armHardTimeout(GEN_TIMEOUT_MS);
 
     // Pause timers when app goes to background to avoid wasted renders and
     // prevent a large progress jump when returning to foreground. Also abort
@@ -466,6 +520,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const unsubAppState = registerAppStateHandler('immediate', (state) => {
       if (state === 'background' || state === 'inactive') {
         stopTimers();
+        // Pause hard timeout — record entry time so we can re-arm with
+        // remaining duration on foreground return.
+        hardTimeoutBgEnter = Date.now();
+        if (hardTimeoutTimer) { clearTimeout(hardTimeoutTimer); hardTimeoutTimer = null; }
         // Abort in-flight submit request — the job continues server-side
         // and will be recovered on foreground return via DB resync.
         if (abortRef.current) {
@@ -473,12 +531,23 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         }
       } else if (state === 'active') {
         startTimers();
+        // Re-arm hard timeout with remaining time after subtracting
+        // background duration.
+        if (hardTimeoutBgEnter !== null) {
+          const bgDuration = Date.now() - hardTimeoutBgEnter;
+          hardTimeoutBgEnter = null;
+          const elapsed = Date.now() - genStartRef.current - bgDuration;
+          const remaining = GEN_TIMEOUT_MS - elapsed;
+          if (remaining > 0) {
+            armHardTimeout(remaining);
+          }
+        }
       }
     });
 
     return () => {
       stopTimers();
-      clearTimeout(timeout);
+      if (hardTimeoutTimer) clearTimeout(hardTimeoutTimer);
       unsubAppState();
     };
   }, [isGenerating]);

@@ -65,6 +65,7 @@ interface GenerateVideoRequest {
   mainImageUrl?: string;
   memeFormat?: string;
   memeText?: string;
+  idempotencyKey?: string;
   // webhook fields (sent by Runway callback)
   status?: string;
   output?: string[] | { url?: string } | string;
@@ -283,7 +284,29 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
     durationSec: body.durationSec,
     hasMainImageUrl: !!body.mainImageUrl,
     tokens: modeTokens.length,
+    hasIdempotencyKey: !!body.idempotencyKey,
   }));
+
+  // Idempotency: if the client sent an idempotency key, check for an existing
+  // non-terminal job with the same key. If found, return its taskId instead
+  // of creating a duplicate — this prevents wasted Runway API calls when the
+  // client retries after a network drop (e.g. entering a tunnel).
+  if (body.idempotencyKey) {
+    const existing = await findJobByIdempotencyKey(body.idempotencyKey);
+    if (existing) {
+      console.log(`[generate-video] Idempotency hit: returning existing job ${existing.taskId} for key ${body.idempotencyKey}`);
+      return new Response(
+        JSON.stringify({
+          mode: "submit",
+          taskId: existing.taskId,
+          provider: "runway",
+          status: existing.status,
+          idempotent: true,
+        }),
+        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+  }
 
   const isDraft = body.draft === true;
   const requestedDuration = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 30);
@@ -344,9 +367,21 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   // Generate internal job ID immediately — no waiting for Runway API
   const internalJobId = crypto.randomUUID();
 
-  // Save PENDING row to DB immediately
+  // Save PENDING row to DB immediately. The idempotency_key is included
+  // so the unique index prevents a racing duplicate INSERT from creating
+  // a second job — the caught error triggers a re-query for the first row.
   if (body.scanId) {
-    await saveVideoJob(body.scanId, internalJobId, isDraft, hdUpscale);
+    const saved = await saveVideoJob(body.scanId, internalJobId, isDraft, hdUpscale, body.idempotencyKey);
+    if (!saved && body.idempotencyKey) {
+      const existing = await findJobByIdempotencyKey(body.idempotencyKey);
+      if (existing) {
+        console.log(`[generate-video] Idempotency race: INSERT failed, returning existing job ${existing.taskId}`);
+        return new Response(
+          JSON.stringify({ mode: "submit", taskId: existing.taskId, provider: "runway", status: existing.status, idempotent: true }),
+          { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
   }
 
   // Fire-and-forget: self-invoke runway-submit mode to call Runway API asynchronously
@@ -937,12 +972,21 @@ async function checkWebhookResult(scanId: string): Promise<string | null> {
   return null;
 }
 
-async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, isHd: boolean): Promise<void> {
-  if (!supabaseUrl || !serviceRoleKey) return;
+async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, isHd: boolean, idempotencyKey?: string): Promise<boolean> {
+  if (!supabaseUrl || !serviceRoleKey) return false;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    await fetch(`${supabaseUrl}/rest/v1/video_jobs`, {
+    const row: Record<string, unknown> = {
+      scan_id: scanId,
+      task_id: taskId,
+      status: "PENDING",
+      step: "analyzing",
+      is_draft: isDraft,
+      is_hd: isHd,
+    };
+    if (idempotencyKey) row.idempotency_key = idempotencyKey;
+    const resp = await fetch(`${supabaseUrl}/rest/v1/video_jobs`, {
       method: "POST",
       headers: {
         apikey: serviceRoleKey,
@@ -950,19 +994,14 @@ async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, is
         "Content-Type": "application/json",
         Prefer: "return=minimal",
       },
-      body: JSON.stringify({
-        scan_id: scanId,
-        task_id: taskId,
-        status: "PENDING",
-        step: "analyzing",
-        is_draft: isDraft,
-        is_hd: isHd,
-      }),
+      body: JSON.stringify(row),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
+    if (!resp.ok && resp.status === 409) return false;
+    return true;
   } catch {
-    // non-fatal
+    return false;
   }
 }
 
@@ -985,6 +1024,28 @@ async function updateRunwayTaskId(scanId: string, internalJobId: string, runwayT
     clearTimeout(timeoutId);
   } catch {
     // non-fatal — server-poll can still find the job via task_id
+  }
+}
+
+async function findJobByIdempotencyKey(idempotencyKey: string): Promise<{ taskId: string; status: string } | null> {
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/video_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=task_id,status&limit=1`,
+      {
+        headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+        signal: controller.signal,
+      },
+    );
+    clearTimeout(timeoutId);
+    if (!resp.ok) return null;
+    const rows = await resp.json() as Array<{ task_id: string; status: string }>;
+    if (rows.length === 0) return null;
+    return { taskId: rows[0].task_id, status: rows[0].status };
+  } catch {
+    return null;
   }
 }
 

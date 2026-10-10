@@ -52,6 +52,31 @@ export function useVideoJobRecovery() {
       const activeJob = await getActiveVideoJob();
       const scanId = activeJob?.scanId ?? null;
 
+      // First: check scans.video_url / muxed_video_url — the webhook writes
+      // here directly and it's the most reliable completion signal. If the
+      // result is already there, clear local storage and show the result
+      // without entering a phantom in-progress state.
+      if (scanId) {
+        const { data: scanData } = await supabase
+          .from('scans')
+          .select('video_url, muxed_video_url')
+          .eq('id', scanId)
+          .maybeSingle();
+        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        if (scanFinalUrl) {
+          clearActiveVideoJob();
+          safeSetInfo({
+            state: 'completed',
+            jobId,
+            step: 'completed',
+            videoUrl: scanFinalUrl,
+            errorMsg: null,
+          });
+          return;
+        }
+      }
+
+      // Second: check video_jobs for the authoritative status.
       let query = supabase
         .from('video_jobs')
         .select('id, status, step, video_url, error_message');

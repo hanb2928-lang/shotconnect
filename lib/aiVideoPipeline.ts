@@ -180,6 +180,17 @@ function yieldToUI(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function generateIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 function compactBody(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
@@ -354,6 +365,7 @@ export async function generateAiVideo(
   report('submitting', 0.05, isDraft ? '빠른 미리보기 생성 요청 중...' : 'AI 비디오 생성 요청 전송 중...');
 
   // Phase 1: Submit task
+  const idempotencyKey = generateIdempotencyKey();
   let submitData: { taskId: string; motionPrompt: string; durationSec: number; aspectRatio: string; variationSeed: number } | null = null;
   let lastSubmitErr: Error | null = null;
 
@@ -377,6 +389,7 @@ export async function generateAiVideo(
           aspectRatio: options.aspectRatio ?? '9:16',
           productName: options.productName,
           scanId: options.scanId,
+          idempotencyKey,
           variationSeed: options.variationSeed ?? 0,
           bgmMood: options.bgmMood,
           captionText: options.captionText,
@@ -1032,6 +1045,8 @@ export async function submitVideoJobAsync(
     onProgress?.({ phase, progress, message, elapsedSec: 0, serverStep: serverStep ?? undefined });
   };
 
+  const idempotencyKey = generateIdempotencyKey();
+
   const submitBody = compactBody({
     mode: 'submit',
     prompt,
@@ -1039,6 +1054,7 @@ export async function submitVideoJobAsync(
     aspectRatio: options.aspectRatio ?? '9:16',
     productName: options.productName,
     scanId: options.scanId,
+    idempotencyKey,
     variationSeed: options.variationSeed ?? 0,
     bgmMood: options.bgmMood,
     captionText: options.captionText,
@@ -1539,6 +1555,8 @@ export async function upgradeVideoToHd(
   const HD_SUBMIT_TIMEOUT_MS = 90_000;
   const HD_SUBMIT_SOFT_TIMEOUT_MS = 6_000;
 
+  const hdIdempotencyKey = generateIdempotencyKey();
+
   const hdSubmitBody = compactBody({
     mode: 'submit',
     prompt,
@@ -1546,6 +1564,7 @@ export async function upgradeVideoToHd(
     aspectRatio: options.aspectRatio ?? '9:16',
     productName: options.productName,
     scanId,
+    idempotencyKey: hdIdempotencyKey,
     variationSeed: options.variationSeed ?? 0,
     bgmMood: options.bgmMood,
     captionText: options.captionText,
