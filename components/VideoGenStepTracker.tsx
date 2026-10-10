@@ -144,7 +144,11 @@ export function VideoGenStepTracker({ progress, variant = 'overlay' }: VideoGenS
 
   useEffect(() => {
     registerPause(pulseSV, barWidthSV, percentSV);
-    return () => { cancelAnimation(pulseSV); };
+    return () => {
+      cancelAnimation(pulseSV);
+      cancelAnimation(barWidthSV);
+      cancelAnimation(percentSV);
+    };
   }, [pulseSV, barWidthSV, percentSV, registerPause]);
 
   useEffect(() => {

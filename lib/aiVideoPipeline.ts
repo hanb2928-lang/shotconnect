@@ -985,13 +985,17 @@ function waitForVideoCompletion(
       if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
       pollBackoffAttempt = 0;
       reconnectAttempts = 0;
-      setupChannel();
-      scheduleNextPoll();
-      checkDb();
-      checkScanVideoUrl();
-      runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
+      onFlushComplete(() => {
+        if (settled) return;
+        setupChannel();
+        scheduleNextPoll();
+        checkDb();
+        checkScanVideoUrl();
+        runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
+        resumeBurstCount = 0;
+        runResumeBurst();
+      });
     };
 
     const handleAppState = (nextState: string) => {

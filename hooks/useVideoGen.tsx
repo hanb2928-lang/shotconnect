@@ -450,7 +450,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               // Job still in progress — retry after delay instead of bailing
               completionRetryRef.attempts++;
               if (completionRetryRef.attempts < completionRetryRef.max) {
-                completionFallbackRef.current = setTimeout(checkCompletionFallback, 10_000);
+                completionFallbackRef.current = setTimeout(checkCompletionFallback, 15_000);
                 return;
               }
               throw new Error('Completion retry limit reached');
@@ -465,7 +465,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               serverProgRef.current = null;
               setBackgroundTransition(true);
             } else {
-              completionFallbackRef.current = setTimeout(checkCompletionFallback, 10_000);
+              completionFallbackRef.current = setTimeout(checkCompletionFallback, 15_000);
             }
           }
         })();
@@ -481,7 +481,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             if (renderStallSinceRef.current === null) {
               renderStallSinceRef.current = Date.now();
             } else if (Date.now() - renderStallSinceRef.current >= COMPLETION_FALLBACK_DELAY_MS) {
-              if (!completionFallbackRef.current) {
+              if (!completionFallbackRef.current && jobIdRef.current) {
                 completionFallbackRef.current = setTimeout(checkCompletionFallback, 0);
               }
               renderStallSinceRef.current = null;
@@ -491,7 +491,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           }
           return prev;
         });
-      }, 3000);
+      }, 10000);
     };
 
     const stopTimers = () => {
