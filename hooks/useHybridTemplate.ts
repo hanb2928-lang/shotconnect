@@ -55,7 +55,7 @@ export function useHybridTemplate(
       });
     return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryKey, platformKey]);
+  }, [categoryKey, platformKey, params.productName, params.fallbackHook]);
 
   const badgeLabel = getTemplateBadgeLabel(result);
   const tpl = result?.template;

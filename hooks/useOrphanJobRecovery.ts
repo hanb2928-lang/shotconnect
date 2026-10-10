@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
+import { getItem, setItem, removeItem } from '@/lib/storage';
 
 export interface OrphanedScan {
   id: string;
@@ -21,30 +22,22 @@ const STORAGE_KEY_LAST_SCAN_ID = 'last_active_scan_id';
 const STORAGE_KEY_LAST_SCAN_AT = 'last_active_scan_at';
 
 export function rememberActiveScan(scanId: string): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_LAST_SCAN_ID, scanId);
-    localStorage.setItem(STORAGE_KEY_LAST_SCAN_AT, String(Date.now()));
-  } catch { /* non-web or unavailable */ }
+  setItem(STORAGE_KEY_LAST_SCAN_ID, scanId).catch(() => {});
+  setItem(STORAGE_KEY_LAST_SCAN_AT, String(Date.now())).catch(() => {});
 }
 
 export function forgetActiveScan(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY_LAST_SCAN_ID);
-    localStorage.removeItem(STORAGE_KEY_LAST_SCAN_AT);
-  } catch { /* non-web or unavailable */ }
+  removeItem(STORAGE_KEY_LAST_SCAN_ID).catch(() => {});
+  removeItem(STORAGE_KEY_LAST_SCAN_AT).catch(() => {});
 }
 
-function getStoredScanId(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEY_LAST_SCAN_ID);
-  } catch { return null; }
+async function getStoredScanId(): Promise<string | null> {
+  return getItem(STORAGE_KEY_LAST_SCAN_ID);
 }
 
-function getStoredScanAt(): number | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_LAST_SCAN_AT);
-    return raw ? parseInt(raw, 10) : null;
-  } catch { return null; }
+async function getStoredScanAt(): Promise<number | null> {
+  const raw = await getItem(STORAGE_KEY_LAST_SCAN_AT);
+  return raw ? parseInt(raw, 10) : null;
 }
 
 async function queryOrphanedScans(): Promise<OrphanedScan[]> {
@@ -115,8 +108,8 @@ export function useOrphanJobRecovery(
       await ensureFreshSession();
     } catch { /* non-fatal */ }
 
-    const storedId = getStoredScanId();
-    const storedAt = getStoredScanAt();
+    const storedId = await getStoredScanId();
+    const storedAt = await getStoredScanAt();
 
     if (storedId) {
       const scan = await checkScanCompletion(storedId);

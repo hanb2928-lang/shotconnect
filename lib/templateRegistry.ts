@@ -95,6 +95,8 @@ const PLATFORM_ALIASES: Record<string, string> = {
 let cachedTemplates: TemplateRegistryEntry[] | null = null;
 let fetchPromise: Promise<TemplateRegistryEntry[]> | null = null;
 let fetchGeneration = 0;
+let cacheTimestamp = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export function canonicalizeCategory(raw: string | undefined | null): string {
   if (!raw) return '_default';
@@ -109,7 +111,7 @@ export function canonicalizePlatform(raw: string | undefined | null): string {
 }
 
 async function fetchAllTemplates(): Promise<TemplateRegistryEntry[]> {
-  if (cachedTemplates) return cachedTemplates;
+  if (cachedTemplates && Date.now() - cacheTimestamp < CACHE_TTL_MS) return cachedTemplates;
   if (fetchPromise) return fetchPromise;
 
   const generation = ++fetchGeneration;
@@ -124,6 +126,7 @@ async function fetchAllTemplates(): Promise<TemplateRegistryEntry[]> {
 
       if (error || !data || generation !== fetchGeneration) return [];
       cachedTemplates = data as TemplateRegistryEntry[];
+      cacheTimestamp = Date.now();
       return cachedTemplates;
     } catch {
       return [];
@@ -138,6 +141,7 @@ async function fetchAllTemplates(): Promise<TemplateRegistryEntry[]> {
 
 export function invalidateTemplateCache(): void {
   cachedTemplates = null;
+  cacheTimestamp = 0;
   fetchGeneration += 1;
   fetchPromise = null;
 }

@@ -107,8 +107,10 @@ export function useResultPolling(
 
     const applyProgress = (stepProg: number | null, step: string | null) => {
       if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
-        if (stepProg < highestProgressSeen) return; // stale — reject
-        highestProgressSeen = stepProg;
+        const isStepChange = step !== null && step !== latestStepSeen;
+        if (stepProg < highestProgressSeen && !isStepChange) return; // stale — reject
+        if (isStepChange) highestProgressSeen = stepProg;
+        else highestProgressSeen = Math.max(highestProgressSeen, stepProg);
         const elapsedSec = Math.round((Date.now() - startTime) / 1000);
         const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
         setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);

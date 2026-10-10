@@ -90,7 +90,7 @@ const CHANNEL_RECONNECT_DELAY_MS = 3000;
 const JITTER = () => 0.8 + Math.random() * 0.4;
 const CHANNEL_MAX_RECONNECT_ATTEMPTS = 5;
 
-const BG_MAX_WAIT_MS = 120_000;
+const BG_MAX_WAIT_MS = 300_000;
 const MAX_CONSECUTIVE_POLL_FAILURES = 10;
 const POLL_FAIL_MESSAGE = '서버 응답이 지연되고 있습니다. 작업 목록에서 나중에 결과를 확인해 주세요.';
 

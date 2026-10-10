@@ -35,6 +35,7 @@ export function useVideoJobRecovery() {
 
   const checkJob = useCallback(async (jobId: string) => {
     if (checkingRef.current) return;
+    if (dismissedJobIdRef.current === jobId) return;
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
@@ -45,6 +46,7 @@ export function useVideoJobRecovery() {
 
     try {
       await ensureFreshSession();
+      if (dismissedJobIdRef.current === jobId) return;
       const isSoft = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
 
       // For soft-fallback IDs, no DB row has that task_id — look up by
@@ -92,6 +94,8 @@ export function useVideoJobRecovery() {
 
       const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
       if (timeoutId) clearTimeout(timeoutId);
+
+      if (dismissedJobIdRef.current === jobId) return;
 
       if (error || !data) {
         clearActiveVideoJob();

@@ -2,6 +2,9 @@ import { getItem, removeItem, setItem } from '@/lib/storage';
 
 export const ACTIVE_VIDEO_JOB_KEY = 'active_video_job';
 
+let saveGeneration = 0;
+let clearGeneration = 0;
+
 // A persisted job older than this is considered stale and will not be
 // restored on app restart. The server-side video generation timeout is
 // 10 minutes; 30 minutes gives ample buffer for slow renders, retries,
@@ -36,6 +39,10 @@ function isValidActiveVideoJob(raw: unknown): raw is ActiveVideoJob {
 }
 
 export async function saveActiveVideoJob(jobId: string, step: string, scanId?: string | null): Promise<void> {
+  // Don't save if a clear was issued after the caller decided to save
+  // (e.g. rapid tap → startGeneration → abort → clearGeneration race).
+  if (clearGeneration > saveGeneration) return;
+  saveGeneration = clearGeneration;
   const now = Date.now();
   const data: ActiveVideoJob = {
     jobId,
@@ -49,6 +56,7 @@ export async function saveActiveVideoJob(jobId: string, step: string, scanId?: s
 }
 
 export async function updateActiveVideoJobStep(step: string, progress?: number): Promise<void> {
+  if (clearGeneration > saveGeneration) return;
   const active = await getActiveVideoJob();
   if (!active) return;
   active.step = step;
@@ -60,6 +68,7 @@ export async function updateActiveVideoJobStep(step: string, progress?: number):
 }
 
 export async function clearActiveVideoJob(): Promise<void> {
+  clearGeneration++;
   await setItem(ACTIVE_VIDEO_JOB_KEY, '');
   if (typeof window !== 'undefined' && window.localStorage) {
     try {

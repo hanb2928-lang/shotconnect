@@ -92,6 +92,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const completionFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appStateActiveRef = useRef(true);
   const foregroundSyncRef = useRef<Promise<void> | null>(null);
+  const serverProgRef = useRef<number | null>(null);
+  const simTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const nudgeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const generationTokenRef = useRef(0);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -121,6 +125,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         abortRef.current.abort();
         abortRef.current = null;
       }
+      if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
+      if (nudgeTimerRef.current) { clearInterval(nudgeTimerRef.current); nudgeTimerRef.current = null; }
     };
   }, []);
 
@@ -306,7 +312,6 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   // progress from polling/Realtime, (c) a 2-second soft-creep guard so the
   // bar never visually stalls even when the server is silent.
   // Pauses during background to avoid wasted renders and progress jumps.
-  const serverProgRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isGenerating) return;
     const GEN_TIMEOUT_MS = 600_000;
@@ -314,7 +319,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     let creepTimer: ReturnType<typeof setInterval> | null = null;
     let hardGuardTimer: ReturnType<typeof setInterval> | null = null;
     let completionWatchTimer: ReturnType<typeof setInterval> | null = null;
-    const completionRetry = { attempts: 0, max: 6 };
+    const completionRetry = { attempts: 0, max: 10 };
 
     const startTimers = () => {
       if (timer || creepTimer) return;
@@ -370,9 +375,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const currentJobId = jobIdRef.current;
         const currentScanId = scanIdRef.current;
         if (!currentJobId) return;
+        const token = generationTokenRef.current;
         (async () => {
           try {
             await ensureFreshSession();
+            if (generationTokenRef.current !== token) return;
             // First check scans.video_url — the webhook writes here directly
             // and it's the most reliable completion signal.
             if (currentScanId) {
@@ -381,6 +388,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 .select('video_url, muxed_video_url')
                 .eq('id', currentScanId)
                 .maybeSingle();
+              if (generationTokenRef.current !== token) return;
               if (scanData) {
                 const scanFinalUrl = scanData.muxed_video_url ?? scanData.video_url;
                 if (scanFinalUrl) {
@@ -400,11 +408,13 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 }
               }
             }
+            if (generationTokenRef.current !== token) return;
             const isSoft = currentJobId.startsWith('soft-');
             let q = supabase.from('video_jobs').select('status, video_url, error_message');
             const { data, error: dbErr } = isSoft && currentScanId
               ? await q.eq('scan_id', currentScanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
               : await q.eq('task_id', currentJobId).maybeSingle();
+            if (generationTokenRef.current !== token) return;
             if (dbErr || !data) {
               throw new Error('DB lookup failed');
             }
@@ -605,7 +615,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ss = polling.serverStep;
     if (ss) {
-      updateActiveVideoJobStep(ss).catch(() => {});
+      updateActiveVideoJobStep(ss, polling.serverProgress ?? undefined).catch(() => {});
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (prev.serverStep === ss) return prev;
@@ -702,9 +712,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           const currentJobId = jobIdRef.current;
           const currentScanId = scanIdRef.current;
           if (currentJobId) {
+            const stallToken = generationTokenRef.current;
             (async () => {
               try {
                 await ensureFreshSession();
+                if (generationTokenRef.current !== stallToken) return;
                 // First check scans.video_url — the webhook writes here
                 // directly and it's the most reliable completion signal.
                 if (currentScanId) {
@@ -713,6 +725,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                     .select('video_url, muxed_video_url')
                     .eq('id', currentScanId)
                     .maybeSingle();
+                  if (generationTokenRef.current !== stallToken) return;
                   if (scanData) {
                     const scanFinalUrl = scanData.muxed_video_url ?? scanData.video_url;
                     if (scanFinalUrl) {
@@ -732,11 +745,13 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                     }
                   }
                 }
+                if (generationTokenRef.current !== stallToken) return;
                 const isSoft = currentJobId.startsWith('soft-');
                 let q = supabase.from('video_jobs').select('status, video_url, error_message');
                 const { data, error: dbErr } = isSoft && currentScanId
                   ? await q.eq('scan_id', currentScanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
                   : await q.eq('task_id', currentJobId).maybeSingle();
+                if (generationTokenRef.current !== stallToken) return;
                 if (dbErr || !data) return;
                 const row = data as { status: string; video_url: string | null; error_message: string | null };
                 if (row.status === 'SUCCESS' && row.video_url) {
@@ -829,6 +844,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         return { ...prev, progress: Math.max(prev.progress, simProgress), message: stepMsg };
       });
     }, 300);
+    simTimerRef.current = simTimer;
 
     let nudgeTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -848,6 +864,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
 
       setVideoProgress({ phase: 'submitting', progress: 0.10, message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 });
       clearInterval(simTimer);
+      simTimerRef.current = null;
 
       nudgeTimer = setInterval(() => {
         setVideoProgress((prev) => {
@@ -856,6 +873,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           return { ...prev, progress: next, message: 'AI가 훅 문구를 분석하고 렌더링을 준비하는 중...' };
         });
       }, 2000);
+      nudgeTimerRef.current = nudgeTimer;
 
       const { data: scanData, error: scanError } = await supabase
         .from('scans')
@@ -900,14 +918,46 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       clearInterval(nudgeTimer);
       clearInterval(simTimer);
       nudgeTimer = null;
+      nudgeTimerRef.current = null;
+      simTimerRef.current = null;
       jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
-      await saveActiveVideoJob(submitResult.taskId, 'submitting', scanIdRef.current);
+      try {
+        await saveActiveVideoJob(submitResult.taskId, 'submitting', scanIdRef.current);
+      } catch {
+        // Persistence failed — job is still submitted and polling works
+        // via in-memory jobIdRef. Don't throw; the job isn't lost.
+      }
       setVideoProgress({ phase: 'generating', progress: 0.15, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; }
+      if (nudgeTimerRef.current) { clearInterval(nudgeTimerRef.current); nudgeTimerRef.current = null; }
       clearInterval(simTimer);
+      if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
+      // If the submit was aborted (e.g. app backgrounded) but the scan row
+      // was already created, DON'T delete it — the server may have already
+      // received the submit and created a video_jobs row. Instead, persist
+      // a soft-fallback job so the foreground resync can recover it.
       if (scanIdRef.current && !jobIdRef.current) {
+        const abortedScanId = scanIdRef.current;
+        const isAbort = err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message));
+        if (isAbort) {
+          const fallbackId = `soft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          jobIdRef.current = fallbackId;
+          setJobId(fallbackId);
+          setIsGenerating(true);
+          try {
+            await saveActiveVideoJob(fallbackId, 'submitting', abortedScanId);
+          } catch {
+            // Persistence failed — in-memory state still works for this session
+          }
+          setVideoProgress({ phase: 'generating', progress: 0.12, message: '백그라운드 전환으로 일시 중단됨 — 포그라운드 복귀 시 자동 연결됩니다...', elapsedSec: 0 });
+          generateLockRef.current = false;
+          return;
+        }
+        // Non-abort error (e.g. scan insert failure, network error before
+        // submit) — safe to delete the scan row since the server never
+        // received a submit request.
         const orphanedScanId = scanIdRef.current;
         scanIdRef.current = null;
         try { await supabase.from('scans').delete().eq('id', orphanedScanId); } catch {}
@@ -927,22 +977,29 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       setError(userMsg);
     } finally {
       if (nudgeTimer) clearInterval(nudgeTimer);
+      if (nudgeTimerRef.current) { clearInterval(nudgeTimerRef.current); nudgeTimerRef.current = null; }
       clearInterval(simTimer);
+      if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
       generateLockRef.current = false;
     }
   }, [isGenerating]);
 
   const clearGeneration = useCallback(() => {
+    generationTokenRef.current++;
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
+    if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
+    if (nudgeTimerRef.current) { clearInterval(nudgeTimerRef.current); nudgeTimerRef.current = null; }
     jobIdRef.current = null;
     setJobId(null);
     setIsGenerating(false);
     setVideoProgress(null);
     setError(null);
     scanIdRef.current = null;
+    serverProgRef.current = null;
+    genStartRef.current = 0;
     if (hookTimeoutRef.current) {
       clearTimeout(hookTimeoutRef.current);
       hookTimeoutRef.current = null;
@@ -967,6 +1024,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const retryFromDB = useCallback(async (): Promise<boolean> => {
+    if (generateLockRef.current || isGenerating) return false;
     const active = await getActiveVideoJob();
     if (!active || !active.jobId || !active.scanId) return false;
     try {
