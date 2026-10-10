@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react';
-import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform, TextInput } from 'react-native';
+import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform, TextInput, AppState } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -44,6 +44,7 @@ import { runBootSweep } from '@/lib/bootSweeper';
 import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
+import { dispatchAppStateChange, cancelPendingDeferred } from '@/lib/appStateCoordinator';
 
 installGlobalErrorHandlers();
 
@@ -173,6 +174,21 @@ function AppShell() {
 
 export default function RootLayout() {
   useFrameworkReady();
+
+  // Single global AppState dispatcher — all other files register handlers
+  // via registerAppStateHandler instead of calling AppState.addEventListener
+  // directly. This prevents the thundering-herd bridge flood on background.
+  useEffect(() => {
+    if (typeof AppState === 'undefined' || typeof AppState.addEventListener !== 'function') return;
+    const sub = AppState.addEventListener('change', (nextState: string) => {
+      dispatchAppStateChange(nextState);
+    });
+    return () => {
+      sub.remove();
+      cancelPendingDeferred();
+    };
+  }, []);
+
   const { phase: bootPhase, isFreshBoot, markBooted } = useBootState();
   const [ready, setReady] = useState<ReadyState>('loading');
   const [fontTimedOut, setFontTimedOut] = useState(false);

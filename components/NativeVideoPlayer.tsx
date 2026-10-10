@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { View, StyleSheet, Platform, AppState, type AppStateStatus } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { VideoView, useVideoPlayer } from 'expo-video';
 
 interface NativeVideoPlayerProps {
@@ -68,7 +69,7 @@ export function NativeVideoPlayer({ videoUri, isPlaying, ttsUrl, onLoad, onError
   useEffect(() => {
     if (Platform.OS === 'web') return;
 
-    const handleAppState = (nextState: AppStateStatus) => {
+    const handleAppState = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
         try { player.pause(); } catch { /* stale player */ }
         try { ttsPlayer.pause(); } catch { /* stale player */ }
@@ -82,8 +83,8 @@ export function NativeVideoPlayer({ videoUri, isPlaying, ttsUrl, onLoad, onError
       }
     };
 
-    const sub = AppState.addEventListener('change', handleAppState);
-    return () => sub.remove();
+    const unsub = registerAppStateHandler('immediate', handleAppState);
+    return unsub;
   }, [player, ttsPlayer]);
 
   if (Platform.OS === 'web') {

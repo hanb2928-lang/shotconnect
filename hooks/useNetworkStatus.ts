@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Platform, AppState, type AppStateStatus } from 'react-native';
+import { Platform } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 
 export type NetworkStatus = 'online' | 'offline' | 'unstable' | 'unknown';
@@ -175,7 +176,7 @@ function stopProbing() {
   clearUnstable();
 }
 
-function handleAppStateChange(nextState: AppStateStatus) {
+function handleAppStateChange(nextState: string) {
   if (nextState === 'background' || nextState === 'inactive') {
     stopProbing();
   } else if (nextState === 'active') {
@@ -196,7 +197,7 @@ function init() {
       window.addEventListener('offline', offlineHandler);
     }
   } else {
-    AppState.addEventListener('change', handleAppStateChange);
+    registerAppStateHandler('deferred', handleAppStateChange);
   }
   startProbing();
 }

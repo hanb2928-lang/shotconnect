@@ -7,7 +7,7 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
 import { useResultPolling } from '@/hooks/useResultPolling';
@@ -104,10 +104,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   // Track app active/background state so background-sensitive timers
   // (step-stall DB sync, hook timeout) can skip work while backgrounded.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+    const unsub = registerAppStateHandler('immediate', (state) => {
       appStateActiveRef.current = state === 'active';
     });
-    return () => sub.remove();
+    return unsub;
   }, []);
 
   // Abort any in-flight submit when the provider unmounts to prevent
@@ -161,7 +161,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   // Force-sync job status from DB when app returns to foreground
   useEffect(() => {
     if (!jobId) return;
-    const handleAppState = (nextState: AppStateStatus) => {
+    const handleAppState = (nextState: string) => {
       if (nextState === 'active') {
         if (foregroundSyncRef.current) return;
         // Foreground return: resync job status from DB. Use task_id (not id)
@@ -252,8 +252,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         });
       }
     };
-    const sub = AppState.addEventListener('change', handleAppState);
-    return () => sub.remove();
+    const unsub = registerAppStateHandler('deferred', handleAppState);
+    return unsub;
   }, [jobId]);
 
   // Progress timer — advances progress while generating.
@@ -460,7 +460,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     // prevent a large progress jump when returning to foreground. Also abort
     // the submit AbortController so no orphaned fetch callbacks fire on a
     // backgrounded native view (OS memory reclaim crash defense).
-    const appSub = AppState.addEventListener('change', (state: AppStateStatus) => {
+    const unsubAppState = registerAppStateHandler('immediate', (state) => {
       if (state === 'background' || state === 'inactive') {
         stopTimers();
         // Abort in-flight submit request — the job continues server-side
@@ -476,7 +476,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     return () => {
       stopTimers();
       clearTimeout(timeout);
-      appSub.remove();
+      unsubAppState();
     };
   }, [isGenerating]);
 

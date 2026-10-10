@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, AppState, type AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import Svg, { Circle, Path, Ellipse, Defs, RadialGradient, Stop, LinearGradient } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -111,7 +112,7 @@ export function ProgressBarBabyRun({ progressSV, step, text }: ProgressBarBabyRu
 
   // Pause infinite animations when app goes to background to prevent CPU drain
   useEffect(() => {
-    const handleAppStateChange = (nextState: AppStateStatus) => {
+    const handleAppStateChange = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
         cancelAnimation(bodyBob);
         cancelAnimation(armLeft);
@@ -121,11 +122,8 @@ export function ProgressBarBabyRun({ progressSV, step, text }: ProgressBarBabyRu
         cancelAnimation(headBob);
       }
     };
-    let sub: { remove: () => void } | null = null;
-    if (typeof AppState.addEventListener === 'function') {
-      sub = AppState.addEventListener('change', handleAppStateChange);
-    }
-    return () => { sub?.remove(); };
+    const unsub = registerAppStateHandler('immediate', handleAppStateChange);
+    return unsub;
   }, [bodyBob, armLeft, armRight, legLeft, legRight, headBob]);
 
   useEffect(() => {

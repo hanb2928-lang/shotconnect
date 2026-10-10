@@ -131,13 +131,13 @@ function getWorker(): Worker | null {
 const pendingTasks = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let nextTaskId = 0;
 
-function dispatchToWorker<T>(payload: Record<string, unknown>): Promise<T> {
+function dispatchToWorker<T>(payload: Record<string, unknown>, transfer?: Transferable[]): Promise<T> {
   const worker = getWorker();
   if (!worker) return Promise.reject(new Error('Worker pool unavailable'));
   const id = ++nextTaskId;
   return new Promise<T>((resolve, reject) => {
     pendingTasks.set(id, { resolve: resolve as (v: unknown) => void, reject });
-    worker.postMessage({ id, ...payload });
+    worker.postMessage({ id, ...payload }, transfer ?? []);
   });
 }
 
@@ -177,7 +177,7 @@ export async function compressImageInWorker(
 }
 
 export async function encodeBase64InWorker(buffer: ArrayBuffer): Promise<string> {
-  return dispatchToWorker<string>({ type: 'base64', payload: { buffer }, transfer: [buffer] } as Record<string, unknown>);
+  return dispatchToWorker<string>({ type: 'base64', payload: { buffer } }, [buffer]);
 }
 
 export async function cropToSubjectInWorker(dataUrl: string): Promise<string> {

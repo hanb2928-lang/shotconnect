@@ -1,6 +1,7 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Platform, Image as RNImage, AppState, type AppStateStatus } from 'react-native';
+import { Platform, Image as RNImage } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 import { isTokenExpiringSoon } from '@/lib/timeUtils';
 import { base64ToUint8ArrayAsync, cleanBase64, uint8ArrayToBase64Async } from '@/lib/base64';
@@ -437,20 +438,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 function createBackgroundAbort(): AbortController | null {
   if (Platform.OS === 'web') return null;
   const controller = new AbortController();
-  let listener: { remove: () => void } | null = null;
-  const handler = (state: AppStateStatus) => {
+  let unsub: (() => void) | null = null;
+  unsub = registerAppStateHandler('immediate', (state) => {
     if (state === 'background' || state === 'inactive') {
       controller.abort();
-      listener?.remove();
-      listener = null;
+      unsub?.();
+      unsub = null;
     }
-  };
-  listener = AppState.addEventListener('change', handler);
+  });
   // Auto-cleanup if the controller is never explicitly aborted
   const originalAbort = controller.abort.bind(controller);
   controller.abort = () => {
-    listener?.remove();
-    listener = null;
+    unsub?.();
+    unsub = null;
     originalAbort();
   };
   return controller;

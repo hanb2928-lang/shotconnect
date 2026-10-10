@@ -148,7 +148,7 @@ import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { probeUrlAccessible } from '@/lib/videoAudioMuxer';
 import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
-import { registerAppStateHandler, dispatchAppStateChange } from '@/lib/appStateCoordinator';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { safeInvoke } from '@/lib/apiClient';
@@ -1608,19 +1608,6 @@ export default function ResultScreen() {
         muxedBlobUrlRef.current = null;
       }
     };
-  }, []);
-
-  // Single AppState coordinator: one native listener dispatches to all
-  // handlers via the serialized appStateCoordinator. This replaces 5
-  // separate AppState.addEventListener calls that caused a thundering
-  // herd on every foreground transition, and serializes deferred bridge
-  // work to prevent microtask queue explosion during background transitions.
-  useEffect(() => {
-    if (typeof AppState.addEventListener !== 'function') return;
-    const sub = AppState.addEventListener('change', (nextAppState: string) => {
-      dispatchAppStateChange(nextAppState);
-    });
-    return () => sub.remove();
   }, []);
 
   useEffect(() => {

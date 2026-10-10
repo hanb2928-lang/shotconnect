@@ -1,4 +1,4 @@
-import { AppState, type AppStateStatus } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, ensureFreshSession } from './supabase';
 import { monotonicStart, monotonicElapsedSec, monotonicElapsedMs } from './timeUtils';
 import type { ProductVisionResult } from './productVision';
@@ -109,7 +109,7 @@ function installBackgroundPause(opts: {
   let bgTimer: ReturnType<typeof setTimeout> | null = null;
   let isBackgrounded = false;
 
-  const handleAppState = (nextState: AppStateStatus) => {
+  const handleAppState = (nextState: string) => {
     if (nextState === 'background' || nextState === 'inactive') {
       if (isBackgrounded || opts.isSettled()) return;
       isBackgrounded = true;
@@ -126,10 +126,10 @@ function installBackgroundPause(opts: {
     }
   };
 
-  const appSub = AppState.addEventListener('change', handleAppState);
+  const unsubAppState = registerAppStateHandler('deferred', handleAppState);
   return () => {
     if (bgTimer) clearTimeout(bgTimer);
-    appSub.remove();
+    unsubAppState();
   };
 }
 
@@ -602,7 +602,7 @@ function waitForVideoCompletion(
     let bgTimer: ReturnType<typeof setTimeout> | null = null;
     let runwayFallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
     let isBackgrounded = false;
-    let appSub: { remove: () => void } | null = null;
+    let appSub: (() => void) | null = null;
 
     const cleanup = () => {
       if (channel) supabase.removeChannel(channel);
@@ -618,7 +618,7 @@ function waitForVideoCompletion(
       if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
       if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
       if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
-      appSub?.remove();
+      appSub?.();
     };
 
     const finish = (fn: () => void) => {
@@ -980,14 +980,14 @@ function waitForVideoCompletion(
       runResumeBurst();
     };
 
-    const handleAppState = (nextState: AppStateStatus) => {
+    const handleAppState = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
         pauseBackground();
       } else if (nextState === 'active') {
         resumeBackground();
       }
     };
-    appSub = AppState.addEventListener('change', handleAppState);
+    appSub = registerAppStateHandler('deferred', handleAppState);
 
     // Initial DB check in case the webhook already completed before we subscribed
     checkDb();

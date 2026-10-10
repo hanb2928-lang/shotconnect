@@ -7,9 +7,8 @@ import {
   ViewStyle,
   Platform,
   useWindowDimensions,
-  AppState,
-  type AppStateStatus,
 } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 
 import {
   Play,
@@ -548,7 +547,7 @@ useEffect(() => {
   // where a zombie media player receives play() after OS resource reclaim.
   const wasPlayingBeforeBgRef = useRef(false);
   useEffect(() => {
-    const handleAppState = (nextState: AppStateStatus) => {
+    const handleAppState = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
         wasPlayingBeforeBgRef.current = isPlaying;
         if (intervalRef.current) {
@@ -581,8 +580,8 @@ useEffect(() => {
         });
       }
     };
-    const sub = AppState.addEventListener('change', handleAppState);
-    return () => sub.remove();
+    const unsub = registerAppStateHandler('immediate', handleAppState);
+    return unsub;
   }, [hasGeneratedVideo, isPlaying, videoUri]);
 
   useEffect(() => {

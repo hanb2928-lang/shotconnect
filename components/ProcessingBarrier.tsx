@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Modal, ActivityIndicator, AppState, type AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet, Modal, ActivityIndicator } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import Animated, {
   useSharedValue,
   withRepeat,
@@ -23,7 +24,7 @@ export function ProcessingBarrier({
   sublabel,
 }: ProcessingBarrierProps) {
   const rotateSV = useSharedValue(0);
-  const appStateRef = useRef<AppStateStatus>('active');
+  const appStateRef = useRef<string>('active');
 
   useEffect(() => {
     if (!visible) {
@@ -40,7 +41,7 @@ export function ProcessingBarrier({
       false,
     );
 
-    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+    const sub = registerAppStateHandler('immediate', (state) => {
       appStateRef.current = state;
       if (state === 'background' || state === 'inactive') {
         cancelAnimation(rotateSV);
@@ -57,7 +58,7 @@ export function ProcessingBarrier({
     });
 
     return () => {
-      sub.remove();
+      sub();
       cancelAnimation(rotateSV);
     };
   }, [visible, rotateSV]);

@@ -11,8 +11,6 @@ import {
   ScrollView,
   Animated as RNAnimated,
   Easing,
-  AppState,
-  AppStateStatus,
   InteractionManager,
   Alert,
 } from 'react-native';
@@ -32,6 +30,7 @@ import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, Video } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { theme } from '@/lib/theme';
 import { startAsyncAnalysis } from '@/lib/asyncAnalysis';
 import { saveManualScan, uploadImage, uploadCompressedUri } from '@/lib/analysis';
@@ -485,7 +484,7 @@ function CameraScreenInner() {
 
   useEffect(() => {
     if (Platform.OS === 'web') return () => {};
-    const handleChange = (nextState: AppStateStatus) => {
+    const handleChange = (nextState: string) => {
       if (nextState === 'active') {
         if (isMountedRef.current) {
           // Forced remount cycle prevents Camera HAL FD leak on background→foreground
@@ -515,9 +514,9 @@ function CameraScreenInner() {
         bufferReleasedRef.current = true;
       }
     };
-    const sub = AppState.addEventListener('change', handleChange);
+    const unsub = registerAppStateHandler('deferred', handleChange);
     return () => {
-      sub.remove();
+      unsub();
       if (cameraRemountTimerRef.current) {
         clearTimeout(cameraRemountTimerRef.current);
         cameraRemountTimerRef.current = null;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Modal, Image, AppState, type AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet, Modal, Image } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -45,7 +46,7 @@ export function MotionPreviewOverlay({
   const translateA = useSharedValue(0);
   const translateB = useSharedValue(0);
   const sparkleRotate = useSharedValue(0);
-  const appStateRef = useRef<AppStateStatus>('active');
+  const appStateRef = useRef<string>('active');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -131,7 +132,7 @@ export function MotionPreviewOverlay({
 
   // Pause on background
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+    const sub = registerAppStateHandler('immediate', (state) => {
       appStateRef.current = state;
       if (state === 'background' || state === 'inactive') {
         if (timerRef.current) {
@@ -148,7 +149,7 @@ export function MotionPreviewOverlay({
         timerRef.current = setInterval(advanceSlide, CROSSFADE_MS + 200);
       }
     });
-    return () => { sub.remove(); };
+    return sub;
   }, [visible, hasImages, advanceSlide, sparkleRotate]);
 
   // Cleanup on unmount

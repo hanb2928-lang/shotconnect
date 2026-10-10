@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 
 export interface OrphanedScan {
@@ -156,16 +156,12 @@ export function useOrphanJobRecovery(
   useEffect(() => {
     mountedRef.current = true;
 
-    const handleAppState = (state: AppStateStatus) => {
-      if (state === 'active') {
-        runRecovery();
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppState);
+    const unsubHandler = registerAppStateHandler('deferred', (state) => {
+      if (state === 'active') runRecovery();
+    });
     return () => {
       mountedRef.current = false;
-      subscription.remove();
+      unsubHandler();
     };
   }, [runRecovery]);
 

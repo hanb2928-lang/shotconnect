@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { stepToProgress } from '@/lib/videoGenSteps';
 
@@ -496,7 +496,7 @@ export function useResultPolling(
     // unsubscribe Realtime so the OS can reclaim memory without orphaned
     // callbacks crashing the app. On foreground: re-subscribe Realtime,
     // run a resume burst, and restart the normal poll schedule.
-    const handleAppState = (nextState: AppStateStatus) => {
+    const handleAppState = (nextState: string) => {
       if (nextState === 'active') {
         if (!cancelled && !settledRef.current) {
           // Re-subscribe Realtime channel (was unsubscribed on background).
@@ -530,11 +530,11 @@ export function useResultPolling(
         }
       }
     };
-    const appSub = AppState.addEventListener('change', handleAppState);
+    const unsubAppState = registerAppStateHandler('deferred', handleAppState);
 
     return () => {
       cleanup();
-      appSub.remove();
+      unsubAppState();
     };
   }, [jobId, scanId, settle]);
 

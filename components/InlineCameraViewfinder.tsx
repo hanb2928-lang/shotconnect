@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, ViewStyle, AppState, type AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, ViewStyle } from 'react-native';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { CameraView } from 'expo-camera';
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { Camera, Image as ImageIcon, Loader, ShieldAlert, RotateCcw } from 'lucide-react-native';
@@ -153,7 +154,7 @@ export const InlineCameraViewfinder = forwardRef<
   useEffect(() => {
     if (Platform.OS === 'web') return;
     if (!isActive) return;
-    const handleAppState = (nextState: AppStateStatus) => {
+    const handleAppState = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
         setCameraReady(false);
         setNativeCameraActive(false);
@@ -168,8 +169,8 @@ export const InlineCameraViewfinder = forwardRef<
         return () => clearTimeout(reDelayId);
       }
     };
-    const sub = AppState.addEventListener('change', handleAppState);
-    return () => sub.remove();
+    const unsub = registerAppStateHandler('immediate', handleAppState);
+    return unsub;
   }, [isActive, permission?.granted]);
 
   useEffect(() => {
