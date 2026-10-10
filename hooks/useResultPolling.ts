@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { stepToProgress } from '@/lib/videoGenSteps';
+import { HybridRealtimePoller, type ChannelHealth } from '@/lib/hybridRealtimePoller';
 
 export type JobState = 'idle' | 'polling' | 'completed' | 'failed' | 'timeout';
 
@@ -17,9 +18,6 @@ export interface ResultPollingOptions {
 }
 
 const POLL_FIRST_DELAY_MS = 8000;
-const POLL_INITIAL_MS = 7000;
-const POLL_MAX_MS = 30000;
-const POLL_BACKOFF_FACTOR = 1.8;
 const SOFT_WARN_MS = 120_000;
 const HARD_TIMEOUT_MS = 600_000;
 const POLL_ERROR_WINDOW_MS = 60_000;
@@ -86,6 +84,7 @@ export function useResultPolling(
 
     const startTime = Date.now();
     let cancelled = false;
+    const hybridPoller = new HybridRealtimePoller();
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
     let softWarnTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,7 +94,6 @@ export function useResultPolling(
     // Hoisted early so cleanup() can reference it without TDZ issues.
     let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
     const pollErrorWindow: number[] = [];
-    let pollAttempt = 0;
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
     // Monotonic guard: track the highest progress and latest step seen
@@ -144,6 +142,7 @@ export function useResultPolling(
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
+            hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null };
               if (!row || typeof row.status !== 'string') return;
@@ -171,6 +170,7 @@ export function useResultPolling(
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
+            hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
               const finalUrl = row?.muxed_video_url ?? row?.video_url;
@@ -184,7 +184,13 @@ export function useResultPolling(
         );
       }
 
-      return ch.subscribe();
+      return ch.subscribe((status: string) => {
+        if (cancelled || settledRef.current) return;
+        const health = HybridRealtimePoller.statusToHealth(status);
+        if (health === 'HEALTHY') hybridPoller.markHealthy();
+        else if (health === 'DEGRADED') hybridPoller.markDegraded();
+        else hybridPoller.markDisconnected();
+      });
     };
 
     try {
@@ -292,11 +298,7 @@ export function useResultPolling(
       // DB force-sync. Skip redundant edge function polls to avoid lock
       // conflicts and wasted network requests on native.
       if (highestProgressSeen >= 0.85) {
-        const delayMs = Math.min(
-          Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
-          POLL_MAX_MS,
-        );
-        pollAttempt++;
+        const delayMs = hybridPoller.nextPollDelayMs();
         pollTimer = setTimeout(pollOnce, delayMs);
         return;
       }
@@ -329,11 +331,7 @@ export function useResultPolling(
           if (settledRef.current) return;
         }
         if (!cancelled && !settledRef.current) {
-          const delayMs = Math.min(
-            Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
-            POLL_MAX_MS,
-          );
-          pollAttempt++;
+          const delayMs = hybridPoller.nextPollDelayMs();
           pollTimer = setTimeout(pollOnce, delayMs);
         }
         return;
@@ -426,11 +424,7 @@ export function useResultPolling(
       }
 
       if (!cancelled && !settledRef.current) {
-        const delayMs = Math.min(
-          Math.round(POLL_INITIAL_MS * Math.pow(POLL_BACKOFF_FACTOR, pollAttempt)),
-          POLL_MAX_MS,
-        );
-        pollAttempt++;
+        const delayMs = hybridPoller.nextPollDelayMs();
         pollTimer = setTimeout(pollOnce, delayMs);
       }
     };
@@ -507,11 +501,10 @@ export function useResultPolling(
               // Realtime unavailable — polling still works as fallback
             }
           }
-          pollAttempt = 0;
           if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
           resumeBurstCount = 0;
           runResumeBurst();
-          if (!pollTimer) pollTimer = setTimeout(pollOnce, POLL_INITIAL_MS);
+          if (!pollTimer) pollTimer = setTimeout(pollOnce, hybridPoller.nextPollDelayMs());
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
         // Graceful pause: abort all in-flight network requests and release
