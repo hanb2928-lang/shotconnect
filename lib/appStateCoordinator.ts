@@ -1,5 +1,5 @@
 /**
- * Serialized AppState transition coordinator.
+ * Serialized AppState transition coordinator with microtask drain gate.
  *
  * Problem: when the app transitions to background/inactive, the OS locks
  * the native bridge within milliseconds. If multiple AppState handlers fire
@@ -9,14 +9,29 @@
  * thread deadlocks waiting for bridge responses that will never arrive,
  * triggering a watchdog timeout and SIGKILL.
  *
- * Solution: instead of dispatching all handlers synchronously via forEach,
- * the coordinator separates handler work into two phases:
+ * A second, subtler problem: the immediate phase aborts AbortControllers
+ * and clears timers. Those aborts trigger `.catch()` and `.finally()`
+ * microtasks from every in-flight promise that was watching the signal.
+ * When dozens of promises abort simultaneously, their rejection handlers
+ * flood the microtask queue in a single drain — and any handler that
+ * touches the bridge (logging, state cleanup, removeChannel) does so while
+ * the bridge is already locking. This is the "microtask explosion window"
+ * between the immediate phase and the first deferred macrotask.
+ *
+ * Solution: three-phase dispatch with a microtask drain gate.
  *
  *  1. Immediate phase: only in-process, synchronous, bridge-free work
  *     (AbortController.abort(), clearing timers, setting flags). This
  *     runs instantly with no bridge contact.
  *
- *  2. Deferred phase: any work that touches the native bridge (network
+ *  2. Drain phase: a single `queueMicrotask` yields to let all abort-
+ *     triggered rejection handlers settle. A suspension gate flag is set
+ *     BEFORE this drain so that any new microtask that tries to enqueue
+ *     deferred bridge work is silently dropped instead of piling up.
+ *     The drain completes within one microtask checkpoint — typically
+ *     under 1ms — before the OS bridge lock takes effect.
+ *
+ *  3. Deferred phase: any work that touches the native bridge (network
  *     calls, removeChannel, setItem) is deferred to sequential macrotasks
  *     via setTimeout(0). Each deferred task runs in its own event loop
  *     turn, so the JS thread yields to the OS between tasks. If the OS
@@ -24,8 +39,8 @@
  *     pile up on the bridge.
  *
  * Handlers register as either 'immediate' or 'deferred'. The coordinator
- * runs all immediate handlers synchronously, then schedules deferred
- * handlers one at a time.
+ * runs all immediate handlers synchronously, drains the microtask queue
+ * once, then schedules deferred handlers one at a time.
  */
 
 export type AppStatePhase = 'immediate' | 'deferred';
@@ -40,6 +55,12 @@ const handlers = new Set<RegisteredHandler>();
 let deferredQueue: (() => void)[] = [];
 let deferredTimer: ReturnType<typeof setTimeout> | null = null;
 let lastDispatchedState: string | null = null;
+
+// Suspension gate: when true, the coordinator is in the drain phase
+// between immediate handlers and deferred macrotasks. Any attempt to
+// dispatch a new state change during this window is dropped to prevent
+// re-entrant microtask flooding.
+let suspending = false;
 
 export function registerAppStateHandler(
   phase: AppStatePhase,
@@ -67,6 +88,10 @@ function processDeferredQueue(): void {
 }
 
 export function dispatchAppStateChange(nextState: string): void {
+  // Re-entrant dispatch during the drain window would re-trigger
+  // immediate handlers and flood the microtask queue again. Drop it.
+  if (suspending) return;
+
   lastDispatchedState = nextState;
 
   // Phase 1: immediate handlers run synchronously — abort controllers,
@@ -81,9 +106,9 @@ export function dispatchAppStateChange(nextState: string): void {
     }
   }
 
-  // Phase 2: collect deferred handlers, then run them one per macrotask.
-  // This prevents the microtask queue from flooding the bridge during
-  // the transition window.
+  // Phase 2: collect deferred handlers. The suspension gate is set
+  // before the microtask drain so that abort-triggered rejection
+  // handlers that try to re-dispatch are silently dropped.
   deferredQueue = [];
   for (const entry of handlers) {
     if (entry.phase === 'deferred') {
@@ -100,9 +125,21 @@ export function dispatchAppStateChange(nextState: string): void {
   if (deferredTimer !== null) {
     clearTimeout(deferredTimer);
   }
-  if (deferredQueue.length > 0) {
-    deferredTimer = setTimeout(processDeferredQueue, 0);
-  }
+
+  if (deferredQueue.length === 0) return;
+
+  // Set the suspension gate, then yield once via queueMicrotask to let
+  // all abort-triggered rejection/finally handlers drain. These handlers
+  // are pure JS (no bridge calls) — they settle within one microtask
+  // checkpoint, typically under 1ms. After the drain, clear the gate
+  // and schedule the deferred macrotasks.
+  suspending = true;
+  queueMicrotask(() => {
+    suspending = false;
+    if (deferredQueue.length > 0) {
+      deferredTimer = setTimeout(processDeferredQueue, 0);
+    }
+  });
 }
 
 export function getLastDispatchedState(): string | null {
@@ -115,6 +152,7 @@ export function cancelPendingDeferred(): void {
     deferredTimer = null;
   }
   deferredQueue = [];
+  suspending = false;
 }
 
 export function _resetForTesting(): void {
@@ -125,4 +163,5 @@ export function _resetForTesting(): void {
     deferredTimer = null;
   }
   lastDispatchedState = null;
+  suspending = false;
 }

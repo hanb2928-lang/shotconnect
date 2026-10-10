@@ -2046,6 +2046,12 @@ export default function ResultScreen() {
             timestamp: Date.now(),
           })).catch(() => {});
         }
+        // Clear the done-guard so the effect can re-enter on foreground
+        // return with a fresh encoder instance. Without this, muxDoneRef
+        // stays set to pairKey and the useEffect guard blocks re-entry
+        // permanently after a background-triggered abort.
+        muxDoneRef.current = null;
+        nativeMuxInFlightRef.current = false;
         if (muxAbortRef.current) {
           muxAbortRef.current.abort();
           muxAbortRef.current = null;
