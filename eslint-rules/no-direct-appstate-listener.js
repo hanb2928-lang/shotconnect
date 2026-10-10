@@ -8,7 +8,7 @@
  */
 module.exports = {
   meta: {
-    type: 'suggestion',
+    type: 'problem',
     docs: {
       description:
         'Disallow direct AppState.addEventListener — use registerAppStateHandler from lib/appStateCoordinator instead.',

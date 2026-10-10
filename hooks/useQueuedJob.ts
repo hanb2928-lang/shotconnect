@@ -182,7 +182,9 @@ export function useQueuedJob() {
       }
     };
 
-    // Pause polling when app is backgrounded to avoid zombie requests.
+    // Pause polling AND Realtime when app is backgrounded to avoid
+    // queued websocket payloads flooding the frozen JS bridge on
+    // foreground return (thundering herd backpressure deadlock).
     let bgPaused = false;
     const handleAppState = (nextState: string) => {
       if (mySubmitId !== submitIdRef.current) return;
@@ -191,10 +193,28 @@ export function useQueuedJob() {
           clearInterval(pollRef.current);
           pollRef.current = null;
         }
+        if (subRef.current) {
+          subRef.current.unsubscribe();
+          subRef.current = null;
+        }
         bgPaused = true;
       } else if (nextState === 'active' && bgPaused) {
         bgPaused = false;
-        if (!pollingPaused && !userPausedRef.current) startPolling();
+        if (!pollingPaused && !userPausedRef.current) {
+          subRef.current = subscribeToJob(jobId, handleUpdate, () => {
+            if (mySubmitId !== submitIdRef.current) return;
+            if (subRef.current) {
+              subRef.current.unsubscribe();
+              subRef.current = null;
+            }
+            setState((prev) => ({
+              ...prev,
+              status: prev.status === 'done' ? prev.status : 'queued',
+              error: '실시간 연결이 끊겼습니다. 백그라운드에서 계속 확인합니다.',
+            }));
+          });
+          startPolling();
+        }
       }
     };
     const unsubAppState = registerAppStateHandler('deferred', handleAppState);
