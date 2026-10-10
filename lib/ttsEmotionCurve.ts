@@ -1,5 +1,6 @@
 import { type ProsodyProfile, getProsodyAdjustedSpeed, buildProsodyInstructions, insertBreathMarkers, insertMicroPauses } from '@/lib/prosodyProfile';
 import { distributeProportionalMs, msToSec, secToMs, validateTimelineInvariant } from '@/lib/timelineInvariant';
+import { normalizeTtsText, snapSegmentBatch, estimateSyllables, MIN_SYLLABLES } from '@/lib/ttsTimestampSnapper';
 
 export type EmotionPhase = 'attention' | 'interest' | 'desire' | 'conviction' | 'action';
 
@@ -157,7 +158,14 @@ export function splitTextForEmotionCurve(
   baseInstructions?: string,
   prosodyProfile?: ProsodyProfile,
 ): TtsSegmentRequest[] {
-  const sentences = fullText.split(/(?<=[.!?。！？])\s+/).filter((s) => s.trim());
+  // Normalize text before splitting: merge empty syllables, strip emoji,
+  // collapse whitespace, and repair malformed Unicode.
+  const normalizedText = normalizeTtsText(fullText);
+  if (!normalizedText) return [];
+
+  const sentences = normalizedText.split(/(?<=[.!?。！？])\s+/).filter((s) => s.trim());
+  if (sentences.length === 0) return [];
+
   const totalChars = sentences.reduce((sum, s) => sum + s.length, 0) || 1;
 
   const validSegments = curve.segments.filter((seg) => seg.endSec > seg.startSec);
@@ -171,7 +179,7 @@ export function splitTextForEmotionCurve(
   });
   const totalAdjusted = speedAdjustedRatios.reduce((sum, r) => sum + r, 0) || 1;
 
-  return validSegments
+  const rawSegments = validSegments
     .map((segment, idx) => {
     const adjustedRatio = speedAdjustedRatios[idx] / totalAdjusted;
     const startRatio = idx === 0 ? 0 :
@@ -189,7 +197,12 @@ export function splitTextForEmotionCurve(
       charCount += sentence.length;
     }
 
-    let segmentText = segmentSentences.join(' ') || fullText.slice(startChar, endChar);
+    let segmentText = segmentSentences.join(' ') || normalizedText.slice(startChar, endChar);
+
+    // Skip segments with too few syllables to produce meaningful TTS
+    if (estimateSyllables(segmentText) < MIN_SYLLABLES) {
+      return null;
+    }
 
     if (prosodyProfile) {
       segmentText = insertMicroPauses(segmentText, prosodyProfile.vector.microPauseFrequency, prosodyProfile.vector.microPauseDurationSec);
@@ -207,6 +220,25 @@ export function splitTextForEmotionCurve(
       instructions,
       startSec: segment.startSec,
       endSec: segment.endSec,
+    };
+  }).filter((s): s is NonNullable<typeof s> => s !== null);
+
+  // Snap timestamps: correct sync drift > 50ms between estimated audio
+  // duration and allocated timeline slot.
+  const snapInput = rawSegments.map((s) => ({
+    text: s.text,
+    startSec: s.startSec,
+    endSec: s.endSec,
+    speed: s.speed,
+  }));
+  const snapResult = snapSegmentBatch(snapInput);
+
+  return rawSegments.map((seg, i) => {
+    const snapped = snapResult.segments[i];
+    return {
+      ...seg,
+      startSec: snapped?.startSec ?? seg.startSec,
+      endSec: snapped?.endSec ?? seg.endSec,
     };
   });
 }
