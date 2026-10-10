@@ -103,7 +103,7 @@ import { TrendMatchCard } from '@/components/TrendMatchCard';
 import { AffiliatePromptBanner } from '@/components/AffiliatePromptBanner';
 import { AIStyleCard } from '@/components/AIStyleCard';
 import type { StyleRecommendation } from '@/lib/styleRecommend';
-import { getItem } from '@/lib/storage';
+import { getItem, setItem } from '@/lib/storage';
 import { FeatureTileGrid } from '@/components/FeatureTileGrid';
 import type { FeatureCategory, ScanMode, MediaType } from '@/components/FeatureTileGrid';
 import { subscribeToJob } from '@/lib/jobQueue';
@@ -2002,9 +2002,28 @@ export default function ResultScreen() {
 
     const handleMuxAppState = (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
+        // Atomic snapshot: persist current mux state so it can be restored
+        // if the OS kills the process while backgrounded. Without this, the
+        // muxDoneRef guard prevents re-entry but the user loses all visible
+        // progress context after a cold restart.
+        if (scan?.id && (isMuxing || muxProgress > 0)) {
+          setItem(`mux_snapshot:${scan.id}`, JSON.stringify({
+            scanId: scan.id,
+            progress: muxProgress,
+            generatedVideoUrl,
+            ttsUrl,
+            timestamp: Date.now(),
+          })).catch(() => {});
+        }
         if (muxAbortRef.current) {
           muxAbortRef.current.abort();
           muxAbortRef.current = null;
+        }
+      } else if (nextState === 'active') {
+        // Clear the snapshot on successful foreground return — the mux
+        // effect will re-run naturally if needed via its dependency array.
+        if (scan?.id) {
+          setItem(`mux_snapshot:${scan.id}`, '').catch(() => {});
         }
       }
     };
