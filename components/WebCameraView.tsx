@@ -184,6 +184,31 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
     };
   }, [isActive, facing, previewBase64, startStream, stopStream]);
 
+  // Foreground recovery: if the recorder was terminated by a background
+  // transition, the C++ encoder is dead. Clean up the refs so the user
+  // can start a fresh recording instead of calling .stop() on a dead
+  // encoder (which triggers a native SIGABRT).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const onVisibilityChange = () => {
+      if (document.hidden) return;
+      const recorder = recorderRef.current;
+      if (recorder && (recorder as MediaRecorder & { _terminated?: boolean })._terminated) {
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        recorderRef.current = null;
+        recordingPromiseRef.current = null;
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        setRecordingDuration(0);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
   useEffect(() => {
     return () => {
       mountedRef.current = false;

@@ -89,12 +89,14 @@ export function startVideoRecording(
     // Background guard: when the page is hidden, the OS forcefully reclaims
     // the hardware codec session. Calling recorder.stop() on the dead C++
     // encoder triggers a native SIGABRT that bypasses JS try-catch and kills
-    // the process. Do NOT call any MediaRecorder method — just set the flag
-    // and let the browser GC the dead recorder on foreground return.
+    // the process. Do NOT call any MediaRecorder method — just set the flag,
+    // mark the recorder as terminated, and let the browser GC the dead
+    // recorder on foreground return.
     const onVisibilityChange = () => {
       if (typeof document === 'undefined') return;
       if (document.hidden && !settled) {
         settled = true;
+        (recorder as MediaRecorder & { _terminated?: boolean })._terminated = true;
         pressureUnsub();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         // Resolve with whatever chunks were collected so far — the caller
@@ -196,6 +198,9 @@ export function startVideoRecording(
 }
 
 export function stopVideoRecording(recorder: MediaRecorder): void {
+  // If the recorder was terminated by a background transition, the C++
+  // encoder is already dead. Calling .stop() would trigger a SIGABRT.
+  if ((recorder as MediaRecorder & { _terminated?: boolean })._terminated) return;
   if (recorder.state !== 'inactive') {
     recorder.stop();
   }
