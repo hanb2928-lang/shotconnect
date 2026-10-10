@@ -1263,7 +1263,7 @@ export function subscribeVideoJob(
       // time-based creep, so the UI never freezes at a stale percentage.
       const stepProgress = stepToProgress(row.step);
       const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-      const timeProgress = Math.min(0.15 + (elapsedSec / 180) * 0.8, 0.85);
+      const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.97);
       const effectiveProgress = stepProgress != null
         ? Math.max(stepProgress, timeProgress)
         : timeProgress;
@@ -1306,6 +1306,7 @@ export function subscribeVideoJob(
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (runwayPollTimer) clearTimeout(runwayPollTimer);
     if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+    if (overallTimeoutTimer) clearTimeout(overallTimeoutTimer);
   };
 
   const scheduleReconnect = () => {
@@ -1467,6 +1468,20 @@ export function subscribeVideoJob(
     }, interval);
   };
 
+  // Overall timeout — 5 minutes. After this, do one final check and if
+  // still not complete, force a FAILED with a retry message instead of
+  // leaving the user stuck at a frozen progress percentage forever.
+  const overallTimeoutTimer = setTimeout(() => {
+    if (settled) return;
+    checkAndNotify().then(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      removeBgPause();
+      callback({ status: 'FAILED', error: '비디오 생성이 5분을 초과했습니다. 서버에서는 완료되었을 수 있어요. 잠시 후 결과 페이지를 다시 방문하면 완성된 영상을 확인할 수 있습니다.' });
+    });
+  }, 300_000);
+
   setupChannel();
   scheduleNextPoll();
   checkAndNotify();
@@ -1478,6 +1493,7 @@ export function subscribeVideoJob(
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
+      if (overallTimeoutTimer) clearTimeout(overallTimeoutTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
         channel = null;
@@ -1718,6 +1734,7 @@ export function subscribeHdUpgrade(
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+    if (hdOverallTimeoutTimer) clearTimeout(hdOverallTimeoutTimer);
   };
 
   const scheduleReconnect = () => {
@@ -1802,6 +1819,19 @@ export function subscribeHdUpgrade(
     }, interval);
   };
 
+  // Overall timeout — 5 minutes. Force a final check, then FAILED if still
+  // not complete, instead of polling forever.
+  const hdOverallTimeoutTimer = setTimeout(() => {
+    if (settled) return;
+    checkAndNotify().then(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      removeBgPause();
+      callback({ status: 'FAILED', error: '고화질 업그레이드가 5분을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
+    });
+  }, 300_000);
+
   setupChannel();
   scheduleNextPoll();
   checkAndNotify();
@@ -1811,6 +1841,7 @@ export function subscribeHdUpgrade(
     pause: () => {
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (hdOverallTimeoutTimer) clearTimeout(hdOverallTimeoutTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
         channel = null;

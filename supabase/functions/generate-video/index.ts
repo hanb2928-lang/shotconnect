@@ -286,7 +286,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   }));
 
   const isDraft = body.draft === true;
-  const requestedDuration = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 10);
+  const requestedDuration = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 30);
   const durationSec = requestedDuration;
 
   const sanitizedProductName = sanitizeVideoProductName(body.productName);
@@ -415,7 +415,7 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
   }
 
   const aspectRatio = body.aspectRatio ?? "9:16";
-  const durationSec = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 10);
+  const durationSec = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 30);
   const isDraft = body.draft === true;
   const hdUpscale = body.hdUpscale === true;
   // Drafts always use 720p/24fps even when HD is requested — the HD upgrade
@@ -1204,7 +1204,7 @@ async function submitRunwayTask(
   const timeoutId = setTimeout(() => controller.abort(), RUNWAY_SUBMIT_TIMEOUT_MS);
 
   try {
-    const clampedDuration = Math.min(Math.max(Math.round(durationSec), 2), 10);
+    const clampedDuration = Math.min(Math.max(Math.round(durationSec), 2), 30);
     const ratioMap: Record<string, string> = isHd
       ? {
           "9:16": "1080:1920",
@@ -1225,7 +1225,9 @@ async function submitRunwayTask(
 
     const hasImage = typeof promptImage === "string" && promptImage.length > 0;
     const endpoint = hasImage ? "image_to_video" : "text_to_video";
-    const model = "gen4.5";
+    // Gen-4.5 supports 2-10s. For longer durations (>10s), use seedance2_5
+    // which supports 4-30s at 480p/720p.
+    const model = clampedDuration > 10 ? "seedance2_5" : "gen4.5";
     const ratioValue = ratioMap[aspectRatio] ?? "720:1280";
     const safePrompt = safeSlice(prompt.trim(), 1000);
 
