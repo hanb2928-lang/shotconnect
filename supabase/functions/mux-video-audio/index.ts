@@ -37,6 +37,35 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Idempotency guard: if the scans row already has a muxed_video_url,
+    // return it immediately instead of re-downloading and re-encoding.
+    // This prevents duplicate ffmpeg processes and zombie workers when
+    // the client retries due to a network blip or Realtime re-trigger.
+    if (scanId && supabaseUrl && serviceRoleKey) {
+      try {
+        const checkResp = await fetch(
+          `${supabaseUrl}/rest/v1/scans?id=eq.${scanId}&select=muxed_video_url`,
+          {
+            headers: {
+              "Authorization": `Bearer ${serviceRoleKey}`,
+              "apikey": serviceRoleKey,
+            },
+          },
+        );
+        if (checkResp.ok) {
+          const rows = await checkResp.json() as Array<{ muxed_video_url?: string | null }>;
+          if (rows.length > 0 && rows[0].muxed_video_url) {
+            return new Response(
+              JSON.stringify({ success: true, muxedUrl: rows[0].muxed_video_url, cached: true }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+        }
+      } catch {
+        // Non-fatal — proceed with full mux if the check fails
+      }
+    }
+
     // Download both files
     const [videoResp, audioResp] = await Promise.all([
       fetch(videoUrl),
@@ -97,12 +126,18 @@ Deno.serve(async (req: Request) => {
       await ffmpeg.writeFile("input_video.mp4", await fetchFile(videoBlob));
       await ffmpeg.writeFile("input_audio.mp3", await fetchFile(audioBlob));
 
-      // Merge: copy video stream, encode audio as AAC, output MP4
+      // Merge: re-encode video at 720p with ultrafast preset for speed,
+      // encode audio as AAC. ultrafast + CRF 28 trades larger file size
+      // for ~3x faster encoding vs default preset.
       await ffmpeg.exec([
         "-i", "input_video.mp4",
         "-i", "input_audio.mp3",
-        "-c:v", "copy",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "28",
+        "-vf", "scale=-2:720",
         "-c:a", "aac",
+        "-b:a", "128k",
         "-shortest",
         "-movflags", "+faststart",
         "output.mp4",

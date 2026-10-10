@@ -74,9 +74,9 @@ export interface RenderParams {
 }
 
 const BASE_PARAMS: Record<DeviceTier, Omit<RenderParams, 'reason'>> = {
-  low:  { maxDimension: 720,  fps: 24, videoBitrate: 2_000_000, audioBitrate: 96_000 },
-  mid:  { maxDimension: 1080, fps: 30, videoBitrate: 4_000_000, audioBitrate: 128_000 },
-  high: { maxDimension: 1920, fps: 30, videoBitrate: 6_000_000, audioBitrate: 128_000 },
+  low:  { maxDimension: 720,  fps: 24, videoBitrate: 1_500_000, audioBitrate: 96_000 },
+  mid:  { maxDimension: 720,  fps: 30, videoBitrate: 2_500_000, audioBitrate: 128_000 },
+  high: { maxDimension: 1080, fps: 30, videoBitrate: 4_000_000, audioBitrate: 128_000 },
 };
 
 let dynamicPressure: 'none' | 'moderate' | 'severe' = 'none';
@@ -172,18 +172,17 @@ export function getAdaptiveRenderParams(): RenderParams {
     return {
       ...BASE_PARAMS.low,
       fps: 20,
-      videoBitrate: 1_200_000,
+      videoBitrate: 1_000_000,
       audioBitrate: 64_000,
       reason: `severe memory pressure (tier: ${tier})`,
     };
   }
 
   if (pressure === 'moderate') {
-    const mid = BASE_PARAMS.mid;
     return {
-      maxDimension: Math.min(base.maxDimension, mid.maxDimension),
+      maxDimension: 720,
       fps: 24,
-      videoBitrate: Math.min(base.videoBitrate, mid.videoBitrate),
+      videoBitrate: 2_000_000,
       audioBitrate: base.audioBitrate,
       reason: `moderate memory pressure (tier: ${tier})`,
     };
@@ -218,9 +217,9 @@ export function getAdaptiveImageMaxDimension(): number {
   const pressure = detectRuntimePressure();
   if (pressure === 'severe') return 720;
   if (tier === 'low') return 720;
-  if (pressure === 'moderate') return 1080;
-  if (tier === 'mid') return 1080;
-  return 1280;
+  if (pressure === 'moderate') return 720;
+  if (tier === 'mid') return 720;
+  return 1080;
 }
 
 let pressurePollInterval: ReturnType<typeof setInterval> | null = null;

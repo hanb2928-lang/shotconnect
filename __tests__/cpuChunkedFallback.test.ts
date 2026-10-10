@@ -99,6 +99,7 @@ jest.mock('@/lib/devicePerformance', () => ({
     return { width: Math.round(w * scale), height: Math.round(h * scale), scale };
   },
   setMemoryPressure: jest.fn(),
+  detectRuntimePressure: jest.fn(() => 'none'),
 }));
 
 jest.mock('@/lib/errorLogger', () => ({

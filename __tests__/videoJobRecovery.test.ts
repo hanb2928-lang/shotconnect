@@ -47,17 +47,18 @@ describe('useVideoJobRecovery logic', () => {
 
   it('getActiveVideoJob returns job data when storage has valid data', async () => {
     const { getItem } = require('@/lib/storage');
-    getItem.mockResolvedValue(JSON.stringify({
+    const now = Date.now();
+    const job = {
       jobId: 'job-recovery-1',
+      scanId: null,
       step: 'rendering',
-      startedAt: 1234567890,
-    }));
+      progress: 0.5,
+      startedAt: now,
+      lastUpdated: now,
+    };
+    getItem.mockResolvedValue(JSON.stringify(job));
     const result = await getActiveVideoJob();
-    expect(result).toEqual({
-      jobId: 'job-recovery-1',
-      step: 'rendering',
-      startedAt: 1234567890,
-    });
+    expect(result).toEqual(job);
   });
 
   it('clearActiveVideoJob clears the storage', async () => {

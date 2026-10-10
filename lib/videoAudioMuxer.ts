@@ -28,7 +28,7 @@ const AUDIO_PROBE_BASE_DELAY_MS = 1000;
 
 import { registerTempFile, unregisterTempFile } from '@/lib/tempFileManager';
 import { flushPostSynthesisMemory } from '@/lib/synthesisGc';
-import { getAdaptiveRenderParams, computeScaledDimensions } from '@/lib/devicePerformance';
+import { getAdaptiveRenderParams, computeScaledDimensions, detectRuntimePressure, setMemoryPressure } from '@/lib/devicePerformance';
 
 /**
  * Verify that a URL is actually reachable via HTTP before attempting
@@ -79,6 +79,17 @@ export async function muxVideoWithAudio(
 
   const hasMediaRecorder = typeof window.MediaRecorder !== 'undefined';
   if (!hasMediaRecorder) return null;
+
+  // Pre-flight memory pressure check: if the device is already under
+  // severe memory pressure, bail out before allocating canvas, media
+  // elements, AudioContext, and MediaRecorder — all of which consume
+  // significant native heap. Starting a mux under pressure guarantees
+  // an OOM kill before the first frame is drawn.
+  const pressure = detectRuntimePressure();
+  if (pressure === 'severe') {
+    setMemoryPressure('severe', 'mux-pre-flight');
+    return null;
+  }
 
   onProgress?.({ phase: 'preparing', progress: 0 });
 
@@ -291,9 +302,31 @@ export async function muxVideoWithAudio(
     }
   }
 
+  let totalChunkBytes = 0;
+  const MAX_CHUNK_BYTES = 150 * 1024 * 1024; // 150MB — abort if chunks exceed this
+
+  // Acquire a Screen Wake Lock to prevent the OS from suspending the
+  // process during encoding. The Wake Lock is automatically released by
+  // the browser when the page is hidden; we re-acquire it on return.
+  let wakeLockSentinel: { release?: () => Promise<void> } | null = null;
+  const acquireWakeLock = async () => {
+    if (typeof navigator === 'undefined') return;
+    const nav = navigator as unknown as { wakeLock?: { request: (t: 'screen') => Promise<{ release?: () => Promise<void> }> } };
+    if (!nav.wakeLock) return;
+    try {
+      wakeLockSentinel = await nav.wakeLock.request('screen');
+    } catch {
+      // Wake Lock can fail if the page was just backgrounded — non-fatal
+    }
+  };
+  void acquireWakeLock();
+
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
+    if (e.data && e.data.size > 0) {
+      chunks.push(e.data);
+      totalChunkBytes += e.data.size;
+    }
   };
 
   const durationSec = Math.max(video.duration, audio.duration) || 0;
@@ -313,9 +346,46 @@ export async function muxVideoWithAudio(
     let stalledFrameCount = 0;
     const FRAME_STALL_THRESHOLD_MS = 5000;
     const MAX_STALLED_FRAMES = 3;
+    let pausedForBackground = false;
+
+    // Background/foreground guard: when the page is hidden (user switches
+    // apps or minimizes the browser), requestAnimationFrame stops firing
+    // but MediaRecorder keeps producing dataavailable events, accumulating
+    // Blob chunks in memory. On mobile, the OS OOM killer will terminate
+    // the process. We pause the recorder and media playback on hidden,
+    // and resume on visible to prevent memory blowup.
+    const onVisibilityChange = () => {
+      if (typeof document === 'undefined') return;
+      if (document.hidden && !settled && recorder.state === 'recording') {
+        pausedForBackground = true;
+        try { recorder.pause(); } catch { /* not supported */ }
+        video.pause();
+        audio.pause();
+        // Check heap pressure on background — if already high, abort
+        const pressure = detectRuntimePressure();
+        if (pressure === 'severe') {
+          setMemoryPressure('severe', 'background-during-mux');
+        }
+      } else if (!document.hidden && pausedForBackground && !settled) {
+        pausedForBackground = false;
+        try { recorder.resume(); } catch { /* not supported */ }
+        video.play().catch(() => {});
+        audio.play().catch(() => {});
+        lastFrameTime = performance.now(); // reset stall timer
+        rafId = requestAnimationFrame(drawFrame);
+        // Re-acquire the Wake Lock — the browser auto-releases it on hide
+        void acquireWakeLock();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
 
     const cleanup = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
       if (onAbort && abortSignal) {
         abortSignal.removeEventListener('abort', onAbort);
       }
@@ -357,6 +427,10 @@ export async function muxVideoWithAudio(
       canvas.width = 0;
       canvas.height = 0;
       chunks.length = 0;
+      if (wakeLockSentinel) {
+        try { void wakeLockSentinel.release?.(); } catch {}
+        wakeLockSentinel = null;
+      }
     };
 
     // If an abort signal is already aborted, resolve immediately.
@@ -474,12 +548,14 @@ export async function muxVideoWithAudio(
       }
 
       // Memory pressure detection (Chromium): if JS heap usage exceeds
-      // 90% of the limit, abort the mux to prevent an OOM crash that
-      // would leave zombie workers and leaked Blob URLs.
+      // 80% of the limit, abort the mux to prevent an OOM crash that
+      // would leave zombie workers and leaked Blob URLs. Lowered from 90%
+      // because background tab memory is more constrained — the OS will
+      // kill the process before the JS engine collects.
       const perfMem = (performance as unknown as { memory?: { jsHeapSizeLimit: number; usedJSHeapSize: number } }).memory;
       if (perfMem && perfMem.jsHeapSizeLimit > 0) {
         const usageRatio = perfMem.usedJSHeapSize / perfMem.jsHeapSizeLimit;
-        if (usageRatio > 0.9) {
+        if (usageRatio > 0.8) {
           if (recorder.state !== 'inactive') {
             try { recorder.stop(); } catch {}
           }
@@ -490,6 +566,20 @@ export async function muxVideoWithAudio(
           }
           return;
         }
+      }
+
+      // Chunk accumulation guard: if recorded data exceeds 150MB, abort
+      // to prevent unbounded memory growth during long videos.
+      if (totalChunkBytes > MAX_CHUNK_BYTES) {
+        if (recorder.state !== 'inactive') {
+          try { recorder.stop(); } catch {}
+        }
+        if (!settled) {
+          settled = true;
+          cleanup();
+          flushPostSynthesisMemory().finally(() => resolve(null));
+        }
+        return;
       }
 
       if (!video.ended) {

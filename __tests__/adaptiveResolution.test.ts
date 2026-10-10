@@ -76,7 +76,7 @@ describe('adaptive resolution', () => {
       const params = getAdaptiveRenderParams();
       expect(params.maxDimension).toBe(720);
       expect(params.fps).toBe(20);
-      expect(params.videoBitrate).toBe(1_200_000);
+      expect(params.videoBitrate).toBe(1_000_000);
       expect(params.audioBitrate).toBe(64_000);
       expect(params.reason).toContain('severe');
     });
@@ -84,8 +84,8 @@ describe('adaptive resolution', () => {
     it('reduces resolution under moderate memory pressure', () => {
       setMemoryPressure('moderate', 'test');
       const params = getAdaptiveRenderParams();
-      // Moderate should clamp to at most mid-tier settings
-      expect(params.maxDimension).toBeLessThanOrEqual(1080);
+      // Moderate should clamp to 720p
+      expect(params.maxDimension).toBeLessThanOrEqual(720);
       expect(params.fps).toBeLessThanOrEqual(24);
       expect(params.reason).toContain('moderate');
     });

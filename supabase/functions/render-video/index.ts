@@ -66,7 +66,7 @@ Deno.serve(async (req: Request) => {
     const quality = (payload.quality as RenderQuality) ?? "high";
 
     const isPreview = quality === "preview";
-    const targetWidth = isPreview ? 540 : 1080;
+    const targetWidth = isPreview ? 540 : 720;
     const specs = (payload.specs as Record<string, string>) ?? {};
     const ratio = specs.ratio ?? "9:16";
     const isPortrait = ratio.includes("9:16");
@@ -77,7 +77,7 @@ Deno.serve(async (req: Request) => {
     const totalSec = parseInt(specs.maxDuration ?? "15", 10) || 15;
     const duration = Math.min(totalSec, 60);
     const fps = isPreview ? 24 : 30;
-    const bitrate = isPreview ? 2_000_000 : 6_000_000;
+    const bitrate = isPreview ? 2_000_000 : 3_000_000;
     const totalFrames = Math.ceil(duration * fps);
 
     // Build scene timeline from payload

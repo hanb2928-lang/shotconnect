@@ -151,6 +151,7 @@ import { muxVideoWithAudio, probeUrlAccessible } from '@/lib/videoAudioMuxer';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { safeInvoke } from '@/lib/apiClient';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 type TargetPlatformKey = 'shorts' | 'tiktok' | 'reels' | 'naverclip' | 'instagramFeed' | 'naverBlog' | 'pinterest' | 'smartstore';
 
@@ -533,6 +534,7 @@ export default function ResultScreen() {
   const [muxError, setMuxError] = useState<string | null>(null);
   const muxDoneRef = useRef<string | null>(null);
   const muxedBlobUrlRef = useRef<string | null>(null);
+  const nativeMuxInFlightRef = useRef(false);
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
@@ -546,6 +548,22 @@ export default function ResultScreen() {
     videoStage === 'drafting' ||
     videoStage === 'hd_upgrading',
   );
+
+  // Keep the screen awake during video generation and audio muxing to
+  // prevent the OS from suspending the process mid-encoding. On native,
+  // this acquires a platform wake lock (Android: PARTIAL_WAKE_LOCK via
+  // expo-keep-awake). On web, it uses the Screen Wake Lock API. Without
+  // this, backgrounding during the 92% encoding phase triggers the OOM
+  // killer because the OS has no signal that the work is important.
+  useEffect(() => {
+    const tag = 'result-mux-gen';
+    if (isGeneratingVideo || isMuxing) {
+      activateKeepAwakeAsync(tag).catch(() => {});
+    } else {
+      deactivateKeepAwake(tag).catch(() => {});
+    }
+    return () => { deactivateKeepAwake(tag).catch(() => {}); };
+  }, [isGeneratingVideo, isMuxing]);
 
   useEffect(() => {
     generatedVideoUrlRef.current = generatedVideoUrl;
@@ -1944,6 +1962,20 @@ export default function ResultScreen() {
         setMuxProgress(0);
         setMuxError(null);
 
+        // Background memory guard: when the page is hidden during muxing,
+        // trigger a proactive memory flush to release idle resources before
+        // the OS OOM killer targets the process.
+        const onVisChange = () => {
+          if (typeof document !== 'undefined' && document.hidden) {
+            import('@/lib/proactiveMemoryFlush').then(({ runProactiveFlush }) => {
+              runProactiveFlush(true).catch(() => {});
+            }).catch(() => {});
+          }
+        };
+        if (typeof document !== 'undefined') {
+          document.addEventListener('visibilitychange', onVisChange);
+        }
+
         try {
           const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
             if (!cancelled) setMuxProgress(p.progress);
@@ -1986,6 +2018,9 @@ export default function ResultScreen() {
             setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
           }
         } finally {
+          if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', onVisChange);
+          }
           if (!cancelled) {
             setIsMuxing(false);
             setMuxProgress(0);
@@ -1993,7 +2028,15 @@ export default function ResultScreen() {
         }
       })();
     } else {
-      // Native: call server-side mux edge function
+      // Native: call server-side mux edge function.
+      // Dedup guard: prevent overlapping invocations when the effect
+      // re-fires due to Realtime updates or AppState changes. The
+      // server-side function has its own idempotency check (returns
+      // cached result if muxed_video_url already exists), but this
+      // client-side guard prevents duplicate network round-trips and
+      // race conditions where two concurrent responses update state.
+      if (nativeMuxInFlightRef.current) return;
+      nativeMuxInFlightRef.current = true;
       muxDoneRef.current = pairKey;
       setIsMuxing(true);
       setMuxProgress(0);
@@ -2013,8 +2056,10 @@ export default function ResultScreen() {
 
           if (invokeError || !data || data.error) {
             const errMsg = data?.error || invokeError?.message || '나레이션 합성에 실패했습니다.';
+            // Don't reset muxDoneRef — this prevents retry storms when
+            // the server is temporarily unavailable. The user can
+            // manually retry by navigating away and back.
             setMuxError(errMsg);
-            muxDoneRef.current = null;
             return;
           }
 
@@ -2025,9 +2070,9 @@ export default function ResultScreen() {
         } catch {
           if (!cancelled) {
             setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
-            muxDoneRef.current = null;
           }
         } finally {
+          nativeMuxInFlightRef.current = false;
           if (!cancelled) {
             setIsMuxing(false);
             setMuxProgress(0);
