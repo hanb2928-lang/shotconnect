@@ -51,7 +51,6 @@ import * as Clipboard from 'expo-clipboard';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
 import { uploadAssetBlobWithProgress, uploadAssetFromFileUriWithProgress, saveAssetRecord } from '@/lib/savedAssets';
-import { registerStorageObject } from '@/lib/storageLifecycle';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import { readUriAsBase64 } from '@/lib/imageEdit';
@@ -147,7 +146,7 @@ import { useWebPush } from '@/hooks/useWebPush';
 import { DirectShareBridge } from '@/components/DirectShareBridge';
 import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
-import { muxVideoWithAudio, probeUrlAccessible } from '@/lib/videoAudioMuxer';
+import { probeUrlAccessible } from '@/lib/videoAudioMuxer';
 import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
@@ -2061,15 +2060,24 @@ export default function ResultScreen() {
     };
     appStateHandlersRef.current.add(handleMuxAppState);
 
-    if (Platform.OS === 'web') {
-      // Create abort controller for this mux session
-      const abortController = new AbortController();
-      muxAbortRef.current = abortController;
+    {
+      // Both web and native: offload muxing to the server-side edge function
+      // to avoid blocking the JS thread with canvas encoding. On mobile, the
+      // OS kills the process when the JS thread is locked by the encoding loop
+      // and cannot receive the background transition signal — server-side
+      // offloading eliminates this entirely.
+      if (nativeMuxInFlightRef.current) return;
+      nativeMuxInFlightRef.current = true;
+      muxDoneRef.current = pairKey;
+      setIsMuxing(true);
+      muxProgressRef.current = 0;
+      setMuxProgress(0);
+      setMuxError(null);
+      const muxAbortController = new AbortController();
+      muxAbortRef.current = muxAbortController;
 
       (async () => {
-        // Pre-flight: verify both URLs are accessible. The TTS file may
-        // still be uploading to storage when ttsUrl is first set, so we
-        // probe with retries before committing to muxing.
+        // Pre-flight: verify both URLs are accessible before invoking.
         const [videoReady, audioReady] = await Promise.all([
           probeUrlAccessible(generatedVideoUrl),
           probeUrlAccessible(ttsUrl),
@@ -2082,100 +2090,6 @@ export default function ResultScreen() {
           return;
         }
 
-        muxDoneRef.current = pairKey;
-        setIsMuxing(true);
-        setMuxProgress(0);
-        setMuxError(null);
-
-        // Background memory guard: when the page is hidden during muxing,
-        // trigger a proactive memory flush to release idle resources before
-        // the OS OOM killer targets the process.
-        const onVisChange = () => {
-          if (typeof document !== 'undefined' && document.hidden) {
-            import('@/lib/proactiveMemoryFlush').then(({ runProactiveFlush }) => {
-              runProactiveFlush(true).catch(() => {});
-            }).catch(() => {});
-          }
-        };
-        if (typeof document !== 'undefined') {
-          document.addEventListener('visibilitychange', onVisChange);
-        }
-
-        try {
-          const targetDur = Math.max(Math.round(selectedDurationMs / 1000), 3);
-          const audioOffset = Math.round(targetDur * 0.2);
-          const audioDur = targetDur - audioOffset;
-          const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
-            // Update progress state directly — this does NOT re-run this
-            // effect because muxProgress is NOT in the dependency array.
-          if (!cancelled) setMuxProgress(p.progress);
-          if (!cancelled) muxProgressRef.current = p.progress;
-          }, abortController.signal, targetDur, audioOffset, audioDur);
-          if (!result || cancelled) {
-            result?.revoke();
-            return;
-          }
-
-          const ext = result.blob.type.includes('webm') ? 'webm' : 'mp4';
-          const fileName = `${scan?.id ?? 'unknown'}/${Date.now()}_muxed.${ext}`;
-          let finalUrl = result.url;
-          let uploadOk = false;
-          try {
-            const { uploadBytesToStorage } = await import('@/lib/imageEdit');
-            const publicUrl = await uploadBytesToStorage(result.blob, 'videos', fileName, result.blob.type, true);
-            finalUrl = publicUrl;
-            uploadOk = true;
-          } catch { /* upload failed */ }
-
-          if (uploadOk) {
-            URL.revokeObjectURL(result.url);
-              await supabase
-                .from('scans')
-                .update({ muxed_video_url: finalUrl })
-                .eq('id', scan?.id ?? '');
-              registerStorageObject(scan?.id ?? '', 'videos', fileName, 'video', result.blob.size).catch(() => {});
-          }
-          if (!cancelled) {
-            if (muxedBlobUrlRef.current && muxedBlobUrlRef.current !== finalUrl) {
-              URL.revokeObjectURL(muxedBlobUrlRef.current);
-            }
-            muxedBlobUrlRef.current = finalUrl.startsWith('blob:') ? finalUrl : null;
-            setMuxedVideoUrl(finalUrl);
-          } else if (finalUrl === result.url) {
-            result.revoke();
-          }
-        } catch {
-          if (!cancelled) {
-            setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
-          }
-        } finally {
-          if (typeof document !== 'undefined') {
-            document.removeEventListener('visibilitychange', onVisChange);
-          }
-          muxAbortRef.current = null;
-          muxProgressRef.current = 0;
-          if (!cancelled) {
-            setIsMuxing(false);
-            setMuxProgress(0);
-          }
-        }
-      })();
-    } else {
-      // Native: call server-side mux edge function.
-      if (nativeMuxInFlightRef.current) return;
-      nativeMuxInFlightRef.current = true;
-      muxDoneRef.current = pairKey;
-      setIsMuxing(true);
-      muxProgressRef.current = 0;
-      setMuxProgress(0);
-      setMuxError(null);
-      // Create abort controller for native mux so background entry can cancel
-      // the in-flight invoke — without this, the handleMuxAppState abort call
-      // finds muxAbortRef.current === null and the invoke keeps running.
-      const nativeAbortController = new AbortController();
-      muxAbortRef.current = nativeAbortController;
-
-      (async () => {
         try {
           const targetDur = Math.max(Math.round(selectedDurationMs / 1000), 3);
           const audioOffset = Math.round(targetDur * 0.2);
@@ -2189,7 +2103,7 @@ export default function ResultScreen() {
               audioOffsetSec: audioOffset,
               audioDurationSec: audioDur,
             },
-            signal: nativeAbortController.signal,
+            signal: muxAbortController.signal,
           });
 
           if (cancelled) return;
@@ -2201,6 +2115,7 @@ export default function ResultScreen() {
           }
 
           if (data.muxedUrl) {
+            muxedBlobUrlRef.current = null;
             setMuxedVideoUrl(data.muxedUrl);
             muxProgressRef.current = 1;
             setMuxProgress(1);
