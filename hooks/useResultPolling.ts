@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { stepToProgress } from '@/lib/videoGenSteps';
 import { HybridRealtimePoller, type ChannelHealth } from '@/lib/hybridRealtimePoller';
@@ -146,6 +147,7 @@ export function useResultPolling(
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
+            if (isInFlushWindow()) return;
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null; progress: number | null };
@@ -177,6 +179,7 @@ export function useResultPolling(
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
+            if (isInFlushWindow()) return;
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
@@ -520,8 +523,7 @@ export function useResultPolling(
             }
           }
           if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-          resumeBurstCount = 0;
-          runResumeBurst();
+          onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
 
           // Re-arm soft warn and hard timeout with remaining time so
           // background duration does not count toward the user's wait.

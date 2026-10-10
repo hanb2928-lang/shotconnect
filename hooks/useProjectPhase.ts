@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { isInFlushWindow } from '@/lib/foregroundFlushGuard';
 
 export type ProjectStep = 'idle' | 'uploading' | 'rendering' | 'completed' | 'failed';
 
@@ -45,6 +46,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
           },
           (payload) => {
             if (cancelled) return;
+            if (isInFlushWindow()) return;
             const updated = payload.new as VideoJobRow;
             setStep(updated.step);
             setData(updated);

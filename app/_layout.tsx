@@ -45,7 +45,8 @@ import { runStorageGC, startPeriodicStorageGC, stopPeriodicStorageGC, registerAl
 import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
-import { dispatchAppStateChange, cancelPendingDeferred } from '@/lib/appStateCoordinator';
+import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { armFlushWindow } from '@/lib/foregroundFlushGuard';
 
 installGlobalErrorHandlers();
 
@@ -179,12 +180,19 @@ export default function RootLayout() {
   // Single global AppState dispatcher — all other files register handlers
   // via registerAppStateHandler instead of calling AppState.addEventListener
   // directly. This prevents the thundering-herd bridge flood on background.
+  //
+  // The flush guard is armed in the 'immediate' phase (synchronous, no bridge
+  // calls) so the 1-second window is open before any deferred handler fires.
   useEffect(() => {
     if (typeof AppState === 'undefined' || typeof AppState.addEventListener !== 'function') return;
+    const unsubFlush = registerAppStateHandler('immediate', (nextState: string) => {
+      if (nextState === 'active') armFlushWindow();
+    });
     const sub = AppState.addEventListener('change', (nextState: string) => {
       dispatchAppStateChange(nextState);
     });
     return () => {
+      unsubFlush();
       sub.remove();
       cancelPendingDeferred();
     };

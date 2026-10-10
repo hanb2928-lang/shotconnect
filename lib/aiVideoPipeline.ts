@@ -1,4 +1,5 @@
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from './supabase';
 import { monotonicStart, monotonicElapsedSec, monotonicElapsedMs } from './timeUtils';
 import type { ProductVisionResult } from './productVision';
@@ -768,6 +769,7 @@ function waitForVideoCompletion(
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
           (payload) => {
             if (!payload.new) return;
+            if (isInFlushWindow()) return;
             try {
               channelHealth = ChannelHealth.HEALTHY;
               pollBackoffAttempt = 0;
@@ -989,8 +991,7 @@ function waitForVideoCompletion(
       checkScanVideoUrl();
       runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      resumeBurstCount = 0;
-      runResumeBurst();
+      onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
     };
 
     const handleAppState = (nextState: string) => {
@@ -1353,6 +1354,7 @@ export function subscribeVideoJob(
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
+          if (isInFlushWindow()) return;
           try {
             channelHealth = ChannelHealth.HEALTHY;
             pollBackoffAttempt = 0;
@@ -1391,6 +1393,7 @@ export function subscribeVideoJob(
         { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
+          if (isInFlushWindow()) return;
           try {
             const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
             const finalUrl = row.muxed_video_url ?? row.video_url;
@@ -1523,8 +1526,7 @@ export function subscribeVideoJob(
       checkAndNotify();
       startRunwayPollFallback();
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      resumeBurstCount = 0;
-      runResumeBurst();
+      onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
     },
     onBackgroundTimeout: () => {
       settled = true;
@@ -1784,6 +1786,7 @@ export function subscribeHdUpgrade(
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
+          if (isInFlushWindow()) return;
           try {
             channelHealth = ChannelHealth.HEALTHY;
             pollBackoffAttempt = 0;
@@ -1873,8 +1876,7 @@ export function subscribeHdUpgrade(
       scheduleNextPoll();
       checkAndNotify();
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      resumeBurstCount = 0;
-      runResumeBurst();
+      onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
     },
     onBackgroundTimeout: () => {
       settled = true;
