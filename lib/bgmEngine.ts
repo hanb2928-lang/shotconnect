@@ -291,6 +291,22 @@ export class BgmPlayer {
 
   private getOrCreateContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
+    // If the OS closed the context while backgrounded, discard it and
+    // rebuild the entire audio graph. Reusing a closed context causes
+    // createGain/createOscillator to throw inside setInterval callbacks,
+    // which ErrorBoundary cannot catch — killing the app instantly.
+    if (this.audioCtx && this.audioCtx.state === 'closed') {
+      this.audioCtx = null;
+      this.masterGain = null;
+      this.dryGain = null;
+      this.reverbConvolver = null;
+      this.reverbGain = null;
+      this.delayNode = null;
+      this.delayFeedback = null;
+      this.delayWet = null;
+      this.wowFlutterLfo = null;
+      this.wowFlutterGain = null;
+    }
     if (!this.audioCtx) {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return null;
@@ -437,11 +453,16 @@ export class BgmPlayer {
 
     const scheduleNotes = () => {
       if (!this.isPlaying || !this.audioCtx || !this.dryGain) return;
-      while (this.nextNoteTime < this.audioCtx.currentTime + 0.15) {
-        const t = this.applySwing(this.currentStep, this.nextNoteTime, stepDurSec, config.swing);
-        this.playStep(config, this.currentStep, t, stepDurSec);
-        this.currentStep = (this.currentStep + 1) % totalSteps;
-        this.nextNoteTime += stepDurSec;
+      if (this.audioCtx.state === 'closed') { this.stop(); return; }
+      try {
+        while (this.nextNoteTime < this.audioCtx.currentTime + 0.15) {
+          const t = this.applySwing(this.currentStep, this.nextNoteTime, stepDurSec, config.swing);
+          this.playStep(config, this.currentStep, t, stepDurSec);
+          this.currentStep = (this.currentStep + 1) % totalSteps;
+          this.nextNoteTime += stepDurSec;
+        }
+      } catch {
+        this.stop();
       }
     };
 
@@ -662,17 +683,22 @@ export class BgmPlayer {
   }
 
   resume(): void {
-    if (!this.audioCtx || !this.masterGain) return;
+    // Rebuild context if OS closed it during background — getOrCreateContext
+    // handles this, but we must re-grab all node references in case they were
+    // nulled.
+    const ctx = this.getOrCreateContext();
+    if (!ctx || !this.masterGain) return;
     this.unlockAudio();
-    this.masterGain.gain.cancelScheduledValues(this.audioCtx.currentTime);
-    this.masterGain.gain.linearRampToValueAtTime(this.volume, this.audioCtx.currentTime + 0.2);
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    this.masterGain.gain.cancelScheduledValues(ctx.currentTime);
+    this.masterGain.gain.linearRampToValueAtTime(this.volume, ctx.currentTime + 0.2);
     this.isPlaying = true;
     if (this.usingBundledFile && this.bundledAudioEl) {
       this.bundledAudioEl.play().catch(() => {});
       return;
     }
     if (this.schedulerTimer) { clearInterval(this.schedulerTimer); this.schedulerTimer = null; }
-    this.nextNoteTime = this.audioCtx.currentTime + 0.05;
+    this.nextNoteTime = ctx.currentTime + 0.05;
     const config = MOOD_SYNTH_CONFIGS[this.currentCategory];
     const bpm = MOOD_CONFIGS[this.currentCategory].bpm;
     if (!bpm || bpm <= 0) return;

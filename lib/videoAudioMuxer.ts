@@ -175,7 +175,10 @@ export async function muxVideoWithAudio(
   const canvas = document.createElement('canvas');
   canvas.width = canvasW;
   canvas.height = canvasH;
-  const ctx = canvas.getContext('2d');
+  // ctx is declared with let because the WebView may purge the canvas
+  // DOM node during background, invalidating the 2D context. On foreground
+  // return we attempt to re-acquire it; if that fails, the mux aborts.
+  let ctx: CanvasRenderingContext2D | null = canvas.getContext('2d');
   if (!ctx) {
     cleanupMediaElements();
     return null;
@@ -397,6 +400,13 @@ export async function muxVideoWithAudio(
     // Blob chunks in memory. On mobile, the OS OOM killer will terminate
     // the process. We pause the recorder and media playback on hidden,
     // and resume on visible to prevent memory blowup.
+    //
+    // CRITICAL: On mobile, the OS may kill the MediaRecorder encoder
+    // silently while backgrounded — recorder.state transitions to
+    // 'inactive' with no onerror event. Calling resume() on an inactive
+    // recorder throws InvalidStateError, which propagates up through the
+    // visibilitychange event listener and crashes the app because
+    // ErrorBoundary cannot catch errors in DOM event listeners.
     const onVisibilityChange = () => {
       if (typeof document === 'undefined') return;
       if (document.hidden && !settled && recorder.state === 'recording') {
@@ -411,7 +421,43 @@ export async function muxVideoWithAudio(
         }
       } else if (!document.hidden && pausedForBackground && !settled) {
         pausedForBackground = false;
-        try { recorder.resume(); } catch { /* not supported */ }
+        // If the OS killed the recorder while backgrounded, abort cleanly
+        // instead of calling resume() on a dead recorder (which throws).
+        if (recorder.state === 'inactive') {
+          settled = true;
+          cleanup();
+          flushPostSynthesisMemory().finally(() => resolve(null));
+          return;
+        }
+        // Re-acquire the 2D canvas context — the WebView may have purged
+        // the canvas DOM node during background, making the old ctx a
+        // dangling pointer. Any drawImage call on it would SIGSEGV.
+        if (!useOffscreenDraw) {
+          try {
+            const freshCtx = canvas.getContext('2d');
+            if (freshCtx) ctx = freshCtx;
+            else {
+              // Canvas node was purged and cannot be recreated — abort.
+              settled = true;
+              cleanup();
+              flushPostSynthesisMemory().finally(() => resolve(null));
+              return;
+            }
+          } catch {
+            settled = true;
+            cleanup();
+            flushPostSynthesisMemory().finally(() => resolve(null));
+            return;
+          }
+        }
+        if (recorder.state === 'paused') {
+          try { recorder.resume(); } catch { /* not supported */ }
+        }
+        // AudioContext is suspended by the OS on background; resume it
+        // explicitly or audio playback will be silent / throw on connect.
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
         video.play().catch(() => {});
         audio.play().catch(() => {});
         lastFrameTime = performance.now(); // reset stall timer
@@ -424,8 +470,13 @@ export async function muxVideoWithAudio(
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
 
+    let checkEndTimerId: ReturnType<typeof setTimeout> | null = null;
+
     const cleanup = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = null;
+      if (checkEndTimerId !== null) clearTimeout(checkEndTimerId);
+      checkEndTimerId = null;
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', onVisibilityChange);
       }
@@ -541,6 +592,19 @@ export async function muxVideoWithAudio(
     // Start playback and recording — see startPlayback below for the
     // audio-first lock that prevents capture/playback desync.
 
+    // Local abort helper — avoids repeating the settled/cleanup/flush/resolve
+    // pattern across 8+ guard sites. Defined before drawFrame so it's in
+    // scope for all closures below.
+    const abortMux = (reason: string) => {
+      if (settled) return;
+      settled = true;
+      if (recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch {}
+      }
+      cleanup();
+      flushPostSynthesisMemory().finally(() => resolve(null));
+    };
+
     const drawFrame = async () => {
       // OOM / zombie-process guard: if consecutive frames take >5s each
       // (memory pressure, GPU context loss, or font loading hang),
@@ -554,11 +618,7 @@ export async function muxVideoWithAudio(
             if (recorder.state !== 'inactive') {
               try { recorder.stop(); } catch {}
             }
-            if (!settled) {
-              settled = true;
-              cleanup();
-              flushPostSynthesisMemory().finally(() => resolve(null));
-            }
+            abortMux('frame-stall-timeout');
             return;
           }
         }
@@ -575,11 +635,31 @@ export async function muxVideoWithAudio(
         } catch {
           // createImageBitmap can fail on some browsers — fall back
           // to synchronous main-thread draw for this frame.
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          if (ctx) {
+            try { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); } catch {}
+          }
         }
       } else {
         // Main-thread path: draw video frame directly to canvas.
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Guard against purged 2D context — the WebView may have destroyed
+        // the canvas DOM node during background, making ctx a dangling
+        // pointer. Calling drawImage on it causes a native SIGSEGV that
+        // try-catch cannot intercept on some WebView implementations.
+        if (!ctx) {
+          abortMux('canvas-2d-context-null');
+          return;
+        }
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        } catch {
+          // Canvas context was purged by the WebView during background.
+          // Attempt to re-acquire; if that fails, abort the mux cleanly.
+          ctx = canvas.getContext('2d');
+          if (!ctx) {
+            abortMux('canvas-2d-context-purged');
+            return;
+          }
+        }
       }
 
       if (onProgress && durationSec > 0) {
@@ -599,14 +679,7 @@ export async function muxVideoWithAudio(
       if (perfMem && perfMem.jsHeapSizeLimit > 0) {
         const usageRatio = perfMem.usedJSHeapSize / perfMem.jsHeapSizeLimit;
         if (usageRatio > 0.8) {
-          if (recorder.state !== 'inactive') {
-            try { recorder.stop(); } catch {}
-          }
-          if (!settled) {
-            settled = true;
-            cleanup();
-            flushPostSynthesisMemory().finally(() => resolve(null));
-          }
+          abortMux('memory-pressure-80pct');
           return;
         }
       }
@@ -614,18 +687,14 @@ export async function muxVideoWithAudio(
       // Chunk accumulation guard: if recorded data exceeds 150MB, abort
       // to prevent unbounded memory growth during long videos.
       if (totalChunkBytes > MAX_CHUNK_BYTES) {
-        if (recorder.state !== 'inactive') {
-          try { recorder.stop(); } catch {}
-        }
-        if (!settled) {
-          settled = true;
-          cleanup();
-          flushPostSynthesisMemory().finally(() => resolve(null));
-        }
+        abortMux('chunk-limit-150mb');
         return;
       }
 
-      if (!video.ended) {
+      // Stop the RAF loop if the recorder died (OS killed it during
+      // background, or it was stopped by another guard). Continuing to
+      // draw frames to a dead capture stream wastes CPU and can throw.
+      if (!video.ended && recorder.state !== 'inactive') {
         rafId = requestAnimationFrame(drawFrame);
       }
     };
@@ -663,6 +732,7 @@ export async function muxVideoWithAudio(
     // Stop after both video and audio have finished
     const checkEnd = () => {
       if (settled) return;
+      checkEndTimerId = null;
       if (video.ended && audio.ended) {
         if (recorder.state !== 'inactive') recorder.stop();
         return;
@@ -673,9 +743,9 @@ export async function muxVideoWithAudio(
         if (recorder.state !== 'inactive') recorder.stop();
         return;
       }
-      setTimeout(checkEnd, 100);
+      checkEndTimerId = setTimeout(checkEnd, 100);
     };
-    setTimeout(checkEnd, 200);
+    checkEndTimerId = setTimeout(checkEnd, 200);
   });
 }
 

@@ -568,15 +568,22 @@ useEffect(() => {
         // has re-attached. Calling play() synchronously in the AppState
         // callback can trigger a crash on some native bridges.
         requestAnimationFrame(() => {
-          if (wasPlayingBeforeBgRef.current && hasGeneratedVideo) {
+          // Re-check hasGeneratedVideo inside the RAF callback — the
+          // closure may capture a stale value from when the effect was
+          // last subscribed. If the video was revoked/cleared while
+          // backgrounded (e.g. by mediaCacheClear or a generation reset),
+          // calling setIsPlaying(true) would start playback with no
+          // valid video source, causing a crash.
+          if (wasPlayingBeforeBgRef.current && hasGeneratedVideo && videoUri) {
             setIsPlaying(true);
           }
+          wasPlayingBeforeBgRef.current = false;
         });
       }
     };
     const sub = AppState.addEventListener('change', handleAppState);
     return () => sub.remove();
-  }, [hasGeneratedVideo, isPlaying]);
+  }, [hasGeneratedVideo, isPlaying, videoUri]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;

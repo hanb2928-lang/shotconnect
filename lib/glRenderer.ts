@@ -113,7 +113,55 @@ interface GLContextState {
 
 let contextLostCount = 0;
 let glContextLostGlobal = false;
+// Set to true when the app goes background — all pooled GL contexts are
+// considered dead (the WebView may purge their canvas nodes and GL
+// contexts at any time). Any GL method call on a purged context causes
+// a native SIGSEGV that try-catch cannot intercept, so this flag must
+// be checked BEFORE any gl.* call. Cleared on foreground return so
+// new contexts can be created from scratch.
+let contextsPurgedForBackground = false;
 const contextState = new WeakMap<WebGL2RenderingContext, GLContextState>();
+
+/**
+ * Purge all pooled GL contexts without calling any GL methods.
+ *
+ * Called on visibilitychange → hidden. The WebView may purge canvas
+ * DOM nodes and GL contexts while the app is backgrounded. Calling
+ * any GL method (isContextLost, deleteProgram, loseContext, etc.) on
+ * a purged context triggers a native SIGSEGV that kills the process
+ * before try-catch can intervene. This function only clears the JS
+ * references — the GPU resources are already gone or will be cleaned
+ * up by the browser.
+ */
+export function purgeGLContextsForBackground(): void {
+  contextsPurgedForBackground = true;
+  glContextLostGlobal = true;
+  contextPool.length = 0;
+}
+
+/**
+ * Reset the background-purge flag on foreground return so new GL
+ * contexts can be created. Old contexts are already gone — callers
+ * must create fresh ones via getGLCanvas.
+ */
+export function restoreGLContextsAfterForeground(): void {
+  contextsPurgedForBackground = false;
+  glContextLostGlobal = false;
+}
+
+// Module-level visibility listener: purge GL contexts on background
+// before the WebView purges the canvas nodes. This is the critical
+// defense against the SIGSEGV that occurs when JavaScript tries to
+// call methods on a purged GL context after foreground return.
+if (typeof document !== 'undefined' && Platform.OS === 'web') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      purgeGLContextsForBackground();
+    } else {
+      restoreGLContextsAfterForeground();
+    }
+  });
+}
 
 /**
  * WebGL context pool — prevents exceeding the iOS/Safari limit (~16 concurrent
@@ -190,6 +238,12 @@ export function getActiveContextCount(): number {
 }
 
 export function releaseAllGLContexts(): void {
+  // If contexts were purged for background, the GL objects are already
+  // dead — calling any GL method on them will SIGSEGV. Just clear the pool.
+  if (contextsPurgedForBackground) {
+    contextPool.length = 0;
+    return;
+  }
   for (const entry of contextPool) {
     invalidateContext(entry.gl);
     try {
@@ -201,6 +255,11 @@ export function releaseAllGLContexts(): void {
 }
 
 function isGLContextLost(gl: WebGL2RenderingContext): boolean {
+  // Check the background-purge flag FIRST — if the app was backgrounded,
+  // the GL context may have been purged by the WebView and calling
+  // gl.isContextLost() on it will SIGSEGV before this try-catch can help.
+  if (contextsPurgedForBackground) return true;
+  if (glContextLostGlobal) return true;
   try {
     return typeof gl.isContextLost === 'function' && gl.isContextLost();
   } catch {
@@ -330,7 +389,9 @@ function safeGLRender(
   if (!ctx) return null;
   const { gl, canvas } = ctx;
 
-  if (glContextLostGlobal || isGLContextLost(gl)) {
+  // Check purge flag before any GL method call — isGLContextLost calls
+  // gl.isContextLost() which SIGSEGVs on a purged context.
+  if (contextsPurgedForBackground || glContextLostGlobal || isGLContextLost(gl)) {
     invalidateContext(gl);
     releaseContext(gl);
     return null;

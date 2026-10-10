@@ -157,16 +157,61 @@ export async function mergeClipsSequentially(
   // Safety: if the queue somehow hangs (uncaught error in a clip that
   // doesn't reach the finally block), force-reset after 10 minutes so
   // the state doesn't stay "running" forever, blocking all future merges.
+  //
+  // CRITICAL: The failsafe timer uses wall-clock setTimeout, which keeps
+  // ticking while the app is backgrounded. If the user backgrounds the
+  // app during a merge, the timer fires in the background, calls
+  // currentAbort.abort() on a potentially-dead AbortController, and
+  // triggers flushPostSynthesisMemory() while the OS is reclaiming
+  // memory — a race that can crash the app. We pause the timer on
+  // visibilitychange hidden and recalculate the remaining time on visible.
   const QUEUE_FAILSAFE_MS = 600_000;
-  const failsafeTimer = setTimeout(() => {
-    if (queueState === 'running') {
-      queueState = 'idle';
-      progressCallback = null;
-      currentAbort?.abort();
-      currentAbort = null;
-      flushPostSynthesisMemory().catch(() => {});
+  let failsafeRemainingMs = QUEUE_FAILSAFE_MS;
+  let failsafeStartedAt = 0;
+  let failsafeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearFailsafe = () => {
+    if (failsafeTimer !== null) {
+      clearTimeout(failsafeTimer);
+      failsafeTimer = null;
     }
-  }, QUEUE_FAILSAFE_MS);
+  };
+
+  const startFailsafe = () => {
+    clearFailsafe();
+    failsafeStartedAt = Date.now();
+    failsafeTimer = setTimeout(() => {
+      if (queueState === 'running') {
+        queueState = 'idle';
+        progressCallback = null;
+        currentAbort?.abort();
+        currentAbort = null;
+        flushPostSynthesisMemory().catch(() => {});
+      }
+    }, failsafeRemainingMs);
+  };
+
+  const onFailsafeVisibilityChange = () => {
+    if (typeof document === 'undefined') return;
+    if (document.hidden) {
+      // Pause: calculate remaining time and clear the timer
+      if (failsafeTimer !== null) {
+        const elapsed = Date.now() - failsafeStartedAt;
+        failsafeRemainingMs = Math.max(0, failsafeRemainingMs - elapsed);
+        clearFailsafe();
+      }
+    } else {
+      // Resume: restart timer with remaining time
+      if (queueState === 'running' && failsafeRemainingMs > 0) {
+        startFailsafe();
+      }
+    }
+  };
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onFailsafeVisibilityChange);
+  }
+  startFailsafe();
 
   const results: ClipMergeResult[] = [];
 
@@ -293,7 +338,10 @@ export async function mergeClipsSequentially(
   queueState = 'idle';
   progressCallback = null;
   completedResults = [];
-  clearTimeout(failsafeTimer);
+  clearFailsafe();
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onFailsafeVisibilityChange);
+  }
 
   return results;
 }

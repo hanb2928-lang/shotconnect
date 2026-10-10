@@ -14,6 +14,7 @@
 
 import { Platform } from 'react-native';
 import { hashObject } from '@/lib/contentHash';
+import { getRegisteredTempFiles } from '@/lib/tempFileManager';
 
 const L1_MAX_ENTRIES = 60;
 const L2_BATCH_THRESHOLD = 5;
@@ -120,8 +121,11 @@ export function mediaCacheEvict(key: string): void {
 }
 
 export function mediaCacheClear(): void {
+  let registered: Set<string> | null = null;
+  try { registered = new Set(getRegisteredTempFiles()); } catch { /* non-fatal */ }
   for (const entry of l1Map.values()) {
     if (entry.isBlobUrl) {
+      if (registered && registered.has(entry.url)) continue;
       try {
         URL.revokeObjectURL(entry.url);
       } catch {}
