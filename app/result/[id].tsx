@@ -103,7 +103,7 @@ import { TrendMatchCard } from '@/components/TrendMatchCard';
 import { AffiliatePromptBanner } from '@/components/AffiliatePromptBanner';
 import { AIStyleCard } from '@/components/AIStyleCard';
 import type { StyleRecommendation } from '@/lib/styleRecommend';
-import { getItem } from '@/lib/storage';
+import { getItem, setItem } from '@/lib/storage';
 import { FeatureTileGrid } from '@/components/FeatureTileGrid';
 import type { FeatureCategory, ScanMode, MediaType } from '@/components/FeatureTileGrid';
 import { subscribeToJob } from '@/lib/jobQueue';
@@ -148,6 +148,7 @@ import { DirectShareBridge } from '@/components/DirectShareBridge';
 import { buildCopyOverlayTimeline } from '@/lib/promptBuilder';
 import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { muxVideoWithAudio, probeUrlAccessible } from '@/lib/videoAudioMuxer';
+import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { safeInvoke } from '@/lib/apiClient';
@@ -535,6 +536,8 @@ export default function ResultScreen() {
   const muxDoneRef = useRef<string | null>(null);
   const muxedBlobUrlRef = useRef<string | null>(null);
   const nativeMuxInFlightRef = useRef(false);
+  const muxAbortRef = useRef<AbortController | null>(null);
+  const MUX_SNAPSHOT_KEY = 'mux_snapshot';
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
@@ -1932,6 +1935,15 @@ export default function ResultScreen() {
   // and we haven't already muxed this particular video+audio pair.
   // On web: uses client-side Canvas/MediaRecorder muxing.
   // On native: calls the mux-video-audio edge function (server-side ffmpeg.wasm).
+  //
+  // Three defenses protect this phase:
+  // 1. Pipeline mutex lock: prevents the 92% muxing phase from overlapping
+  //    with polling timers or UI state updates that could cause re-entrancy.
+  // 2. AppState background disposal: when the app is backgrounded mid-mux,
+  //    the mux is aborted and progress is snapshotted to AsyncStorage. On
+  //    foreground, the snapshot is read and the mux is retried from scratch
+  //    (the server-side idempotency guard ensures no duplicate work).
+  // 3. 720p hard cap: the canvas is always 720p max (see videoAudioMuxer).
   useEffect(() => {
     if (!generatedVideoUrl || !ttsUrl) return;
     if (isMuxing) return;
@@ -1940,7 +1952,58 @@ export default function ResultScreen() {
 
     let cancelled = false;
 
+    // Defense 3: Acquire pipeline lock to prevent polling/UI overlap.
+    // If the lock is held by another owner (e.g. video generation), skip
+    // — the effect will re-fire when isMuxing flips back to false.
+    if (!acquirePipelineLock('mux')) return;
+
+    // Defense 2: AppState listener — abort mux on background, snapshot
+    // progress, and restore on foreground.
+    const handleMuxAppState = (nextState: string) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        // Snapshot current mux state for foreground restore
+        const snapshot = {
+          pairKey,
+          muxProgress,
+          scanId: scan?.id ?? null,
+          savedAt: Date.now(),
+        };
+        setItem(MUX_SNAPSHOT_KEY, JSON.stringify(snapshot)).catch(() => {});
+        // Abort the in-flight mux — the AbortController triggers cleanup
+        // in videoAudioMuxer, releasing canvas, audio context, and worker.
+        if (muxAbortRef.current) {
+          muxAbortRef.current.abort();
+          muxAbortRef.current = null;
+        }
+      } else if (nextState === 'active') {
+        // Read snapshot and retry if the pair wasn't completed
+        getItem(MUX_SNAPSHOT_KEY).then((raw) => {
+          if (!raw || cancelled) return;
+          try {
+            const snap = JSON.parse(raw) as { pairKey: string; savedAt: number };
+          // Only retry if the snapshot matches the current pair and is
+          // recent (within 5 minutes). Stale snapshots are cleared.
+          if (snap.pairKey === pairKey && Date.now() - snap.savedAt < 5 * 60 * 1000) {
+            // Reset muxDoneRef so the effect re-fires and retries
+            muxDoneRef.current = null;
+            setIsMuxing(false);
+          }
+          } catch { /* corrupted snapshot */ }
+          // Clear the snapshot regardless
+          setItem(MUX_SNAPSHOT_KEY, '').catch(() => {});
+        }).catch(() => {});
+      }
+    };
+    let appSub: { remove: () => void } | null = null;
+    if (typeof AppState.addEventListener === 'function') {
+      appSub = AppState.addEventListener('change', handleMuxAppState);
+    }
+
     if (Platform.OS === 'web') {
+      // Create abort controller for this mux session
+      const abortController = new AbortController();
+      muxAbortRef.current = abortController;
+
       (async () => {
         // Pre-flight: verify both URLs are accessible. The TTS file may
         // still be uploading to storage when ttsUrl is first set, so we
@@ -1979,7 +2042,7 @@ export default function ResultScreen() {
         try {
           const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
             if (!cancelled) setMuxProgress(p.progress);
-          });
+          }, abortController.signal);
           if (!result || cancelled) {
             result?.revoke();
             return;
@@ -2021,6 +2084,7 @@ export default function ResultScreen() {
           if (typeof document !== 'undefined') {
             document.removeEventListener('visibilitychange', onVisChange);
           }
+          muxAbortRef.current = null;
           if (!cancelled) {
             setIsMuxing(false);
             setMuxProgress(0);
@@ -2081,8 +2145,16 @@ export default function ResultScreen() {
       })();
     }
 
-    return () => { cancelled = true; };
-  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id]);
+    return () => {
+      cancelled = true;
+      releasePipelineLock('mux');
+      if (muxAbortRef.current) {
+        muxAbortRef.current.abort();
+        muxAbortRef.current = null;
+      }
+      if (appSub) appSub.remove();
+    };
+  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id, muxProgress]);
 
   // Realtime subscription on the scans row itself: when the background
   // stereo pipeline (or any other background task) writes text data

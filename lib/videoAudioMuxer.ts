@@ -156,11 +156,18 @@ export async function muxVideoWithAudio(
   // pressure to pick the safest render dimensions. On a low-end phone under
   // memory pressure, this drops to 720p@20fps to avoid OOM kills. On a
   // high-end device with no pressure, full source resolution is preserved.
+  // HARD CAP: muxing canvas is always locked to 720p max, regardless of
+  // device tier. 1080p canvas capture doubles the per-frame buffer
+  // allocation and pushes the native heap past the LMK threshold on
+  // mid-range devices. The server-side FFmpeg also caps at 720p, so
+  // encoding above 720p client-side is wasted work that only increases
+  // memory pressure without improving the final output.
   const adaptive = getAdaptiveRenderParams();
+  const MUX_MAX_DIMENSION = 720;
   const sourceW = video.videoWidth;
   const sourceH = video.videoHeight;
   const { width: canvasW, height: canvasH, scale: canvasScale } =
-    computeScaledDimensions(sourceW, sourceH, adaptive.maxDimension);
+    computeScaledDimensions(sourceW, sourceH, MUX_MAX_DIMENSION);
 
   const canvas = document.createElement('canvas');
   canvas.width = canvasW;
