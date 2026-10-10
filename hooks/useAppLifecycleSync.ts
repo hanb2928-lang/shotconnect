@@ -1,12 +1,15 @@
 import { useEffect, useRef } from 'react';
-import { AppState, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { ensureFreshSession } from '@/lib/supabase';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 
 /**
  * Refresh the auth session and run sync callbacks when the app returns
- * to the foreground. On native, listens to AppState; on web, listens to
- * the Page Visibility API. The session refresh fires before any caller
- * callbacks so subsequent DB queries use a valid token.
+ * to the foreground. On native, registers via the central coordinator
+ * (not a raw AppState listener) to avoid thundering-herd bridge floods
+ * on background transitions. On web, listens to the Page Visibility API.
+ * The session refresh fires before any caller callbacks so subsequent
+ * DB queries use a valid token.
  */
 export function useAppLifecycleSync(onForegroundSync?: () => void | Promise<void>): void {
   const callbackRef = useRef(onForegroundSync);
@@ -50,12 +53,12 @@ export function useAppLifecycleSync(onForegroundSync?: () => void | Promise<void
       };
     }
 
-    const subscription = AppState.addEventListener('change', (nextState) => {
+    const unsub = registerAppStateHandler('deferred', (nextState) => {
       if (nextState === 'active') handleForeground();
     });
     return () => {
       mounted = false;
-      subscription.remove();
+      unsub();
     };
   }, []);
 }
