@@ -514,16 +514,21 @@ export function useResultPolling(
     const handleAppState = (nextState: string) => {
       if (nextState === 'active') {
         if (!cancelled && !settledRef.current) {
-          // Re-subscribe Realtime channel (was unsubscribed on background).
-          if (!realtimeChannel) {
-            try {
-              realtimeChannel = createRealtimeChannel();
-            } catch {
-              // Realtime unavailable — polling still works as fallback
-            }
-          }
           if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-          onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
+          onFlushComplete(() => {
+            if (cancelled || settledRef.current) return;
+            // Re-subscribe Realtime channel inside the flush window so the
+            // bridge call doesn't fire during the reconnect storm.
+            if (!realtimeChannel) {
+              try {
+                realtimeChannel = createRealtimeChannel();
+              } catch {
+                // Realtime unavailable — polling still works as fallback
+              }
+            }
+            resumeBurstCount = 0;
+            runResumeBurst();
+          });
 
           // Re-arm soft warn and hard timeout with remaining time so
           // background duration does not count toward the user's wait.
@@ -570,86 +575,6 @@ export function useResultPolling(
       unsubAppState();
     };
   }, [jobId, scanId, settle]);
-
-  // Forced completion guard: when server-reported progress reaches 85%+
-  // (rendering) while still polling, start a 15-second timer. If no terminal
-  // status arrives, do a DB force-sync — complete if the video is ready,
-  // otherwise retry up to 6 times at 10-second intervals before escalating
-  // to a timeout error. The server goes rendering→completed directly, so
-  // 85% means rendering is underway and the result should arrive soon.
-  useEffect(() => {
-    if (jobState !== 'polling' || serverProgress === null || serverProgress < 0.85) return;
-    if (!jobId) return;
-
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let aborted = false;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 6;
-
-    const checkOnce = async () => {
-      if (aborted || settledRef.current) return;
-      try {
-        await ensureFreshSession();
-        if (scanId) {
-          const { data: scanData } = await supabase
-            .from('scans')
-            .select('video_url, muxed_video_url')
-            .eq('id', scanId)
-            .maybeSingle();
-          if (aborted || settledRef.current) return;
-          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
-          if (scanFinalUrl) {
-            settle('completed', undefined, scanFinalUrl);
-            return;
-          }
-        }
-        const isSoft = jobId.startsWith('soft-');
-        let query = supabase.from('video_jobs').select('status, video_url, error_message');
-        const { data, error: dbErr } = isSoft && scanId
-          ? await query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
-          : await query.eq('task_id', jobId).maybeSingle();
-        if (aborted || settledRef.current) return;
-        if (dbErr || !data) {
-          attempts++;
-          if (attempts < MAX_ATTEMPTS && !aborted && !settledRef.current) {
-            timer = setTimeout(checkOnce, 10_000);
-            return;
-          }
-          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
-          return;
-        }
-        const row = data as { status: string; video_url: string | null; error_message: string | null };
-        if (row.status === 'SUCCESS' && row.video_url) {
-          settle('completed', undefined, row.video_url);
-        } else if (row.status === 'FAILED') {
-          settle('failed', row.error_message ?? '영상 생성에 실패했습니다.');
-        } else {
-          attempts++;
-          if (attempts < MAX_ATTEMPTS && !aborted && !settledRef.current) {
-            timer = setTimeout(checkOnce, 10_000);
-            return;
-          }
-          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
-        }
-      } catch {
-        attempts++;
-        if (attempts < MAX_ATTEMPTS && !aborted && !settledRef.current) {
-          timer = setTimeout(checkOnce, 10_000);
-          return;
-        }
-        if (!aborted && !settledRef.current) {
-          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
-        }
-      }
-    };
-
-    timer = setTimeout(checkOnce, 15_000);
-
-    return () => {
-      aborted = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [serverProgress, jobState, jobId, scanId, settle]);
 
   return { jobState, progressMessage, serverProgress, serverStep, isTimeout, error };
 }

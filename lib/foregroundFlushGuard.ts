@@ -36,9 +36,19 @@ export function armFlushWindow(): void {
     flushWindowActive = false;
     flushTimer = null;
     const cbs = completionCallbacks.splice(0);
-    for (const cb of cbs) {
+    // Stagger callbacks across sequential setTimeout(0) macrotasks so the
+    // JS thread yields to the OS between each consumer's DB queries. Firing
+    // all callbacks synchronously in one tick recreates the thundering herd
+    // the flush window was designed to prevent — 8+ concurrent DB queries
+    // + 2+ Realtime channel subscriptions hit the bridge simultaneously.
+    let i = 0;
+    const runNext = () => {
+      if (i >= cbs.length) return;
+      const cb = cbs[i++];
       try { cb(); } catch { /* non-fatal */ }
-    }
+      if (i < cbs.length) setTimeout(runNext, 0);
+    };
+    runNext();
   }, FLUSH_WINDOW_MS);
 }
 
