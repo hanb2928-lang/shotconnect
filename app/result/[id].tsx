@@ -538,6 +538,7 @@ export default function ResultScreen() {
   const muxedBlobUrlRef = useRef<string | null>(null);
   const nativeMuxInFlightRef = useRef(false);
   const muxAbortRef = useRef<AbortController | null>(null);
+  const muxProgressRef = useRef(0);
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
@@ -1549,6 +1550,37 @@ export default function ResultScreen() {
         if (scanData.video_url) {
           setGeneratedVideoUrl(scanData.video_url);
         }
+        // Restore mux snapshot from local storage if the app was killed
+        // while muxing in the background. The snapshot contains the
+        // generatedVideoUrl and ttsUrl that were in-flight, so the mux
+        // effect can re-trigger naturally via its dependency array.
+        if (!scanData.muxed_video_url) {
+          try {
+            const snapshot = await getItem(`mux_snapshot:${scanData.id}`);
+            if (snapshot && mountedRef.current) {
+              const parsed = JSON.parse(snapshot) as {
+                scanId: string;
+                progress: number;
+                generatedVideoUrl: string;
+                ttsUrl: string;
+                timestamp: number;
+              };
+              // Only restore if the snapshot is recent (within 30 minutes)
+              // and the scan row doesn't already have a muxed URL.
+              if (Date.now() - parsed.timestamp < 30 * 60 * 1000) {
+                if (parsed.generatedVideoUrl && !scanData.video_url) {
+                  setGeneratedVideoUrl(parsed.generatedVideoUrl);
+                }
+                if (parsed.ttsUrl) {
+                  setTtsUrl(parsed.ttsUrl);
+                }
+              } else {
+                // Stale snapshot — clear it
+                setItem(`mux_snapshot:${scanData.id}`, '').catch(() => {});
+              }
+            }
+          } catch { /* corrupt snapshot — ignore */ }
+        }
         if (scanData.product_vision) {
           setProductVision(scanData.product_vision);
         }
@@ -2006,10 +2038,10 @@ export default function ResultScreen() {
         // if the OS kills the process while backgrounded. Without this, the
         // muxDoneRef guard prevents re-entry but the user loses all visible
         // progress context after a cold restart.
-        if (scan?.id && (isMuxing || muxProgress > 0)) {
+        if (scan?.id && (isMuxing || muxProgressRef.current > 0)) {
           setItem(`mux_snapshot:${scan.id}`, JSON.stringify({
             scanId: scan.id,
-            progress: muxProgress,
+            progress: muxProgressRef.current,
             generatedVideoUrl,
             ttsUrl,
             timestamp: Date.now(),
@@ -2076,7 +2108,8 @@ export default function ResultScreen() {
           const result = await muxVideoWithAudio(generatedVideoUrl, ttsUrl, (p) => {
             // Update progress state directly — this does NOT re-run this
             // effect because muxProgress is NOT in the dependency array.
-            if (!cancelled) setMuxProgress(p.progress);
+          if (!cancelled) setMuxProgress(p.progress);
+          if (!cancelled) muxProgressRef.current = p.progress;
           }, abortController.signal, targetDur, audioOffset, audioDur);
           if (!result || cancelled) {
             result?.revoke();
@@ -2120,6 +2153,7 @@ export default function ResultScreen() {
             document.removeEventListener('visibilitychange', onVisChange);
           }
           muxAbortRef.current = null;
+          muxProgressRef.current = 0;
           if (!cancelled) {
             setIsMuxing(false);
             setMuxProgress(0);
@@ -2132,8 +2166,14 @@ export default function ResultScreen() {
       nativeMuxInFlightRef.current = true;
       muxDoneRef.current = pairKey;
       setIsMuxing(true);
+      muxProgressRef.current = 0;
       setMuxProgress(0);
       setMuxError(null);
+      // Create abort controller for native mux so background entry can cancel
+      // the in-flight invoke — without this, the handleMuxAppState abort call
+      // finds muxAbortRef.current === null and the invoke keeps running.
+      const nativeAbortController = new AbortController();
+      muxAbortRef.current = nativeAbortController;
 
       (async () => {
         try {
@@ -2149,6 +2189,7 @@ export default function ResultScreen() {
               audioOffsetSec: audioOffset,
               audioDurationSec: audioDur,
             },
+            signal: nativeAbortController.signal,
           });
 
           if (cancelled) return;
@@ -2161,6 +2202,7 @@ export default function ResultScreen() {
 
           if (data.muxedUrl) {
             setMuxedVideoUrl(data.muxedUrl);
+            muxProgressRef.current = 1;
             setMuxProgress(1);
           }
         } catch {
@@ -2169,6 +2211,8 @@ export default function ResultScreen() {
           }
         } finally {
           nativeMuxInFlightRef.current = false;
+          muxAbortRef.current = null;
+          muxProgressRef.current = 0;
           if (!cancelled) {
             setIsMuxing(false);
             setMuxProgress(0);

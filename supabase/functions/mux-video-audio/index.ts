@@ -18,6 +18,11 @@ interface MuxRequest {
   audioDurationSec?: number;
 }
 
+// In-flight deduplication: maps scanId → ongoing mux Promise so that
+// concurrent requests for the same scan (Realtime re-trigger + polling
+// retry) share a single FFmpeg run instead of spawning duplicates.
+const inflightMux = new Map<string, Promise<Response>>();
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -69,6 +74,15 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // In-flight deduplication: if another request for the same scanId
+    // is already running FFmpeg, wait for its result instead of starting
+    // a second concurrent encode. The promise is removed on settle.
+    if (scanId) {
+      const existing = inflightMux.get(scanId);
+      if (existing) return await existing;
+    }
+
+    const muxWork = async (): Promise<Response> => {
     // Download both files
     const [videoResp, audioResp] = await Promise.all([
       fetch(videoUrl),
@@ -153,13 +167,8 @@ Deno.serve(async (req: Request) => {
         // optionally stretch/shrink to fit the narration window (atempo),
         // then pad with silence to match the full target duration (apad).
         const filterParts: string[] = [];
-        if (offset > 0) {
-          filterParts.push(`adelay=${Math.round(offset * 1000)}|${Math.round(offset * 1000)}`);
-        }
-        // If audioDurationSec is specified, use atempo to time-stretch or
-        // shrink the audio so it fills the narration window exactly. This
-        // prevents chunk timestamp desync in multi-cut shortform merges
-        // where individual TTS clips don't match their segment duration.
+        // atempo must run BEFORE adelay so the offset silence is not
+        // time-stretched along with the audio. Order: atempo → adelay → apad.
         if (audioDurationSec && audioDurationSec > 0) {
           const narrationWindow = targetDurationSec - offset;
           if (narrationWindow > 0) {
@@ -183,6 +192,9 @@ Deno.serve(async (req: Request) => {
               filterParts.push(...tempoFilters);
             }
           }
+        }
+        if (offset > 0) {
+          filterParts.push(`adelay=${Math.round(offset * 1000)}|${Math.round(offset * 1000)}`);
         }
         filterParts.push(`apad=whole_dur=${targetDurationSec}`);
         const audioFilter = filterParts.join(",");
@@ -278,6 +290,15 @@ Deno.serve(async (req: Request) => {
       try { ffmpeg.terminate(); } catch { /* already terminated */ }
       throw ffmpegErr;
     }
+    }; // end muxWork
+
+    if (scanId) {
+      const promise = muxWork().finally(() => inflightMux.delete(scanId));
+      inflightMux.set(scanId, promise);
+      return await promise;
+    }
+    return await muxWork();
+
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "알 수 없는 오류";
     return new Response(

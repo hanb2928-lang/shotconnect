@@ -499,7 +499,9 @@ export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, vide
         const narrAudio = narrationAudioRef.current;
         narrAudio.pause();
         narrAudio.currentTime = 0;
-        narrAudio.play().catch(() => {});
+        // Don't call play() here — the narration-sync effect will start
+        // it at the correct offset. Calling play() now causes a one-frame
+        // audio blip when the effect immediately pauses it.
       }
       if (bgmPlayerRef.current) {
         bgmPlayerRef.current.stop();

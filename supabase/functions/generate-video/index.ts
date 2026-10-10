@@ -1205,7 +1205,15 @@ async function submitRunwayTask(
 
   try {
     const clampedDuration = Math.min(Math.max(Math.round(durationSec), 2), 30);
-    const ratioMap: Record<string, string> = isHd
+    const ratioMapNonHd: Record<string, string> = {
+      "9:16": "720:1280",
+      "16:9": "1280:720",
+      "1:1": "960:960",
+      "4:3": "1104:832",
+      "3:4": "832:1104",
+      "21:9": "1584:672",
+    };
+    const ratioMap: Record<string, string> = isHd && clampedDuration <= 10
       ? {
           "9:16": "1080:1920",
           "16:9": "1920:1080",
@@ -1214,21 +1222,17 @@ async function submitRunwayTask(
           "3:4": "1080:1440",
           "21:9": "2376:1008",
         }
-      : {
-          "9:16": "720:1280",
-          "16:9": "1280:720",
-          "1:1": "960:960",
-          "4:3": "1104:832",
-          "3:4": "832:1104",
-          "21:9": "1584:672",
-        };
+      : ratioMapNonHd;
 
     const hasImage = typeof promptImage === "string" && promptImage.length > 0;
     const endpoint = hasImage ? "image_to_video" : "text_to_video";
     // Gen-4.5 supports 2-10s. For longer durations (>10s), use seedance2_5
     // which supports 4-30s at 480p/720p.
-    const model = clampedDuration > 10 ? "seedance2_5" : "gen4.5";
-    const ratioValue = ratioMap[aspectRatio] ?? "720:1280";
+    const isSeedance = clampedDuration > 10;
+    const model = isSeedance ? "seedance2_5" : "gen4.5";
+    // seedance2_5 only supports up to 720p — force non-HD ratios and
+    // clamp resolution even when HD was requested.
+    const ratioValue = (isSeedance ? ratioMapNonHd : ratioMap)[aspectRatio] ?? "720:1280";
     const safePrompt = safeSlice(prompt.trim(), 1000);
 
     const payload: Record<string, unknown> = {
@@ -1237,7 +1241,7 @@ async function submitRunwayTask(
       duration: clampedDuration,
       ratio: ratioValue,
     };
-    if (resolution) payload.resolution = resolution;
+    if (resolution) payload.resolution = isSeedance ? "720p" : resolution;
     if (fps != null) payload.fps = fps;
     if (hasImage && promptImage) {
       payload.promptImage = promptImage;

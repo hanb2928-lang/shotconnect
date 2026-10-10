@@ -367,7 +367,14 @@ export async function muxVideoWithAudio(
       if (clampedRate > 0.85 && clampedRate < 1.15) {
         // Within 15% of normal — no adjustment needed, natural variation
       } else {
-        try { audio.playbackRate = clampedRate; } catch { /* non-fatal */ }
+        try {
+          audio.playbackRate = clampedRate;
+          (audio as unknown as Record<string, unknown>).preservesPitch = true;
+          const moz = (audio as unknown as Record<string, unknown>).mozPreservesPitch;
+          const webkit = (audio as unknown as Record<string, unknown>).webkitPreservesPitch;
+          if (moz !== undefined) (audio as unknown as Record<string, unknown>).mozPreservesPitch = true;
+          if (webkit !== undefined) (audio as unknown as Record<string, unknown>).webkitPreservesPitch = true;
+        } catch { /* non-fatal */ }
       }
     }
   }
@@ -629,19 +636,22 @@ export async function muxVideoWithAudio(
     // point on the master timeline — the recorder starts with video only,
     // and audio kicks in at the offset.
     const startPlayback = async () => {
+      const audioPlayPromise = audioOffset > 0
+        ? new Promise<void>((resolve) => {
+            setTimeout(() => {
+              audio.play().then(() => resolve()).catch(() => resolve());
+            }, audioOffset * 1000);
+          })
+        : audio.play().catch(() => {});
       if (audioOffset > 0) {
         // Start video first, delay audio until the offset is reached
         await video.play().catch(() => {});
         startTime = performance.now();
         recorder.start(100);
         rafId = requestAnimationFrame(drawFrame);
-        // Schedule audio start at the offset point
-        setTimeout(() => {
-          audio.play().catch(() => {});
-        }, audioOffset * 1000);
+        void audioPlayPromise;
       } else {
         const videoPlayPromise = video.play().catch(() => {});
-        const audioPlayPromise = audio.play().catch(() => {});
         await Promise.all([videoPlayPromise, audioPlayPromise]);
         startTime = performance.now();
         recorder.start(100);

@@ -706,10 +706,10 @@ function computeEditPlan(
   const visionFeatureHint = productVision?.visualFeatures?.slice(0, 2).join(' · ') ?? '';
 
   const d = totalDurationSec;
-  const hookEnd = Math.round(d * 0.2);
-  const needEnd = Math.round(d * 0.47);
-  const transformEnd = Math.round(d * 0.73);
-  const ctaEnd = Math.round(d * 0.87);
+  const hookEnd = Math.max(1, Math.round(d * 0.2));
+  const needEnd = Math.max(hookEnd + 1, Math.round(d * 0.47));
+  const transformEnd = Math.max(needEnd + 1, Math.round(d * 0.73));
+  const ctaEnd = Math.max(transformEnd + 1, Math.round(d * 0.87));
 
   const segments: EditSegment[] = [
     {
