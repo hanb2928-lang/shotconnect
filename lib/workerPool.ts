@@ -1,532 +1,194 @@
-/**
- * Lightweight Web Worker pool for offloading CPU-heavy work from the main thread.
- *
- * On web, creates a small pool of workers from an inline blob URL so the
- * code works with Metro bundling without any special resolver config.
- * On native, all operations fall back to running on the main thread
- * (Hermes/JSC don't support Web Workers).
- */
-
 import { Platform } from 'react-native';
-import { onMemoryPressureChange, getMemoryPressure } from '@/lib/devicePerformance';
-import { addBreadcrumb, logWarning } from '@/lib/errorLogger';
+import { uint8ArrayToBase64 } from '@/lib/base64';
 
-export type WorkerTaskType = 'base64-encode' | 'base64-decode' | 'image-compress' | 'video-luminance' | 'subject-crop';
+type WorkerTask =
+  | { type: 'compress'; dataUrl: string; maxDimension: number; quality: number }
+  | { type: 'base64'; buffer: ArrayBuffer }
+  | { type: 'luminance'; video: HTMLVideoElement; region: 'top' | 'center' | 'bottom' }
+  | { type: 'cropSubject'; dataUrl: string };
 
-export interface WorkerTaskRequest {
-  id: number;
-  type: WorkerTaskType;
-  // base64-encode: { bytes: ArrayBuffer }
-  // base64-decode: { base64: string }
-  // image-compress: { dataUrl: string, maxDim: number, quality: number }
-  [key: string]: unknown;
+let workerInstance: Worker | null = null;
+let workerAvailable = false;
+
+try {
+  workerAvailable = Platform.OS === 'web' && typeof Worker !== 'undefined' && typeof OffscreenCanvas !== 'undefined';
+} catch {
+  workerAvailable = false;
 }
 
-export interface WorkerTaskResponse {
-  id: number;
-  ok: boolean;
-  result?: unknown;
-  error?: string;
-}
-
-type PendingTask = {
-  resolve: (value: unknown) => void;
-  reject: (reason: Error) => void;
-  transferables?: Transferable[];
-  timeoutId?: ReturnType<typeof setTimeout>;
-};
-
-const MAX_POOL_SIZE = 3;
-const MAX_CONCURRENT_UNDER_PRESSURE = 1;
-const WORKER_TASK_TIMEOUT_MS = 60_000;
-let pool: Worker[] = [];
-let workerBlobUrls: string[] = [];
-
-let pending = new Map<number, PendingTask>();
-let taskIdCounter = 0;
-let initialized = false;
-let activeDispatches = 0;
-let pressureUnsub: (() => void) | null = null;
-
-onMemoryPressureChange((level) => {
-  if (level === 'severe') {
-    addBreadcrumb('worker', 'Worker pool throttling enabled — severe memory pressure', 'error', { activeDispatches, poolSize: pool.length });
-    logWarning('Worker pool entering throttle mode due to severe memory pressure', {
-      component: 'workerPool',
-      action: 'pressure-throttle',
-      extra: { activeDispatches, poolSize: pool.length },
-    });
-  } else if (level === 'none') {
-    addBreadcrumb('worker', 'Worker pool throttling disabled — memory pressure cleared', 'warning');
-  }
-});
-
-/**
- * The worker source code as a string. This runs in a separate thread.
- * It handles base64 encoding/decoding and image compression via
- * OffscreenCanvas (when available).
- */
-const WORKER_SOURCE = `
-let offscreenCanvas = null;
-let offscreenCtx = null;
-
-self.onmessage = function(e) {
-  var msg = e.data;
-  var id = msg.id;
-  var type = msg.type;
-
+const workerCode = `
+self.onmessage = async (e) => {
+  const { type, id, payload } = e.data;
   try {
-    if (type === 'base64-encode') {
-      var bytes = new Uint8Array(msg.bytes);
-      var result = encodeBase64(bytes);
-      self.postMessage({ id: id, ok: true, result: result }, [bytes.buffer]);
-      return;
-    }
-
-    if (type === 'base64-decode') {
-      var base64 = msg.base64;
-      var bytes = decodeBase64(base64);
-      self.postMessage({ id: id, ok: true, result: bytes.buffer }, [bytes.buffer]);
-      return;
-    }
-
-    if (type === 'image-compress') {
-      var dataUrl = msg.dataUrl;
-      var maxDim = msg.maxDim;
-      var quality = msg.quality;
-      compressImage(dataUrl, maxDim, quality).then(function(result) {
-        self.postMessage({ id: id, ok: true, result: result });
-      }).catch(function(err) {
-        self.postMessage({ id: id, ok: false, error: String(err) });
+    if (type === 'compress') {
+      const { dataUrl, maxDimension, quality } = payload;
+      const blob = await (await fetch(dataUrl)).blob();
+      const bitmap = await createImageBitmap(blob);
+      const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+      const w = Math.round(bitmap.width * scale);
+      const h = Math.round(bitmap.height * scale);
+      const canvas = new OffscreenCanvas(w, h);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      const outBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
+      const reader = new FileReader();
+      const result = await new Promise((resolve) => {
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(outBlob);
       });
-      return;
-    }
-
-    if (type === 'video-luminance') {
-      var bitmap = msg.bitmap;
-      var result = computeLuminance(bitmap);
-      if (bitmap) bitmap.close();
-      self.postMessage({ id: id, ok: true, result: result });
-      return;
-    }
-
-    if (type === 'subject-crop') {
-      var dataUrl = msg.dataUrl;
-      cropToSubject(dataUrl).then(function(result) {
-        self.postMessage({ id: id, ok: true, result: result });
-      }).catch(function(err) {
-        self.postMessage({ id: id, ok: false, error: String(err) });
-      });
-      return;
-    }
-
-    self.postMessage({ id: id, ok: false, error: 'Unknown task type: ' + type });
-  } catch (err) {
-    self.postMessage({ id: id, ok: false, error: String(err) });
-  }
-};
-
-function encodeBase64(bytes) {
-  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  var len = bytes.length;
-  var result = '';
-  var chunkSize = 0x2000;
-
-  for (var i = 0; i < len; i += 3) {
-    var b0 = bytes[i];
-    var b1 = i + 1 < len ? bytes[i + 1] : 0;
-    var b2 = i + 2 < len ? bytes[i + 2] : 0;
-
-    result += chars[b0 >> 2];
-    result += chars[((b0 & 0x03) << 4) | (b1 >> 4)];
-    if (i + 1 < len) {
-      result += chars[((b1 & 0x0f) << 2) | (b2 >> 6)];
-    } else {
-      result += '=';
-    }
-    if (i + 2 < len) {
-      result += chars[b2 & 0x3f];
-    } else {
-      result += '=';
-    }
-  }
-
-  return result;
-}
-
-function decodeBase64(base64) {
-  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  var lookup = new Uint8Array(256);
-  for (var i = 0; i < chars.length; i++) {
-    lookup[chars.charCodeAt(i)] = i;
-  }
-
-  var clean = base64.replace(/\\s/g, '').replace(/^data:[^,]+;base64,/, '');
-  var len = clean.length;
-  var padding = 0;
-  if (len >= 2 && clean[len - 1] === '=') padding++;
-  if (len >= 2 && clean[len - 2] === '=') padding++;
-
-  var byteLen = Math.max(0, Math.floor((len / 4) * 3 - padding));
-  var bytes = new Uint8Array(byteLen);
-
-  var byteIdx = 0;
-  for (var i = 0; i < len; i += 4) {
-    var c0 = lookup[clean.charCodeAt(i)] || 0;
-    var c1 = lookup[clean.charCodeAt(i + 1)] || 0;
-    var c2 = i + 2 < len ? (lookup[clean.charCodeAt(i + 2)] || 0) : 0;
-    var c3 = i + 3 < len ? (lookup[clean.charCodeAt(i + 3)] || 0) : 0;
-
-    var triple = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
-    if (byteIdx < byteLen) bytes[byteIdx++] = (triple >> 16) & 0xff;
-    if (byteIdx < byteLen) bytes[byteIdx++] = (triple >> 8) & 0xff;
-    if (byteIdx < byteLen) bytes[byteIdx++] = triple & 0xff;
-  }
-
-  return bytes;
-}
-
-function computeLuminance(bitmap) {
-  if (!bitmap || typeof OffscreenCanvas === 'undefined') return 0.3;
-  var sampleW = 64;
-  var sampleH = 48;
-  if (!offscreenCanvas) {
-    offscreenCanvas = new OffscreenCanvas(sampleW, sampleH);
-    offscreenCtx = offscreenCanvas.getContext('2d');
-  } else {
-    offscreenCanvas.width = sampleW;
-    offscreenCanvas.height = sampleH;
-  }
-  try {
-    offscreenCtx.drawImage(bitmap, 0, 0, sampleW, sampleH);
-    var imageData = offscreenCtx.getImageData(0, 0, sampleW, sampleH);
-    var data = imageData.data;
-    var totalLum = 0;
-    var pixelCount = 0;
-    for (var i = 0; i < data.length; i += 4) {
-      totalLum += (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
-      pixelCount++;
-    }
-    return pixelCount > 0 ? totalLum / pixelCount : 0.3;
-  } catch (e) {
-    return 0.3;
-  }
-}
-
-function cropToSubject(dataUrl) {
-  return new Promise(function(resolve, reject) {
-    if (typeof OffscreenCanvas === 'undefined') {
-      reject(new Error('OffscreenCanvas not supported in worker'));
-      return;
-    }
-    var img = new Image();
-    img.onload = function() {
-      var naturalW = img.naturalWidth || img.width;
-      var naturalH = img.naturalHeight || img.height;
-      var maxDim = 1024;
-      var scale = Math.min(1, maxDim / Math.max(naturalW, naturalH));
-      var w = Math.max(1, Math.round(naturalW * scale));
-      var h = Math.max(1, Math.round(naturalH * scale));
-
-      if (!offscreenCanvas) {
-        offscreenCanvas = new OffscreenCanvas(w, h);
-        offscreenCtx = offscreenCanvas.getContext('2d');
-      } else {
-        offscreenCanvas.width = w;
-        offscreenCanvas.height = h;
+      self.postMessage({ id, result });
+    } else if (type === 'base64') {
+      const { buffer } = payload;
+      const bytes = new Uint8Array(buffer);
+      const CHUNK = 49152;
+      let result = '';
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        const chunk = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+        result += self.btoa(String.fromCharCode(...chunk));
       }
-
-      offscreenCtx.clearRect(0, 0, w, h);
-      offscreenCtx.drawImage(img, 0, 0, w, h);
-      var imageData = offscreenCtx.getImageData(0, 0, w, h);
-      var data = imageData.data;
-
-      var minX = w, maxX = 0, minY = h, maxY = 0;
-      var foundPixels = 0;
-
-      for (var y = 0; y < h; y++) {
-        for (var x = 0; x < w; x++) {
-          var idx = (y * w + x) * 4;
-          if (data[idx + 3] > 30) {
-            foundPixels++;
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
+      self.postMessage({ id, result });
+    } else if (type === 'cropSubject') {
+      const { dataUrl } = payload;
+      const blob = await (await fetch(dataUrl)).blob();
+      const bitmap = await createImageBitmap(blob);
+      const maxDim = 1024;
+      const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+      const w = Math.round(bitmap.width * scale);
+      const h = Math.round(bitmap.height * scale);
+      const canvas = new OffscreenCanvas(w, h);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const data = imageData.data;
+      let minR = w, maxR = 0, minC = h, maxC = 0;
+      const threshold = 30;
+      let found = false;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4;
+          const alpha = data[idx + 3];
+          if (alpha > threshold) {
+            found = true;
+            if (x < minR) minR = x;
+            if (x > maxR) maxR = x;
+            if (y < minC) minC = y;
+            if (y > maxC) maxC = y;
           }
         }
       }
-
-      if (foundPixels < 100) {
-        resolve(null);
+      if (!found) {
+        const outBlob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.85 });
+        const reader = new FileReader();
+        const result = await new Promise((resolve) => {
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(outBlob);
+        });
+        self.postMessage({ id, result });
         return;
       }
-
-      var subjectW = maxX - minX;
-      var subjectH = maxY - minY;
-      var cx = (minX + maxX) / 2;
-      var cy = (minY + maxY) / 2;
-      var targetSize = Math.max(subjectW, subjectH);
-      var padding = Math.round(targetSize * 0.15);
-      var cropSize = targetSize + padding * 2;
-
-      var cropCanvas = new OffscreenCanvas(cropSize, cropSize);
-      var cropCtx = cropCanvas.getContext('2d');
-      var sx = Math.max(0, cx - cropSize / 2);
-      var sy = Math.max(0, cy - cropSize / 2);
-      cropCtx.drawImage(offscreenCanvas, sx, sy, cropSize, cropSize, 0, 0, cropSize, cropSize);
-
-      cropCanvas.convertToBlob({ type: 'image/png' }).then(function(blob) {
-        var reader = new FileReader();
-        reader.onload = function() { resolve(reader.result); };
-        reader.onerror = function() { reject(new Error('Failed to read crop blob')); };
-        reader.readAsDataURL(blob);
-      }).catch(function(err) { reject(err); });
-    };
-    img.onerror = function() { reject(new Error('Failed to load image in worker')); };
-    img.src = dataUrl;
-  });
-}
-
-function compressImage(dataUrl, maxDim, quality) {  return new Promise(function(resolve, reject) {
-    if (typeof OffscreenCanvas === 'undefined') {
-      reject(new Error('OffscreenCanvas not supported in worker'));
-      return;
-    }
-
-    var img = new Image();
-    img.onload = function() {
-      var naturalW = img.naturalWidth || img.width;
-      var naturalH = img.naturalHeight || img.height;
-      var scale = Math.min(1, maxDim / Math.max(naturalW, naturalH));
-      var w = Math.max(1, Math.round(naturalW * scale));
-      var h = Math.max(1, Math.round(naturalH * scale));
-
-      if (!offscreenCanvas) {
-        offscreenCanvas = new OffscreenCanvas(w, h);
-        offscreenCtx = offscreenCanvas.getContext('2d');
-      } else {
-        offscreenCanvas.width = w;
-        offscreenCanvas.height = h;
-      }
-
-      offscreenCtx.drawImage(img, 0, 0, w, h);
-
-      offscreenCanvas.convertToBlob({ type: 'image/jpeg', quality: quality }).then(function(blob) {
-        var reader = new FileReader();
-        reader.onload = function() {
-          resolve(reader.result);
-        };
-        reader.onerror = function() {
-          reject(new Error('Failed to read compressed blob'));
-        };
-        reader.readAsDataURL(blob);
-      }).catch(function(err) {
-        reject(err);
+      const pad = 16;
+      minR = Math.max(0, minR - pad);
+      minC = Math.max(0, minC - pad);
+      maxR = Math.min(w, maxR + pad);
+      maxC = Math.min(h, maxC + pad);
+      const cropW = maxR - minR;
+      const cropH = maxC - minC;
+      const side = Math.max(cropW, cropH);
+      const sqCanvas = new OffscreenCanvas(side, side);
+      const sqCtx = sqCanvas.getContext('2d');
+      const ox = Math.round((side - cropW) / 2);
+      const oy = Math.round((side - cropH) / 2);
+      sqCtx.drawImage(canvas, minR, minC, cropW, cropH, ox, oy, cropW, cropH);
+      const outBlob = await sqCanvas.convertToBlob({ type: 'image/webp', quality: 0.85 });
+      const reader = new FileReader();
+      const result = await new Promise((resolve) => {
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(outBlob);
       });
-    };
-    img.onerror = function() {
-      reject(new Error('Failed to load image in worker'));
-    };
-    img.src = dataUrl;
-  });
-}
+      self.postMessage({ id, result });
+    }
+  } catch (err) {
+    self.postMessage({ id, error: err instanceof Error ? err.message : 'worker error' });
+  }
+};
 `;
 
-function createWorkerFromSource(source: string): Worker | null {
+const blobUrlCache: string | null = null;
+
+function getWorker(): Worker | null {
+  if (!workerAvailable) return null;
+  if (workerInstance) return workerInstance;
   try {
-    const blob = new Blob([source], { type: 'application/javascript' });
-    const url = URL.createObjectURL(blob);
-    const worker = new Worker(url);
-    workerBlobUrls.push(url);
-    worker.onmessage = handleWorkerMessage;
-    worker.onerror = (err) => {
-      console.warn('Worker pool error:', err.message);
-    };
-    return worker;
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const url = blobUrlCache ?? URL.createObjectURL(blob);
+    workerInstance = new Worker(url);
+    return workerInstance;
   } catch {
     return null;
   }
 }
 
-function handleWorkerMessage(e: MessageEvent<WorkerTaskResponse>) {
-  const { id, ok, result, error } = e.data;
-  const task = pending.get(id);
-  if (!task) return;
-  if (task.timeoutId) clearTimeout(task.timeoutId);
-  pending.delete(id);
-  activeDispatches = Math.max(0, activeDispatches - 1);
+const pendingTasks = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+let nextTaskId = 0;
 
-  if (ok) {
-    task.resolve(result);
-  } else {
-    task.reject(new Error(error || 'Worker task failed'));
-  }
-}
-
-function dispatch(
-  request: WorkerTaskRequest,
-  transferables?: Transferable[],
-): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    if (pool.length === 0) {
-      reject(new Error('No workers available'));
-      return;
-    }
-
-    const pressure = getMemoryPressure();
-    if (pressure === 'severe' && activeDispatches >= MAX_CONCURRENT_UNDER_PRESSURE) {
-      reject(new Error('Worker pool throttled due to severe memory pressure'));
-      return;
-    }
-
-    pending.set(request.id, { resolve, reject, transferables });
-    activeDispatches++;
-
-    // Per-task timeout: if a worker hangs (OOM in OffscreenCanvas, stuck
-    // image decode), reject after 60s so the pending map doesn't leak
-    // and the caller can fall back to main-thread execution.
-    const taskTimeout = setTimeout(() => {
-      const task = pending.get(request.id);
-      if (!task) return;
-      pending.delete(request.id);
-      activeDispatches = Math.max(0, activeDispatches - 1);
-      task.reject(new Error('Worker task timed out (60s)'));
-    }, WORKER_TASK_TIMEOUT_MS);
-    pending.get(request.id)!.timeoutId = taskTimeout;
-
-    // Find a worker with the fewest pending tasks (simplified: round-robin)
-    const worker = pool[request.id % pool.length];
-    if (worker) {
-      try {
-        worker.postMessage(request, transferables || []);
-      } catch (err) {
-        clearTimeout(taskTimeout);
-        pending.delete(request.id);
-        activeDispatches--;
-        reject(err instanceof Error ? err : new Error('Worker dispatch failed'));
-      }
-    } else {
-      clearTimeout(taskTimeout);
-      pending.delete(request.id);
-      activeDispatches--;
-      reject(new Error('No workers available'));
-    }
+function dispatchToWorker<T>(payload: Record<string, unknown>): Promise<T> {
+  const worker = getWorker();
+  if (!worker) return Promise.reject(new Error('Worker pool unavailable'));
+  const id = ++nextTaskId;
+  return new Promise<T>((resolve, reject) => {
+    pendingTasks.set(id, { resolve: resolve as (v: unknown) => void, reject });
+    worker.postMessage({ id, ...payload });
   });
 }
 
-function ensureInitialized(): void {
-  if (initialized) return;
-  initialized = true;
-
-  if (Platform.OS !== 'web') return;
-  if (typeof Worker === 'undefined') return;
-
-  let numWorkers = 2;
+if (workerAvailable) {
   try {
-    numWorkers = Math.min(MAX_POOL_SIZE, navigator.hardwareConcurrency || 2);
-  } catch {
-    // navigator.hardwareConcurrency can throw in some embedded / restricted contexts
-  }
-
-  for (let i = 0; i < numWorkers; i++) {
-    try {
-      const worker = createWorkerFromSource(WORKER_SOURCE);
-      if (worker) pool.push(worker);
-    } catch {
-      // Individual worker creation failure — skip this slot
+    const worker = getWorker();
+    if (worker) {
+      worker.onmessage = (e: MessageEvent) => {
+        const { id, result, error } = e.data;
+        const task = pendingTasks.get(id);
+        if (task) {
+          pendingTasks.delete(id);
+          if (error) task.reject(new Error(error));
+          else task.resolve(result);
+        }
+      };
+      worker.onerror = () => {
+        pendingTasks.forEach((task) => task.reject(new Error('Worker error')));
+        pendingTasks.clear();
+      };
     }
+  } catch {
+    workerAvailable = false;
   }
-  // If no workers were created, callers will fall back to main-thread
-  // execution via isWorkerPoolAvailable() returning false.
 }
 
 export function isWorkerPoolAvailable(): boolean {
-  if (Platform.OS !== 'web') return false;
-  if (typeof Worker === 'undefined') return false;
-  try {
-    ensureInitialized();
-  } catch {
-    // If initialization throws for any reason, treat as unavailable
-    return false;
-  }
-  return pool.length > 0;
+  return workerAvailable && getWorker() !== null;
 }
 
-/**
- * Encode an ArrayBuffer to a base64 string in a Web Worker.
- * The ArrayBuffer is transferred (not copied) to the worker.
- * Falls back to main-thread encoding if workers aren't available.
- */
-export async function encodeBase64InWorker(bytes: ArrayBuffer): Promise<string> {
-  if (!isWorkerPoolAvailable()) {
-    // Fallback: encode on main thread
-    const { uint8ArrayToBase64 } = await import('./base64');
-    return uint8ArrayToBase64(new Uint8Array(bytes));
-  }
-
-  const id = ++taskIdCounter;
-  return (await dispatch(
-    { id, type: 'base64-encode', bytes },
-    [bytes],
-  )) as string;
-}
-
-/**
- * Decode a base64 string to an ArrayBuffer in a Web Worker.
- * Falls back to main-thread decoding if workers aren't available.
- */
-export async function decodeBase64InWorker(base64: string): Promise<ArrayBuffer> {
-  if (!isWorkerPoolAvailable()) {
-    // Fallback: decode on main thread
-    const { base64ToUint8Array } = await import('./base64');
-    const arr = base64ToUint8Array(base64);
-    return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer;
-  }
-
-  const id = ++taskIdCounter;
-  return (await dispatch(
-    { id, type: 'base64-decode', base64 },
-  )) as ArrayBuffer;
-}
-
-/**
- * Compress an image (data URL → smaller data URL) in a Web Worker
- * using OffscreenCanvas. Falls back to main-thread compression
- * if workers or OffscreenCanvas aren't available.
- */
 export async function compressImageInWorker(
   dataUrl: string,
-  maxDim: number,
+  maxDimension: number,
   quality: number,
 ): Promise<string> {
-  if (!isWorkerPoolAvailable()) {
-    // Fallback: compress on main thread
-    const { prepareImageForApi } = await import('./imageEdit');
-    return prepareImageForApi(dataUrl, maxDim, quality);
-  }
-
-  const id = ++taskIdCounter;
-  return (await dispatch(
-    { id, type: 'image-compress', dataUrl, maxDim, quality },
-  )) as string;
+  return dispatchToWorker<string>({ type: 'compress', payload: { dataUrl, maxDimension, quality } });
 }
 
-/**
- * Sample the average luminance of a video frame in a Web Worker.
- * The caller creates an ImageBitmap from the video element and transfers it;
- * the worker draws it to an OffscreenCanvas and computes the mean luma.
- * Falls back to the synchronous main-thread sampler if workers aren't available.
- */
+export async function encodeBase64InWorker(buffer: ArrayBuffer): Promise<string> {
+  return dispatchToWorker<string>({ type: 'base64', payload: { buffer }, transfer: [buffer] } as Record<string, unknown>);
+}
+
+export async function cropToSubjectInWorker(dataUrl: string): Promise<string> {
+  return dispatchToWorker<string>({ type: 'cropSubject', payload: { dataUrl } });
+}
+
 export async function sampleLuminanceInWorker(
   video: HTMLVideoElement,
   region: 'top' | 'center' | 'bottom',
 ): Promise<number> {
-  if (!isWorkerPoolAvailable() || typeof createImageBitmap === 'undefined') {
-    const { sampleVideoLuminance } = await import('./captionStyling');
-    return sampleVideoLuminance(video, region);
-  }
-
+  if (Platform.OS !== 'web') return 0.3;
   const vw = video.videoWidth;
   const vh = video.videoHeight;
   if (vw === 0 || vh === 0) return 0.3;
@@ -544,55 +206,29 @@ export async function sampleLuminanceInWorker(
     sh = Math.round(vh * 0.25);
   }
 
+  const canvas = document.createElement('canvas');
+  const sampleW = 64;
+  const sampleH = 48;
+  canvas.width = sampleW;
+  canvas.height = sampleH;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return 0.3;
+
   try {
-    const bitmap = await createImageBitmap(video, 0, sy, vw, sh);
-    const id = ++taskIdCounter;
-    return (await dispatch(
-      { id, type: 'video-luminance', bitmap } as WorkerTaskRequest,
-      [bitmap],
-    )) as number;
+    ctx.drawImage(video, 0, sy, vw, sh, 0, 0, sampleW, sampleH);
+    const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
+    const data = imageData.data;
+    let totalLum = 0;
+    let pixelCount = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      totalLum += (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      pixelCount++;
+    }
+    return pixelCount > 0 ? totalLum / pixelCount : 0.3;
   } catch {
-    const { sampleVideoLuminance } = await import('./captionStyling');
-    return sampleVideoLuminance(video, region);
+    return 0.3;
   }
-}
-
-/**
- * Crop an image to its subject's bounding box in a Web Worker.
- * Scans alpha channel for non-transparent pixels, then crops and pads.
- * Returns a PNG data URL, or null if the image has no detectable subject.
- * Falls back to the main-thread implementation if workers aren't available.
- */
-export async function cropToSubjectInWorker(
-  imageDataUrl: string,
-): Promise<string | null> {
-  if (!isWorkerPoolAvailable()) {
-    const { alignSubjectCenter } = await import('./aiSynthesisEngine');
-    return alignSubjectCenter(imageDataUrl);
-  }
-
-  const id = ++taskIdCounter;
-  return (await dispatch(
-    { id, type: 'subject-crop', dataUrl: imageDataUrl } as WorkerTaskRequest,
-  )) as string | null;
-}
-
-/**
- * Terminate all workers and revoke their Blob URLs. Each worker
- * is backed by a Blob URL that must be explicitly revoked — otherwise
- * the browser keeps the worker source in memory indefinitely.
- */
-export function terminateWorkerPool(): void {
-  pool.forEach((w) => w.terminate());
-  pool = [];
-  workerBlobUrls.forEach((url) => {
-    try { URL.revokeObjectURL(url); } catch {}
-  });
-  workerBlobUrls = [];
-  for (const task of pending.values()) {
-    if (task.timeoutId) clearTimeout(task.timeoutId);
-  }
-  pending.clear();
-  activeDispatches = 0;
-  initialized = false;
 }
