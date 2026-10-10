@@ -41,6 +41,7 @@ import { startPressureMonitoring } from '@/lib/devicePerformance';
 import { sweepTempFiles } from '@/lib/tempFileManager';
 import { sweepStaleOfflineCache } from '@/lib/offlineCache';
 import { runBootSweep } from '@/lib/bootSweeper';
+import { runStorageGC, startPeriodicStorageGC, stopPeriodicStorageGC, registerAllNamespaces } from '@/lib/storageNamespaces';
 import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
@@ -324,15 +325,20 @@ export default function RootLayout() {
   // temp files periodically.
   useEffect(() => {
     // Initial sweep on mount
+    registerAllNamespaces();
     sweepTempFiles().catch(() => {});
     sweepStaleOfflineCache().catch(() => {});
     runBootSweep().catch(() => {});
+    runStorageGC().catch(() => {});
+    startPeriodicStorageGC();
+    return () => { stopPeriodicStorageGC(); };
 
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const onHidden = () => {
         if (document.visibilityState === 'hidden') {
           sweepTempFiles().catch(() => {});
           sweepStaleOfflineCache().catch(() => {});
+          runStorageGC().catch(() => {});
         }
       };
       document.addEventListener('visibilitychange', onHidden);
