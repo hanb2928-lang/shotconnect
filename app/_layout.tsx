@@ -40,7 +40,7 @@ import { installMediaCacheLifecycleHook } from '@/lib/mediaCache';
 import { startPressureMonitoring } from '@/lib/devicePerformance';
 import { sweepTempFiles } from '@/lib/tempFileManager';
 import { sweepStaleOfflineCache } from '@/lib/offlineCache';
-import { runBootSweep } from '@/lib/bootSweeper';
+import { runBootSweep, sweepNativeOrphanTemp } from '@/lib/bootSweeper';
 import { runStorageGC, startPeriodicStorageGC, stopPeriodicStorageGC, registerAllNamespaces } from '@/lib/storageNamespaces';
 import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
@@ -187,7 +187,16 @@ export default function RootLayout() {
   useEffect(() => {
     if (typeof AppState === 'undefined' || typeof AppState.addEventListener !== 'function') return;
     const unsubFlush = registerAppStateHandler('immediate', (nextState: string) => {
-      if (nextState === 'active') armFlushWindow();
+      if (nextState === 'active') {
+        // Cancel any deferred background-cleanup tasks that were queued but
+        // never fired (the OS suspended the JS thread before their setTimeout
+        // macrotasks ran). Without this, those stale tasks — GL context
+        // release, temp file sweeps, cache flushes — execute as "zombies" the
+        // instant the process resumes on foreground return, pile-driving the
+        // bridge alongside the flush-window callbacks and triggering OOM.
+        cancelPendingDeferred();
+        armFlushWindow();
+      }
     });
     const sub = AppState.addEventListener('change', (nextState: string) => {
       dispatchAppStateChange(nextState);
@@ -324,6 +333,7 @@ export default function RootLayout() {
   // to the foreground (native: AppState 'active', web: visibilitychange).
   useAppLifecycleSync(() => {
     sweepTempFiles().catch(() => {});
+    sweepNativeOrphanTemp().catch(() => {});
     sweepStaleOfflineCache().catch(() => {});
   });
 
@@ -358,6 +368,7 @@ export default function RootLayout() {
       const RUNTIME_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
       const intervalId = setInterval(() => {
         sweepTempFiles().catch(() => {});
+        sweepNativeOrphanTemp().catch(() => {});
       }, RUNTIME_SWEEP_INTERVAL_MS);
       cleanups.push(() => clearInterval(intervalId));
     }

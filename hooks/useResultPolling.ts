@@ -470,41 +470,37 @@ export function useResultPolling(
     // subsequent polls use the adaptive backoff starting at 1500ms.
     pollTimer = setTimeout(pollOnce, POLL_FIRST_DELAY_MS);
 
-    // Resume pump: on foreground return, immediately poll + run a short
-    // burst of fast polls so the UI catches up without waiting for the
-    // normal backoff schedule (which starts at 3 seconds).
-    const RESUME_BURST_INTERVAL_MS = 1500;
-    const RESUME_BURST_COUNT = 3;
-    let resumeBurstCount = 0;
+    // Resume pump: on foreground return, immediately poll once + run a DB
+    // force-sync so the UI catches up without waiting for the normal backoff
+    // schedule. Only a single burst poll is fired (not 3) to avoid
+    // contributing to the foreground thundering-herd — the normal poll
+    // schedule resumes immediately after.
     const runResumeBurst = async () => {
-      if (cancelled || settledRef.current || resumeBurstCount >= RESUME_BURST_COUNT) {
+      if (cancelled || settledRef.current) {
         resumeBurstTimer = null;
         return;
       }
-      resumeBurstCount++;
-      if (resumeBurstCount === 1) {
-        try { await ensureFreshSession(); } catch { /* non-fatal */ }
-        // Instant DB force-sync on foreground return: the Realtime websocket
-        // may take 1-2 seconds to re-subscribe after a network drop, so check
-        // the DB directly to catch any completion that happened while
-        // backgrounded. This fills the gap before the first poll cycle fires.
-        const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
-        if (!cancelled && !settledRef.current && dbResult) {
-          handleResult(dbResult.status, dbResult.videoUrl);
+      try { await ensureFreshSession(); } catch { /* non-fatal */ }
+      // Instant DB force-sync on foreground return: the Realtime websocket
+      // may take 1-2 seconds to re-subscribe after a network drop, so check
+      // the DB directly to catch any completion that happened while
+      // backgrounded. This fills the gap before the first poll cycle fires.
+      const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
+      if (!cancelled && !settledRef.current && dbResult) {
+        handleResult(dbResult.status, dbResult.videoUrl);
+        if (settledRef.current) return;
+      }
+      // Also check scans.video_url — the webhook may have written the
+      // result directly to scans without the video_jobs row updating.
+      if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
+        const scanResult = await forceSyncByScan();
+        if (!cancelled && !settledRef.current && scanResult) {
+          handleResult(scanResult.status, scanResult.videoUrl);
           if (settledRef.current) return;
-        }
-        // Also check scans.video_url — the webhook may have written the
-        // result directly to scans without the video_jobs row updating.
-        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
-          const scanResult = await forceSyncByScan();
-          if (!cancelled && !settledRef.current && scanResult) {
-            handleResult(scanResult.status, scanResult.videoUrl);
-            if (settledRef.current) return;
-          }
         }
       }
       pollOnce();
-      resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
+      resumeBurstTimer = null;
     };
 
     // Pause polling when app is backgrounded to avoid zombie requests.
@@ -527,7 +523,6 @@ export function useResultPolling(
                 // Realtime unavailable — polling still works as fallback
               }
             }
-            resumeBurstCount = 0;
             runResumeBurst();
           });
 

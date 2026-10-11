@@ -150,6 +150,7 @@ import type { CopyOverlayTimeline } from '@/lib/promptBuilder';
 import { probeUrlAccessible } from '@/lib/urlProbe';
 import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { safeInvoke } from '@/lib/apiClient';
@@ -1972,7 +1973,9 @@ function ResultScreenInner() {
       if (nextState === 'active') {
         if (mountedRef.current && !channel) {
           retryCount = 0;
-          connectChannel();
+          onFlushComplete(() => {
+            if (mountedRef.current && !channel) connectChannel();
+          });
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -2304,7 +2307,9 @@ function ResultScreenInner() {
       if (nextState === 'active') {
         if (mountedRef.current && !channel) {
           retryCount = 0;
-          connectChannel();
+          onFlushComplete(() => {
+            if (mountedRef.current && !channel) connectChannel();
+          });
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }

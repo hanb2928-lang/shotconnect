@@ -58,11 +58,22 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  * asynchronously but may not complete before our resume burst polls run.
  * Calling getSession() forces the client to resolve the current session
  * (refreshing if needed) so subsequent DB queries use a valid token.
+ *
+ * The result is cached for SESSION_CACHE_TTL_MS so that multiple hooks
+ * firing on the same foreground transition (useAppLifecycleSync,
+ * useVideoJobRecovery, useOrphanJobRecovery, useVideoGen, useResultPolling)
+ * all share a single getSession() call instead of each triggering their own
+ * — a major source of the foreground thundering-herd bridge flood.
  */
 let sessionPromise: Promise<void> | null = null;
+let sessionCachedAt = 0;
+const SESSION_CACHE_TTL_MS = 5000;
 
 export async function ensureFreshSession(): Promise<void> {
+  const now = Date.now();
   if (sessionPromise) return sessionPromise;
+  if (now - sessionCachedAt < SESSION_CACHE_TTL_MS) return;
+  sessionCachedAt = now;
   sessionPromise = (async () => {
     try {
       const { data } = await supabase.auth.getSession();

@@ -19,6 +19,7 @@ import { addBreadcrumb } from '@/lib/errorLogger';
 
 const BOOT_SWEEP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const BOOT_SWEEP_NATIVE_MEDIA_AGE_MS = 2 * 60 * 60 * 1000;
+const RUNTIME_SWEEP_NATIVE_MEDIA_AGE_MS = 30 * 60 * 1000;
 const BOOT_SWEEP_IDB_BATCH = 50;
 const BOOT_SWEEP_STORAGE_PREFIX = 'cache:';
 const BOOT_SWEEP_IDB_DB_NAME = 'media-cache-db';
@@ -171,7 +172,13 @@ async function sweepNativeTemp(maxAgeMs: number): Promise<number> {
           f.startsWith('temp_render_') ||
           f.startsWith('temp_chunk_') ||
           f.startsWith('shot-connect-') ||
-          f.startsWith('server-frame-'),
+          f.startsWith('server-frame-') ||
+          f.startsWith('tts-') ||
+          f.startsWith('asset-blob-') ||
+          f.startsWith('url-to-data-') ||
+          f.startsWith('temp-') ||
+          f.startsWith('mux-') ||
+          f.startsWith('render-'),
       );
 
       for (const file of cacheFiles) {
@@ -183,7 +190,12 @@ async function sweepNativeTemp(maxAgeMs: number): Promise<number> {
           if (!modificationTime) continue;
           const ageMs = now - modificationTime * 1000;
           const isLargeMedia =
-            file.startsWith('shot-connect-') || file.startsWith('server-frame-');
+            file.startsWith('shot-connect-') ||
+            file.startsWith('server-frame-') ||
+            file.startsWith('temp_render_') ||
+            file.startsWith('temp_chunk_') ||
+            file.startsWith('mux-') ||
+            file.startsWith('render-');
           const threshold = isLargeMedia
             ? Math.min(maxAgeMs, BOOT_SWEEP_NATIVE_MEDIA_AGE_MS)
             : maxAgeMs;
@@ -249,6 +261,70 @@ export async function runBootSweep(
   }
 
   return result;
+}
+
+/**
+ * Runtime orphan sweep for the native cache directory.
+ *
+ * Unlike runBootSweep (which runs once at startup), this is designed to be
+ * called periodically (e.g. every 5 minutes) alongside sweepTempFiles.
+ * It uses a shorter age threshold so files from recently-crashed pipelines
+ * are caught sooner, preventing disk accumulation during long sessions
+ * where the user generates multiple videos in a row.
+ *
+ * Returns the number of orphaned files deleted.
+ */
+export async function sweepNativeOrphanTemp(
+  maxAgeMs: number = RUNTIME_SWEEP_NATIVE_MEDIA_AGE_MS,
+): Promise<number> {
+  if (Platform.OS === 'web') return 0;
+  try {
+    const fs = await import('expo-file-system/legacy');
+    const dir = fs.cacheDirectory;
+    if (!dir) return 0;
+
+    const now = Date.now();
+    let removed = 0;
+
+    const files = await fs.readDirectoryAsync(dir);
+    const cacheFiles = files.filter(
+      (f) =>
+        f.startsWith('media_cache_') ||
+        f.startsWith('temp_render_') ||
+        f.startsWith('temp_chunk_') ||
+        f.startsWith('shot-connect-') ||
+        f.startsWith('server-frame-') ||
+        f.startsWith('tts-') ||
+        f.startsWith('asset-blob-') ||
+        f.startsWith('url-to-data-') ||
+        f.startsWith('temp-') ||
+        f.startsWith('mux-') ||
+        f.startsWith('render-'),
+    );
+
+    for (let i = 0; i < cacheFiles.length; i++) {
+      const file = cacheFiles[i];
+      const filePath = `${dir}${file}`;
+      try {
+        const info = await fs.getInfoAsync(filePath);
+        if (!info.exists) continue;
+        const modificationTime = (info as { modificationTime?: number }).modificationTime;
+        if (!modificationTime) continue;
+        if (now - modificationTime * 1000 > maxAgeMs) {
+          await fs.deleteAsync(filePath, { idempotent: true });
+          removed++;
+        }
+      } catch {}
+      // Yield every 10 files so the main thread isn't blocked.
+      if ((i + 1) % 10 === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    return removed;
+  } catch {
+    return 0;
+  }
 }
 
 export const BOOT_SWEEP_AGE_MS = BOOT_SWEEP_MAX_AGE_MS;

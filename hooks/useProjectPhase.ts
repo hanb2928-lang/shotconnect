@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
-import { isInFlushWindow } from '@/lib/foregroundFlushGuard';
+import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 
 export type ProjectStep = 'idle' | 'uploading' | 'rendering' | 'completed' | 'failed';
 
@@ -101,7 +101,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
       if (nextState === 'background' || nextState === 'inactive') {
         teardownChannel();
       } else if (nextState === 'active') {
-        setupChannel();
+        onFlushComplete(() => setupChannel());
       }
     });
 
