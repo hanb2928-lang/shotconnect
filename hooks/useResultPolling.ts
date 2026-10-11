@@ -164,8 +164,12 @@ export function useResultPolling(
             try {
               const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null; progress: number | null };
               if (!row || typeof row.status !== 'string') return;
-              if (row.status === 'SUCCESS' && row.video_url) {
-                handleResult(row.status, row.video_url);
+              if (row.status === 'SUCCESS') {
+                // Video render done — muxing (audio merge) may still be
+                // running. Show muxing message; scans table callback will
+                // deliver the final muxed_video_url.
+                setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
+                applyProgress(0.97, 'muxing');
               } else if (row.status === 'FAILED') {
                 handleResult(row.status, null, row.error_message ?? undefined);
               } else {
@@ -198,7 +202,7 @@ export function useResultPolling(
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-              const finalUrl = row?.muxed_video_url || row?.video_url;
+              const finalUrl = row?.muxed_video_url;
               if (finalUrl) {
                 handleResult('SUCCESS', finalUrl);
               }
@@ -241,10 +245,23 @@ export function useResultPolling(
     // Direct DB force-sync: query video_jobs table as a fallback.
     // For soft-fallback task IDs, look up by scan_id since no real row
     // has the fake task ID.
-    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
+    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null; isMuxing?: boolean } | null> => {
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
+        // Check scans.muxed_video_url FIRST — it's the final product with
+        // audio. video_jobs.video_url is the raw render without audio.
+        if (scanId) {
+          const { data: scanData } = await supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle();
+          if (forceSyncAbort.signal.aborted) return null;
+          if (scanData?.muxed_video_url) {
+            return { status: 'SUCCESS', videoUrl: scanData.muxed_video_url, step: 'completed', progress: 1.0 };
+          }
+        }
         let query = supabase
           .from('video_jobs')
           .select('status, video_url, step, progress');
@@ -253,20 +270,49 @@ export function useResultPolling(
           : await query.eq('task_id', jobId).maybeSingle();
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
-        return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
+        if (row.status === 'SUCCESS') {
+          // Render is done but muxing may still be running. Don't return
+          // the raw video_url — wait for muxed_video_url on the next poll.
+          return { status: 'SUCCESS', videoUrl: null, step: 'muxing', progress: 0.97, isMuxing: true };
+        }
+        return { status: row.status, videoUrl: null, step: row.step, progress: row.progress };
       } catch (err) {
         console.error('[useResultPolling] forceSyncDb error:', err);
         return null;
       }
     };
 
-    // Also check by scan_id if the task_id lookup fails.
-    // Returns step so the soft-fallback path can propagate progress.
-    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
+    // Check scans table for muxed_video_url (final product with audio)
+    // FIRST, then fall back to video_jobs. The muxing step (mux-video-audio
+    // edge function) runs AFTER video_jobs reaches SUCCESS — it downloads
+    // the raw video + TTS audio, combines them via FFmpeg, and writes the
+    // result to scans.muxed_video_url. Without checking scans first, the
+    // poll would settle on the raw video_url (no audio) or loop on
+    // SUCCESS-with-null-URL until the 240s hard timeout fires — the
+    // primary cause of the 97% stall and the timeout error message bug.
+    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null; isMuxing?: boolean } | null> => {
       if (!scanId) return null;
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
+        // ALWAYS check scans first — muxed_video_url is the final product.
+        const { data: scanData } = await supabase
+          .from('scans')
+          .select('video_url, muxed_video_url')
+          .eq('id', scanId)
+          .maybeSingle();
+        if (forceSyncAbort.signal.aborted) return null;
+        if (scanData) {
+          const muxedUrl = scanData.muxed_video_url;
+          if (muxedUrl) {
+            return { status: 'SUCCESS', videoUrl: muxedUrl, step: 'completed', progress: 1.0 };
+          }
+          // scans.video_url may exist before muxing completes — it's the
+          // raw video without audio. Don't settle on it; keep polling for
+          // muxed_video_url.
+        }
+
+        // Check video_jobs for progress/step info and terminal status.
         const { data, error: dbError } = await supabase
           .from('video_jobs')
           .select('status, video_url, step, progress')
@@ -274,36 +320,21 @@ export function useResultPolling(
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (forceSyncAbort.signal.aborted || dbError || !data) {
-          // Fallback: check scans.video_url / muxed_video_url directly — the
-          // webhook may have written the result to scans without the
-          // video_jobs row updating.
-          const { data: scanData } = await supabase
-            .from('scans')
-            .select('video_url, muxed_video_url')
-            .eq('id', scanId)
-            .maybeSingle();
-          const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
-          if (scanFinalUrl) {
-            return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed', progress: 1.0 };
-          }
-          return null;
-        }
+        if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
-        if (row.status === 'SUCCESS' && row.video_url) {
-          return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
+
+        if (row.status === 'FAILED') {
+          return { status: 'FAILED', videoUrl: null, step: row.step, progress: row.progress };
         }
-        // Non-terminal: also check scans.video_url / muxed_video_url as a fallback.
-        const { data: scanData } = await supabase
-          .from('scans')
-          .select('video_url, muxed_video_url')
-          .eq('id', scanId)
-          .maybeSingle();
-        const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
-        if (scanFinalUrl) {
-          return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed', progress: 1.0 };
+
+        if (row.status === 'SUCCESS') {
+          // Video render is done but muxing (audio merge) may still be
+          // running. Signal muxing state so the UI can show a message
+          // instead of silently looping until the hard timeout.
+          return { status: 'SUCCESS', videoUrl: null, step: 'muxing', progress: 0.97, isMuxing: true };
         }
-        return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
+
+        return { status: row.status, videoUrl: null, step: row.step, progress: row.progress };
       } catch (err) {
         console.error('[useResultPolling] forceSyncByScan error:', err);
         return null;
@@ -317,11 +348,8 @@ export function useResultPolling(
       } else if (status === 'FAILED') {
         settle('failed', errMsg ?? '영상 생성에 실패했습니다.');
       }
-      // If SUCCESS but videoUrl is null/empty, the server wrote the
-      // terminal status before the URL. Do NOT settle — keep polling so
-      // the next DB scan picks up the URL when it arrives. Without this,
-      // the DB-only 85%+ path loops every 6s until the 600s hard timeout,
-      // then reports "timeout" instead of completion.
+      // SUCCESS with null videoUrl = muxing still in progress.
+      // Do NOT settle — keep polling for muxed_video_url.
     };
 
     const pollOnce = async () => {
@@ -346,26 +374,40 @@ export function useResultPolling(
             // Realtime unavailable — DB poll still works as fallback
           }
         }
-        // DB force-sync only: check video_jobs then scans table
+        // DB force-sync: for soft task IDs, forceSyncByScan checks scans
+        // first (muxed_video_url) then video_jobs. For regular task IDs,
+        // forceSyncDb checks video_jobs only, so we also run forceSyncByScan
+        // to check scans.muxed_video_url.
         const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
         if (cancelled || settledRef.current) return;
+        let muxing = false;
         if (dbResult) {
-          if (dbResult.step) {
-            const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
-              ? dbResult.progress
-              : stepToProgress(dbResult.step);
-            applyProgress(sp, dbResult.step);
+          if (dbResult.isMuxing) {
+            muxing = true;
+            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
+            applyProgress(0.97, 'muxing');
+          } else {
+            if (dbResult.step) {
+              const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
+                ? dbResult.progress
+                : stepToProgress(dbResult.step);
+              applyProgress(sp, dbResult.step);
+            }
+            handleResult(dbResult.status, dbResult.videoUrl);
+            if (settledRef.current) return;
           }
-          handleResult(dbResult.status, dbResult.videoUrl);
-          if (settledRef.current) return;
         }
-        // Also check scans.video_url / muxed_video_url — the webhook may
-        // have written the result directly to scans.
-        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
+        // For non-soft task IDs, also check scans.muxed_video_url directly.
+        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId && !muxing) {
           const scanResult = await forceSyncByScan();
           if (!cancelled && !settledRef.current && scanResult) {
-            handleResult(scanResult.status, scanResult.videoUrl);
-            if (settledRef.current) return;
+            if (scanResult.isMuxing) {
+              setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
+              applyProgress(0.97, 'muxing');
+            } else {
+              handleResult(scanResult.status, scanResult.videoUrl);
+              if (settledRef.current) return;
+            }
           }
         }
         // Tightened interval: 3s instead of 6s when we're in the final
@@ -398,14 +440,19 @@ export function useResultPolling(
         const scanResult = await forceSyncByScan();
         if (cancelled || settledRef.current) return;
         if (scanResult) {
-          if (scanResult.step) {
-            const sp = typeof scanResult.progress === 'number' && !isNaN(scanResult.progress) && scanResult.progress > 0
-              ? scanResult.progress
-              : stepToProgress(scanResult.step);
-            applyProgress(sp, scanResult.step);
+          if (scanResult.isMuxing) {
+            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
+            applyProgress(0.97, 'muxing');
+          } else {
+            if (scanResult.step) {
+              const sp = typeof scanResult.progress === 'number' && !isNaN(scanResult.progress) && scanResult.progress > 0
+                ? scanResult.progress
+                : stepToProgress(scanResult.step);
+              applyProgress(sp, scanResult.step);
+            }
+            handleResult(scanResult.status, scanResult.videoUrl);
+            if (settledRef.current) return;
           }
-          handleResult(scanResult.status, scanResult.videoUrl);
-          if (settledRef.current) return;
         }
         if (!cancelled && !settledRef.current) {
           const delayMs = hybridPoller.nextPollDelayMs();
@@ -429,9 +476,12 @@ export function useResultPolling(
           // actual failures are counted.
           const status = pollData.status as string;
 
-          if (status === 'SUCCESS' && pollData.videoUrl) {
-            handleResult(status, pollData.videoUrl as string);
-            return;
+          if (status === 'SUCCESS') {
+            // Edge function reports render done — but muxing (audio merge)
+            // may still be running. Show muxing message and let the DB poll
+            // / scans Realtime callback deliver the final muxed_video_url.
+            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
+            applyProgress(0.97, 'muxing');
           } else if (status === 'FAILED') {
             const errStr = (pollData.error as string) ?? '';
             if (errStr.includes('404') && notFoundRetries < MAX_404_RETRIES) {
@@ -553,22 +603,31 @@ export function useResultPolling(
       const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
       if (cancelled || settledRef.current || resumeBurstAborted) { resumeBurstTimer = null; return; }
       if (dbResult) {
-        if (dbResult.step) {
-          const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
-            ? dbResult.progress
-            : stepToProgress(dbResult.step);
-          applyProgress(sp, dbResult.step);
+        if (dbResult.isMuxing) {
+          setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
+          applyProgress(0.97, 'muxing');
+        } else {
+          if (dbResult.step) {
+            const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
+              ? dbResult.progress
+              : stepToProgress(dbResult.step);
+            applyProgress(sp, dbResult.step);
+          }
+          handleResult(dbResult.status, dbResult.videoUrl);
+          if (settledRef.current) return;
         }
-        handleResult(dbResult.status, dbResult.videoUrl);
-        if (settledRef.current) return;
       }
-      // Also check scans.video_url — the webhook may have written the
-      // result directly to scans without the video_jobs row updating.
+      // Also check scans.muxed_video_url directly for non-soft task IDs.
       if (!cancelled && !settledRef.current && !resumeBurstAborted && scanId && !isSoftTaskId) {
         const scanResult = await forceSyncByScan();
         if (!cancelled && !settledRef.current && !resumeBurstAborted && scanResult) {
-          handleResult(scanResult.status, scanResult.videoUrl);
-          if (settledRef.current) return;
+          if (scanResult.isMuxing) {
+            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
+            applyProgress(0.97, 'muxing');
+          } else {
+            handleResult(scanResult.status, scanResult.videoUrl);
+            if (settledRef.current) return;
+          }
         }
       }
       if (!cancelled && !settledRef.current && !resumeBurstAborted) {

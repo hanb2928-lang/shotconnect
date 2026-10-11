@@ -27,6 +27,7 @@ const STEP_TO_PROGRESS: Record<string, number> = {
   planning: 0.25,
   submitting: 0.35,
   rendering: 0.85,
+  muxing: 0.97,
   completed: 1.0,
   failed: 0,
 

@@ -748,7 +748,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     // Stop the stall guard at rendering (85%) and do a DB completion check
     // from there, instead of advancing to a fake 95% finalizing step that
     // traps the client.
-    const STEP_ORDER = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering'];
+    const STEP_ORDER = ['analyzing', 'hooking', 'planning', 'submitting', 'rendering', 'muxing'];
     const STEP_STALL_MS = 30_000;
     const STEP_THRESHOLDS: Record<string, number> = {
       analyzing: 0.05,
@@ -756,6 +756,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       planning: 0.25,
       submitting: 0.35,
       rendering: 0.85,
+      muxing: 0.97,
     };
 
     stepStallTimerRef.current = setInterval(() => {
