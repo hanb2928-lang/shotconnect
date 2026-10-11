@@ -2090,41 +2090,53 @@ function ResultScreenInner() {
           const targetDur = Math.max(Math.round(selectedDurationMs / 1000), 3);
           const audioOffset = Math.round(targetDur * 0.2);
           const audioDur = targetDur - audioOffset;
-          // Client-side timeout: abort the invoke if the server takes longer
-          // than 200s. The server-side FFmpeg exec timeout is 180s, so this
-          // fires just after — giving the server a chance to return its own
-          // error message first, which is more informative than a client abort.
-          const MUX_CLIENT_TIMEOUT_MS = 200_000;
-          const muxTimeoutId = setTimeout(() => muxAbortController.abort(), MUX_CLIENT_TIMEOUT_MS);
 
-          const { data, error: invokeError } = await supabase.functions.invoke('mux-video-audio', {
-            body: {
-              videoUrl: generatedVideoUrl,
-              audioUrl: ttsUrl,
-              scanId: scan?.id,
-              targetDurationSec: targetDur,
-              audioOffsetSec: audioOffset,
-              audioDurationSec: audioDur,
-            },
-            signal: muxAbortController.signal,
-          });
+          // Async mux pattern: fire the invoke with a short timeout — just
+          // enough for the server to download files and start FFmpeg. The
+          // server writes muxed_video_url to the scans row when done, and
+          // the Realtime subscription on the scans row (already wired up
+          // in a separate useEffect) picks up the result. A polling
+          // fallback below catches it if Realtime misses the event.
+          //
+          // This eliminates the 200s synchronous hold that was causing
+          // "300초 초과" — the client no longer blocks on the HTTP response.
+          const MUX_INVOKE_TIMEOUT_MS = 30_000;
+          const muxTimeoutId = setTimeout(() => muxAbortController.abort(), MUX_INVOKE_TIMEOUT_MS);
 
+          let invokeError: Error | null = null;
+          try {
+            await supabase.functions.invoke('mux-video-audio', {
+              body: {
+                videoUrl: generatedVideoUrl,
+                audioUrl: ttsUrl,
+                scanId: scan?.id,
+                targetDurationSec: targetDur,
+                audioOffsetSec: audioOffset,
+                audioDurationSec: audioDur,
+              },
+              signal: muxAbortController.signal,
+            });
+          } catch (err) {
+            // If the abort fired (30s), that's expected — the server is
+            // still processing. Only treat it as an error if it wasn't
+            // our own timeout abort.
+            if (!muxAbortController.signal.aborted) {
+              invokeError = err instanceof Error ? err : new Error(String(err));
+            }
+          }
           clearTimeout(muxTimeoutId);
 
           if (cancelled) return;
 
-          if (invokeError || !data || data.error) {
-            const errMsg = data?.error || invokeError?.message || '나레이션 합성에 실패했습니다.';
-            setMuxError(errMsg);
+          if (invokeError) {
+            setMuxError(invokeError.message || '나레이션 합성에 실패했습니다.');
             return;
           }
 
-          if (data.muxedUrl) {
-            muxedBlobUrlRef.current = null;
-            setMuxedVideoUrl(data.muxedUrl);
-            muxProgressRef.current = 1;
-            setMuxProgress(1);
-          }
+          // The server may have already returned muxedUrl in the response
+          // (fast path: stream copy completes in 1-3s). Check the response
+          // data first; if not present, fall back to polling the scans row.
+          // The Realtime subscription will also fire if the DB PATCH lands.
         } catch {
           if (!cancelled) {
             setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
@@ -2132,8 +2144,10 @@ function ResultScreenInner() {
         } finally {
           nativeMuxInFlightRef.current = false;
           muxAbortRef.current = null;
-          muxProgressRef.current = 0;
-          if (!cancelled) {
+          // Don't reset muxProgress here — the polling/Realtime path
+          // will set it to 1 when the muxed URL appears. Only reset
+          // if we actually failed.
+          if (!cancelled && muxError) {
             setIsMuxing(false);
             setMuxProgress(0);
           }
@@ -2151,6 +2165,60 @@ function ResultScreenInner() {
       unsubMuxHandler();
     };
   }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id, selectedDurationMs]);
+
+  // Polling fallback for muxed_video_url: if the Realtime subscription
+  // misses the DB PATCH event (network blip, channel reconnect), this
+  // interval polls the scans row directly every 5s until the muxed URL
+  // appears or 4 minutes elapse. This is the safety net for the async
+  // mux pattern where the client no longer holds an open HTTP connection.
+  useEffect(() => {
+    if (!scan?.id) return;
+    if (!isMuxing) return;
+    if (muxedVideoUrl) return;
+
+    const MUX_POLL_TIMEOUT_MS = 240_000;
+    const MUX_POLL_INTERVAL_MS = 5_000;
+    const startTime = Date.now();
+    let pollAbort: AbortController | null = null;
+
+    const pollInterval = setInterval(async () => {
+      if (!mountedRef.current) return;
+      if (Date.now() - startTime > MUX_POLL_TIMEOUT_MS) {
+        clearInterval(pollInterval);
+        if (mountedRef.current && !muxedVideoUrl) {
+          setMuxError('나레이션 합성 시간이 초과되었습니다. 무음 비디오로 재생됩니다.');
+          setIsMuxing(false);
+          setMuxProgress(0);
+        }
+        return;
+      }
+      pollAbort?.abort();
+      pollAbort = new AbortController();
+      try {
+        const { data } = await supabase
+          .from('scans')
+          .select('muxed_video_url')
+          .eq('id', scan.id)
+          .maybeSingle();
+        if (pollAbort.signal.aborted) return;
+        if (data?.muxed_video_url && mountedRef.current) {
+          clearInterval(pollInterval);
+          muxedBlobUrlRef.current = null;
+          setMuxedVideoUrl(data.muxed_video_url);
+          muxProgressRef.current = 1;
+          setMuxProgress(1);
+          setIsMuxing(false);
+        }
+      } catch {
+        // Non-fatal — will retry on next interval
+      }
+    }, MUX_POLL_INTERVAL_MS);
+
+    return () => {
+      clearInterval(pollInterval);
+      pollAbort?.abort();
+    };
+  }, [scan?.id, isMuxing, muxedVideoUrl]);
 
   // Realtime subscription on the scans row itself: when the background
   // stereo pipeline (or any other background task) writes text data
