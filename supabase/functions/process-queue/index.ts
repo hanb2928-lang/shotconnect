@@ -516,11 +516,9 @@ async function requeueJob(
 async function recoverStaleJobs(): Promise<void> {
   const staleThreshold = new Date(Date.now() - JOB_TIMEOUT_MS).toISOString();
   try {
-    // Requeue stale jobs that still have retries left. The attempt count
-    // stays as-is — the next dequeue will pick it up, and if it fails again
-    // the normal failure path increments attempts. This avoids infinite
-    // stale-recovery loops where a perpetually crashing worker keeps
-    // requeuing the same job without advancing the attempt counter.
+    // Requeue stale jobs that still have retries left. Increment attempts
+    // so a perpetually-crashing worker eventually hits MAX_ATTEMPTS and gets
+    // marked as error instead of being requeued forever.
     const resp = await fetch(
       `${supabaseUrl}/rest/v1/render_jobs?status=eq.processing&started_at=lt.${staleThreshold}&attempts=lt.${MAX_ATTEMPTS}`,
       {
@@ -529,8 +527,9 @@ async function recoverStaleJobs(): Promise<void> {
           apikey: serviceRoleKey,
           Authorization: `Bearer ${serviceRoleKey}`,
           "Content-Type": "application/json",
+          Prefer: "return=minimal",
         },
-        body: JSON.stringify({ status: "queued" }),
+        body: JSON.stringify({ status: "queued", attempts: "attempts+1" }),
       },
     );
     if (!resp.ok) {

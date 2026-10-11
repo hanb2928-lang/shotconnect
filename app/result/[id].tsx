@@ -1646,20 +1646,23 @@ function ResultScreenInner() {
     let ttsFgAbort: AbortController | null = null;
     const handler = (nextAppState: string) => {
       if (nextAppState === 'active' && mountedRef.current) {
-        ttsFgAbort?.abort();
-        ttsFgAbort = new AbortController();
-        Promise.resolve(
-          supabase
-            .from('scans')
-            .select('tts_url')
-            .eq('id', scan.id)
-            .maybeSingle()
-        ).then(({ data }) => {
-          if (ttsFgAbort?.signal.aborted) return;
-          if (data?.tts_url && mountedRef.current) {
-            setTtsUrl(data.tts_url);
-          }
-        }).catch(() => {});
+        onFlushComplete(() => {
+          if (!mountedRef.current) return;
+          ttsFgAbort?.abort();
+          ttsFgAbort = new AbortController();
+          Promise.resolve(
+            supabase
+              .from('scans')
+              .select('tts_url')
+              .eq('id', scan.id)
+              .maybeSingle()
+          ).then(({ data }) => {
+            if (ttsFgAbort?.signal.aborted) return;
+            if (data?.tts_url && mountedRef.current) {
+              setTtsUrl(data.tts_url);
+            }
+          }).catch(() => {});
+        });
       }
     };
     const unsubHandler = registerAppStateHandler('deferred', handler);
@@ -1683,7 +1686,8 @@ function ResultScreenInner() {
         if (cancelled || !recovered) {
           // recoverVideoJob returned null — check for pending jobs below
         } else if (recovered.status === 'SUCCESS' && recovered.videoUrl) {
-          if (mountedRef.current) {
+          if (mountedRef.current && !videoJobSettledRef.current) {
+            videoJobSettledRef.current = true;
             setGeneratedVideoUrl(recovered.videoUrl);
             setVideoStage(recovered.isHd ? 'hd_ready' : 'draft_ready');
             setIsGeneratingVideo(false);
@@ -1781,7 +1785,8 @@ function ResultScreenInner() {
               const elapsed = Math.round((Date.now() - startTime) / 1000);
 
               if (status === 'SUCCESS' && pollData.videoUrl) {
-                if (mountedRef.current) {
+                if (mountedRef.current && !videoJobSettledRef.current) {
+                  videoJobSettledRef.current = true;
                   setGeneratedVideoUrl(pollData.videoUrl as string);
                   setIsGeneratingVideo(false);
                   setVideoGenProgress(null);
@@ -1925,7 +1930,7 @@ function ResultScreenInner() {
           (payload: { new: Record<string, unknown> | null }) => {
             if (!mountedRef.current || !payload.new) return;
             const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-            const finalUrl = row.muxed_video_url ?? row.video_url;
+            const finalUrl = row.muxed_video_url || row.video_url;
             if (finalUrl && !generatedVideoUrlRef.current) {
               setGeneratedVideoUrl(finalUrl);
               setVideoStage('draft_ready');
@@ -2428,20 +2433,23 @@ function ResultScreenInner() {
     let fgAbort: AbortController | null = null;
     const handler = (nextAppState: string) => {
       if (nextAppState === 'active' && mountedRef.current) {
-        fgAbort?.abort();
-        fgAbort = new AbortController();
-        Promise.resolve(
-          supabase
-            .from('render_jobs')
-            .select('*')
-            .eq('id', scan.analysis_job_id!)
-            .maybeSingle()
-        ).then(({ data }) => {
-          if (fgAbort?.signal.aborted) return;
-          if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
-            handleJobUpdateRef.current?.(data as RenderJob);
-          }
-        }).catch(() => {});
+        onFlushComplete(() => {
+          if (!mountedRef.current) return;
+          fgAbort?.abort();
+          fgAbort = new AbortController();
+          Promise.resolve(
+            supabase
+              .from('render_jobs')
+              .select('*')
+              .eq('id', scan.analysis_job_id!)
+              .maybeSingle()
+          ).then(({ data }) => {
+            if (fgAbort?.signal.aborted) return;
+            if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
+              handleJobUpdateRef.current?.(data as RenderJob);
+            }
+          }).catch(() => {});
+        });
       }
     };
     const unsubHandler = registerAppStateHandler('deferred', handler);

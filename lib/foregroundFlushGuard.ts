@@ -33,7 +33,6 @@ export function armFlushWindow(): void {
   flushWindowActive = true;
   if (flushTimer !== null) clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
-    flushWindowActive = false;
     flushTimer = null;
     const cbs = completionCallbacks.splice(0);
     // Stagger callbacks across sequential macrotasks with 150ms spacing so the
@@ -45,10 +44,14 @@ export function armFlushWindow(): void {
     const STAGGER_MS = 150;
     let i = 0;
     const runNext = () => {
-      if (i >= cbs.length) return;
+      if (i >= cbs.length) {
+        flushWindowActive = false;
+        return;
+      }
       const cb = cbs[i++];
       try { cb(); } catch { /* non-fatal */ }
       if (i < cbs.length) setTimeout(runNext, STAGGER_MS);
+      else flushWindowActive = false;
     };
     runNext();
   }, FLUSH_WINDOW_MS);

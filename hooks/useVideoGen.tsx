@@ -155,7 +155,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             .eq('id', active.scanId)
             .maybeSingle();
           if (cancelled) return;
-          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
           if (scanFinalUrl) {
             clearActiveVideoJob();
             if (active.jobId.startsWith('hd-')) {
@@ -244,7 +244,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                   .select('video_url, muxed_video_url')
                   .eq('id', scanIdRef.current)
                   .maybeSingle();
-                const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+                const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
                 if (scanFinalUrl) {
                   clearActiveVideoJob();
                   jobIdRef.current = null;
@@ -264,19 +264,55 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               return;
             }
             const row = data as { status: string; video_url: string | null; error_message: string | null; step: string | null };
-            if (row.status === 'SUCCESS' && row.video_url) {
-              clearActiveVideoJob();
-              jobIdRef.current = null;
-              setJobId(null);
-              setIsGenerating(false);
-              if (outputModeRef.current === 'image') {
-                setResultImageUrl(row.video_url);
+            if (row.status === 'SUCCESS') {
+              const finalUrl = row.video_url;
+              if (finalUrl) {
+                clearActiveVideoJob();
+                jobIdRef.current = null;
+                setJobId(null);
+                setIsGenerating(false);
+                if (outputModeRef.current === 'image') {
+                  setResultImageUrl(finalUrl);
+                } else {
+                  setResultVideoUrl(finalUrl);
+                }
+                serverProgRef.current = 1.0;
+                setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+                notifyVideoCompleted();
               } else {
-                setResultVideoUrl(row.video_url);
+                // SUCCESS but video_url is null/empty — the server wrote the
+                // status before the URL. Try scans.video_url / muxed_video_url
+                // as a fallback before giving up.
+                if (scanIdRef.current) {
+                  try {
+                    const { data: scanData } = await supabase
+                      .from('scans')
+                      .select('video_url, muxed_video_url')
+                      .eq('id', scanIdRef.current)
+                      .maybeSingle();
+                    const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+                    if (scanFinalUrl) {
+                      clearActiveVideoJob();
+                      jobIdRef.current = null;
+                      setJobId(null);
+                      setIsGenerating(false);
+                      if (outputModeRef.current === 'image') {
+                        setResultImageUrl(scanFinalUrl);
+                      } else {
+                        setResultVideoUrl(scanFinalUrl);
+                      }
+                      serverProgRef.current = 1.0;
+                      setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+                      notifyVideoCompleted();
+                      return;
+                    }
+                  } catch {
+                    // scans lookup failed — polling will catch the URL on next tick
+                  }
+                }
+                // No URL anywhere yet — keep polling, don't freeze at 97%
+                serverProgRef.current = Math.max(serverProgRef.current ?? 0, 0.97);
               }
-              serverProgRef.current = 1.0;
-              setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-              notifyVideoCompleted();
             } else if (row.status === 'FAILED') {
               clearActiveVideoJob();
               jobIdRef.current = null;
@@ -400,7 +436,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 .maybeSingle();
               if (generationTokenRef.current !== token) return;
               if (scanData) {
-                const scanFinalUrl = scanData.muxed_video_url ?? scanData.video_url;
+                const scanFinalUrl = scanData.muxed_video_url || scanData.video_url;
                 if (scanFinalUrl) {
                   clearActiveVideoJob();
                   jobIdRef.current = null;
@@ -470,6 +506,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               setVideoProgress(null);
               serverProgRef.current = null;
               setBackgroundTransition(true);
+              setError('영상 생성 완료 확인에 실패했습니다. 앱을 재실행 후 결과 탭에서 확인해주세요.');
             } else {
               completionFallbackRef.current = setTimeout(checkCompletionFallback, 5_000);
             }
@@ -510,7 +547,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       // pause the countdown, not reset it. Otherwise a brief background
       // transition on native (e.g. notification banner) resets the
       // timer indefinitely and the fallback never fires.
-      completionRetry.attempts = 0;
+      // Do NOT reset completionRetry.attempts either — resetting on every
+      // background→foreground toggle enables unbounded retries by toggling.
     };
 
     startTimers();
@@ -741,7 +779,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                     .maybeSingle();
                   if (generationTokenRef.current !== stallToken) return;
                   if (scanData) {
-                    const scanFinalUrl = scanData.muxed_video_url ?? scanData.video_url;
+                    const scanFinalUrl = scanData.muxed_video_url || scanData.video_url;
                     if (scanFinalUrl) {
                       clearActiveVideoJob();
                       jobIdRef.current = null;
@@ -1048,7 +1086,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         .select('video_url, muxed_video_url')
         .eq('id', active.scanId)
         .maybeSingle();
-      const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+      const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
       if (scanFinalUrl) {
         clearActiveVideoJob();
         setError(null);
