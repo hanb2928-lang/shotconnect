@@ -590,12 +590,82 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
 
     // The client starts with the internal job ID. Until the async submission
     // stores the real Runway task ID, there is no external task to poll.
+    // Try a fallback: look up the latest job by scanId — the runway_task_id
+    // may have been persisted under a different internal job ID (e.g. after
+    // a retry or idempotency hit).
     if (!jobStatus || !jobStatus.runwayTaskId) {
+      const fallbackJob = await findLatestJobByScanId(body.scanId);
+      if (fallbackJob?.runwayTaskId && fallbackJob.status !== "SUCCESS" && fallbackJob.status !== "FAILED") {
+        // Found the runway task ID via scan_id fallback — use it
+        const pollStatus = await pollRunwayTask(fallbackJob.runwayTaskId, runwayKey);
+        if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
+          const originalUrl = pollStatus.videoUrl;
+          if (supabaseUrl && serviceRoleKey) {
+            await markVideoJobComplete(body.scanId, fallbackJob.internalJobId ?? taskId, originalUrl);
+          }
+          persistVideoInBackground(originalUrl, body.scanId, fallbackJob.internalJobId ?? taskId);
+          return new Response(
+            JSON.stringify({
+              mode: "poll",
+              status: "SUCCESS",
+              step: "completed",
+              videoUrl: originalUrl,
+              taskId,
+              provider: "runway",
+              persisted: false,
+            }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        if (pollStatus.status === "FAILED") {
+          if (supabaseUrl && serviceRoleKey) {
+            await markVideoJobFailed(body.scanId, fallbackJob.internalJobId ?? taskId, pollStatus.error ?? "Runway 생성 실패");
+          }
+          return new Response(
+            JSON.stringify({
+              mode: "poll",
+              status: "FAILED",
+              step: "failed",
+              error: pollStatus.error ?? "Runway 비디오 생성에 실패했습니다.",
+              taskId,
+              provider: "runway",
+            }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        const runwayStep = RUNWAY_STATUS_TO_STEP[pollStatus.status] ?? "rendering";
+        return new Response(
+          JSON.stringify({
+            mode: "poll",
+            status: pollStatus.status,
+            step: runwayStep,
+            progress: pollStatus.progress ?? "",
+            taskId,
+            provider: "runway",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      // Also check if the fallback job is already complete
+      if (fallbackJob?.status === "SUCCESS" && fallbackJob.videoUrl) {
+        return new Response(
+          JSON.stringify({
+            mode: "poll",
+            status: "SUCCESS",
+            step: "completed",
+            videoUrl: fallbackJob.videoUrl,
+            taskId,
+            provider: "runway",
+            persisted: true,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({
           mode: "poll",
           status: "PROCESSING",
-          step: jobStatus?.step ?? "submitting",
+          step: jobStatus?.step ?? fallbackJob?.step ?? "submitting",
           progress: "Runway 작업 등록 중...",
           taskId,
           provider: "runway",
@@ -720,19 +790,33 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    // Reschedule with buffer delay to give runway-submit time to persist the ID
-    const bufferDelay = SERVER_POLL_INITIAL_DELAY_MS + (attempt === 0 ? FIRST_POLL_BUFFER_MS : 0);
-    setTimeout(() => {
-      const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
-      fetch(selfUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey },
-        body: JSON.stringify({ mode: "server-poll", taskId, scanId, variationSeed: attempt + 1 }),
-        signal: controller.signal,
-      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
-    }, bufferDelay);
+    // Reschedule with buffer delay to give runway-submit time to persist the ID.
+    // Includes retry-on-failure so a cold-start abort doesn't permanently break the chain.
+    const rescheduleSelfInvoke = (retryNum: number) => {
+      if (retryNum >= 3) {
+        console.error(`[generate-video] server-poll runway-task-id wait exhausted retries for task ${taskId}`);
+        return;
+      }
+      setTimeout(() => {
+        const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+        fetch(selfUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey },
+          body: JSON.stringify({ mode: "server-poll", taskId, scanId, variationSeed: attempt + 1 }),
+          signal: controller.signal,
+        }).then(() => {
+          clearTimeout(timeoutId);
+        }).catch(() => {
+          clearTimeout(timeoutId);
+          const retryDelay = 5000 * Math.pow(2, retryNum);
+          console.log(`[generate-video] server-poll runway-id-wait retry ${retryNum + 1}/3 in ${retryDelay}ms`);
+          rescheduleSelfInvoke(retryNum + 1);
+        });
+      }, bufferDelay);
+    };
+    rescheduleSelfInvoke(0);
     return new Response(
       JSON.stringify({ mode: "server-poll", status: "PROCESSING", progress: "Runway 작업 ID 대기 중...", taskId, nextPollInMs: bufferDelay, attempt: attempt + 1 }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -800,8 +884,17 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
   const nextDelay = Math.round(baseDelay + jitter);
   const nextAttempt = attempt + 1;
 
-  // Fire-and-forget self-reinvoke after delay with AbortController guard
-  setTimeout(() => {
+  // Fire-and-forget self-reinvoke after delay with AbortController guard.
+  // Includes retry-on-failure: if the self-reinvocation fetch fails (cold
+  // start, network timeout, abort), retry up to 3 times with increasing
+  // delay. Without this, a single failed self-invoke permanently breaks
+  // the server-poll chain, leaving the DB stuck at PROCESSING forever —
+  // the #1 cause of the 97% stall.
+  const selfInvokeWithRetry = (attemptNum: number, retryNum: number) => {
+    if (retryNum >= 3) {
+      console.error(`[generate-video] server-poll self-invoke exhausted retries for task ${taskId} — zombie guard will catch it`);
+      return;
+    }
     const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
@@ -816,17 +909,20 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
         mode: "server-poll",
         taskId,
         scanId,
-        variationSeed: nextAttempt,
+        variationSeed: attemptNum,
       }),
       signal: controller.signal,
     }).then(() => {
       clearTimeout(timeoutId);
     }).catch(() => {
       clearTimeout(timeoutId);
-      // If self-reinvoke fails, the zombie-job guard in checkVideoJobStatus
-      // will eventually mark it FAILED after ZOMBIE_JOB_TIMEOUT_MS.
+      // Retry with exponential backoff: 5s, 10s, 20s
+      const retryDelay = 5000 * Math.pow(2, retryNum);
+      console.log(`[generate-video] server-poll self-invoke retry ${retryNum + 1}/3 in ${retryDelay}ms for task ${taskId}`);
+      setTimeout(() => selfInvokeWithRetry(attemptNum, retryNum + 1), retryDelay);
     });
-  }, nextDelay);
+  };
+  setTimeout(() => selfInvokeWithRetry(nextAttempt, 0), nextDelay);
 
   return new Response(
     JSON.stringify({
@@ -1071,13 +1167,13 @@ async function findJobByIdempotencyKey(idempotencyKey: string): Promise<{ taskId
   }
 }
 
-async function findLatestJobByScanId(scanId: string): Promise<{ status: string; error?: string; videoUrl?: string; internalJobId?: string } | null> {
+async function findLatestJobByScanId(scanId: string): Promise<{ status: string; error?: string; videoUrl?: string; internalJobId?: string; runwayTaskId?: string; step?: string } | null> {
   if (!supabaseUrl || !serviceRoleKey) return null;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&select=status,error_message,video_url,task_id,runway_task_id,created_at&order=created_at.desc&limit=1`,
+      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&select=status,error_message,video_url,task_id,runway_task_id,step,created_at&order=created_at.desc&limit=1`,
       {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
         signal: controller.signal,
@@ -1085,7 +1181,7 @@ async function findLatestJobByScanId(scanId: string): Promise<{ status: string; 
     );
     clearTimeout(timeoutId);
     if (!resp.ok) return null;
-    const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string; runway_task_id: string | null }>;
+    const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string; runway_task_id: string | null; step?: string }>;
     const row = rows[0];
     if (!row) return null;
     return {
@@ -1094,6 +1190,7 @@ async function findLatestJobByScanId(scanId: string): Promise<{ status: string; 
       videoUrl: row.video_url ?? undefined,
       internalJobId: row.task_id,
       runwayTaskId: row.runway_task_id ?? undefined,
+      step: (row as { step?: string }).step ?? undefined,
     };
   } catch {
     return null;
