@@ -66,11 +66,25 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  * — a major source of the foreground thundering-herd bridge flood.
  */
 let sessionPromise: Promise<void> | null = null;
+let sessionAbort: AbortController | null = null;
 let sessionCachedAt = 0;
 const SESSION_CACHE_TTL_MS = 5000;
 const SESSION_FETCH_TIMEOUT_MS = 3_000;
 
+/**
+ * Force-abort any pending session Promise and clear the cache. Called on
+ * foreground return (immediate phase) to ensure that a getSession() call
+ * that was started before the app backgrounded — and whose underlying
+ * AsyncStorage read may be stuck on a locked native bridge — is rejected
+ * immediately rather than lingering as a dead Promise that blocks the
+ * resume burst. A fresh ensureFreshSession() call will then start a new
+ * getSession() with a new AbortController.
+ */
 export function resetSessionCache(): void {
+  if (sessionAbort) {
+    try { sessionAbort.abort(); } catch { /* ignore */ }
+    sessionAbort = null;
+  }
   sessionPromise = null;
   sessionCachedAt = 0;
 }
@@ -80,11 +94,14 @@ export async function ensureFreshSession(): Promise<void> {
   if (sessionPromise) return sessionPromise;
   if (now - sessionCachedAt < SESSION_CACHE_TTL_MS) return;
   sessionCachedAt = now;
+  sessionAbort = new AbortController();
+  const abortSignal = sessionAbort.signal;
   sessionPromise = (async () => {
     try {
       await Promise.race([
         (async () => {
           const { data } = await supabase.auth.getSession();
+          if (abortSignal.aborted) return;
           const session = data.session;
           if (session?.expires_at) {
             const nowSec = Math.floor(Date.now() / 1000);
@@ -96,12 +113,22 @@ export async function ensureFreshSession(): Promise<void> {
         new Promise<void>((resolve) =>
           setTimeout(resolve, SESSION_FETCH_TIMEOUT_MS),
         ),
+        // Abort guard: if resetSessionCache() fires (foreground return),
+        // this rejects immediately so the caller doesn't wait for a dead
+        // AsyncStorage Promise that will never resolve on a locked bridge.
+        new Promise<void>((_, reject) => {
+          if (abortSignal.aborted) { reject(new Error('aborted')); return; }
+          abortSignal.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          }, { once: true });
+        }),
       ]);
     } catch {
       // Token refresh failure is non-fatal — the resume fetch will simply
       // use whatever token is available and retry via the normal poll loop.
     } finally {
       sessionPromise = null;
+      sessionAbort = null;
     }
   })();
   return sessionPromise;

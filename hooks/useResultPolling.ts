@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
+import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
 import { stepToProgress } from '@/lib/videoGenSteps';
 import { HybridRealtimePoller, type ChannelHealth } from '@/lib/hybridRealtimePoller';
 
@@ -99,14 +100,6 @@ export function useResultPolling(
     const pollErrorWindow: number[] = [];
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
-    // Muxing fallback: if video_jobs reaches SUCCESS but muxed_video_url
-    // never arrives (the mux-video-audio edge function is only invoked from
-    // the multi-clip merge path, not the standard single-video pipeline),
-    // fall back to the raw video_url after 15s. Without this, the poll
-    // would loop at 97% until the 240s hard timeout.
-    let muxingFallbackTimer: ReturnType<typeof setTimeout> | null = null;
-    let rawVideoUrlForFallback: string | null = null;
-    const MUX_FALLBACK_MS = 15_000;
     // Monotonic guard: track the highest progress and latest step seen
     // across both realtime and polling. Stale realtime payloads that arrive
     // after a newer poll result (common on background→foreground transition)
@@ -148,8 +141,7 @@ export function useResultPolling(
       : `task_id=eq.${jobId}`;
 
     const createRealtimeChannel = () => {
-      const ch = supabase
-        .channel(`job-poll-${jobId}`)
+      const ch = createChannel(`job-poll-${jobId}`)
         .on(
           'postgres_changes',
           {
@@ -172,13 +164,8 @@ export function useResultPolling(
             try {
               const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null; progress: number | null };
               if (!row || typeof row.status !== 'string') return;
-              if (row.status === 'SUCCESS') {
-                // Video render done — muxing (audio merge) may still be
-                // running. Arm fallback with raw URL in case muxed_video_url
-                // never arrives (single-video path doesn't trigger muxing).
-                if (row.video_url) armMuxFallback(row.video_url);
-                setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
-                applyProgress(0.97, 'muxing');
+              if (row.status === 'SUCCESS' && row.video_url) {
+                handleResult('SUCCESS', row.video_url);
               } else if (row.status === 'FAILED') {
                 handleResult(row.status, null, row.error_message ?? undefined);
               } else {
@@ -237,30 +224,14 @@ export function useResultPolling(
       // Realtime unavailable — polling still works as fallback
     }
 
-    const armMuxFallback = (rawUrl: string) => {
-      if (muxingFallbackTimer || settledRef.current || cancelled) return;
-      rawVideoUrlForFallback = rawUrl;
-      muxingFallbackTimer = setTimeout(() => {
-        if (cancelled || settledRef.current) return;
-        // muxed_video_url never arrived — the mux-video-audio edge function
-        // is only invoked from the multi-clip merge path, not the standard
-        // single-video pipeline. Fall back to the raw video_url.
-        if (rawVideoUrlForFallback) {
-          setProgressMessage('영상 생성 완료');
-          settle('completed', undefined, rawVideoUrlForFallback);
-        }
-      }, MUX_FALLBACK_MS);
-    };
-
     const cleanup = () => {
       cancelled = true;
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      if (muxingFallbackTimer) clearTimeout(muxingFallbackTimer);
       if (realtimeChannel) {
-        try { supabase.removeChannel(realtimeChannel); } catch { /* ignore */ }
+        safeRemoveChannel(realtimeChannel);
         realtimeChannel = null;
       }
       pollAbort?.abort();
@@ -270,7 +241,7 @@ export function useResultPolling(
     // Direct DB force-sync: query video_jobs table as a fallback.
     // For soft-fallback task IDs, look up by scan_id since no real row
     // has the fake task ID.
-    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null; isMuxing?: boolean } | null> => {
+    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
@@ -296,11 +267,8 @@ export function useResultPolling(
           : await query.eq('task_id', jobId).maybeSingle();
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
-        if (row.status === 'SUCCESS') {
-          // Render is done but muxing may still be running. Capture the
-          // raw video_url for fallback and signal muxing state.
-          if (row.video_url) armMuxFallback(row.video_url);
-          return { status: 'SUCCESS', videoUrl: null, step: 'muxing', progress: 0.97, isMuxing: true };
+        if (row.status === 'SUCCESS' && row.video_url) {
+          return { status: 'SUCCESS', videoUrl: row.video_url, step: 'completed', progress: 1.0 };
         }
         return { status: row.status, videoUrl: null, step: row.step, progress: row.progress };
       } catch (err) {
@@ -309,15 +277,7 @@ export function useResultPolling(
       }
     };
 
-    // Check scans table for muxed_video_url (final product with audio)
-    // FIRST, then fall back to video_jobs. The muxing step (mux-video-audio
-    // edge function) runs AFTER video_jobs reaches SUCCESS — it downloads
-    // the raw video + TTS audio, combines them via FFmpeg, and writes the
-    // result to scans.muxed_video_url. Without checking scans first, the
-    // poll would settle on the raw video_url (no audio) or loop on
-    // SUCCESS-with-null-URL until the 240s hard timeout fires — the
-    // primary cause of the 97% stall and the timeout error message bug.
-    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null; isMuxing?: boolean } | null> => {
+    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
       if (!scanId) return null;
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
@@ -351,11 +311,8 @@ export function useResultPolling(
           return { status: 'FAILED', videoUrl: null, step: row.step, progress: row.progress };
         }
 
-        if (row.status === 'SUCCESS') {
-          // Video render is done but muxing (audio merge) may still be
-          // running. Capture raw URL for fallback.
-          if (row.video_url) armMuxFallback(row.video_url);
-          return { status: 'SUCCESS', videoUrl: null, step: 'muxing', progress: 0.97, isMuxing: true };
+        if (row.status === 'SUCCESS' && row.video_url) {
+          return { status: 'SUCCESS', videoUrl: row.video_url, step: 'completed', progress: 1.0 };
         }
 
         return { status: row.status, videoUrl: null, step: row.step, progress: row.progress };
@@ -372,8 +329,6 @@ export function useResultPolling(
       } else if (status === 'FAILED') {
         settle('failed', errMsg ?? '영상 생성에 실패했습니다.');
       }
-      // SUCCESS with null videoUrl = muxing still in progress.
-      // Do NOT settle — keep polling for muxed_video_url.
     };
 
     const pollOnce = async () => {
@@ -404,34 +359,22 @@ export function useResultPolling(
         // to check scans.muxed_video_url.
         const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
         if (cancelled || settledRef.current) return;
-        let muxing = false;
         if (dbResult) {
-          if (dbResult.isMuxing) {
-            muxing = true;
-            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
-            applyProgress(0.97, 'muxing');
-          } else {
-            if (dbResult.step) {
-              const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
-                ? dbResult.progress
-                : stepToProgress(dbResult.step);
-              applyProgress(sp, dbResult.step);
-            }
-            handleResult(dbResult.status, dbResult.videoUrl);
-            if (settledRef.current) return;
+          if (dbResult.step) {
+            const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
+              ? dbResult.progress
+              : stepToProgress(dbResult.step);
+            applyProgress(sp, dbResult.step);
           }
+          handleResult(dbResult.status, dbResult.videoUrl);
+          if (settledRef.current) return;
         }
-        // For non-soft task IDs, also check scans.muxed_video_url directly.
-        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId && !muxing) {
+        // For non-soft task IDs, also check scans directly.
+        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
           const scanResult = await forceSyncByScan();
           if (!cancelled && !settledRef.current && scanResult) {
-            if (scanResult.isMuxing) {
-              setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
-              applyProgress(0.97, 'muxing');
-            } else {
-              handleResult(scanResult.status, scanResult.videoUrl);
-              if (settledRef.current) return;
-            }
+            handleResult(scanResult.status, scanResult.videoUrl);
+            if (settledRef.current) return;
           }
         }
         // Tightened interval: 3s instead of 6s when we're in the final
@@ -464,19 +407,14 @@ export function useResultPolling(
         const scanResult = await forceSyncByScan();
         if (cancelled || settledRef.current) return;
         if (scanResult) {
-          if (scanResult.isMuxing) {
-            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
-            applyProgress(0.97, 'muxing');
-          } else {
-            if (scanResult.step) {
-              const sp = typeof scanResult.progress === 'number' && !isNaN(scanResult.progress) && scanResult.progress > 0
-                ? scanResult.progress
-                : stepToProgress(scanResult.step);
-              applyProgress(sp, scanResult.step);
-            }
-            handleResult(scanResult.status, scanResult.videoUrl);
-            if (settledRef.current) return;
+          if (scanResult.step) {
+            const sp = typeof scanResult.progress === 'number' && !isNaN(scanResult.progress) && scanResult.progress > 0
+              ? scanResult.progress
+              : stepToProgress(scanResult.step);
+            applyProgress(sp, scanResult.step);
           }
+          handleResult(scanResult.status, scanResult.videoUrl);
+          if (settledRef.current) return;
         }
         if (!cancelled && !settledRef.current) {
           const delayMs = hybridPoller.nextPollDelayMs();
@@ -501,11 +439,9 @@ export function useResultPolling(
           const status = pollData.status as string;
 
           if (status === 'SUCCESS') {
-            // Edge function reports render done — but muxing (audio merge)
-            // may still be running. Show muxing message and let the DB poll
-            // / scans Realtime callback deliver the final muxed_video_url.
-            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
-            applyProgress(0.97, 'muxing');
+            // Edge function reports render done. The DB poll / Realtime
+            // callback will deliver the actual video_url — just keep polling.
+            applyProgress(0.97, null);
           } else if (status === 'FAILED') {
             const errStr = (pollData.error as string) ?? '';
             if (errStr.includes('404') && notFoundRetries < MAX_404_RETRIES) {
@@ -627,31 +563,21 @@ export function useResultPolling(
       const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
       if (cancelled || settledRef.current || resumeBurstAborted) { resumeBurstTimer = null; return; }
       if (dbResult) {
-        if (dbResult.isMuxing) {
-          setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
-          applyProgress(0.97, 'muxing');
-        } else {
-          if (dbResult.step) {
-            const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
-              ? dbResult.progress
-              : stepToProgress(dbResult.step);
-            applyProgress(sp, dbResult.step);
-          }
-          handleResult(dbResult.status, dbResult.videoUrl);
-          if (settledRef.current) return;
+        if (dbResult.step) {
+          const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
+            ? dbResult.progress
+            : stepToProgress(dbResult.step);
+          applyProgress(sp, dbResult.step);
         }
+        handleResult(dbResult.status, dbResult.videoUrl);
+        if (settledRef.current) return;
       }
-      // Also check scans.muxed_video_url directly for non-soft task IDs.
+      // Also check scans directly for non-soft task IDs.
       if (!cancelled && !settledRef.current && !resumeBurstAborted && scanId && !isSoftTaskId) {
         const scanResult = await forceSyncByScan();
         if (!cancelled && !settledRef.current && !resumeBurstAborted && scanResult) {
-          if (scanResult.isMuxing) {
-            setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
-            applyProgress(0.97, 'muxing');
-          } else {
-            handleResult(scanResult.status, scanResult.videoUrl);
-            if (settledRef.current) return;
-          }
+          handleResult(scanResult.status, scanResult.videoUrl);
+          if (settledRef.current) return;
         }
       }
       if (!cancelled && !settledRef.current && !resumeBurstAborted) {
@@ -665,76 +591,74 @@ export function useResultPolling(
     // unsubscribe Realtime so the OS can reclaim memory without orphaned
     // callbacks crashing the app. On foreground: re-subscribe Realtime,
     // run a resume burst, and restart the normal poll schedule.
-    const handleAppState = (nextState: string) => {
-      if (nextState === 'active') {
-        if (!cancelled && !settledRef.current) {
-          resumeBurstAborted = false;
-          if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-          onFlushComplete(() => {
-            if (cancelled || settledRef.current) return;
-            // Re-subscribe Realtime channel inside the flush window so the
-            // bridge call doesn't fire during the reconnect storm.
-            if (!realtimeChannel) {
-              try {
-                realtimeChannel = createRealtimeChannel();
-              } catch {
-                // Realtime unavailable — polling still works as fallback
-              }
-            }
-            runResumeBurst();
-
-            // Re-arm soft warn and hard timeout AFTER the resume burst so
-            // they don't fire before the DB check has a chance to detect
-            // completion. Without this, the hard timeout could fire during
-            // the flush window, declaring the job timed out before any DB
-            // check runs.
-            if (bgEnterTime !== null) {
-              const bgDuration = Date.now() - bgEnterTime;
-              bgEnterTime = null;
-              const elapsed = Date.now() - startTime - bgDuration;
-              const remainingSoft = SOFT_WARN_MS - elapsed;
-              const remainingHard = HARD_TIMEOUT_MS - elapsed;
-              if (!softWarnFired && remainingSoft > 0) {
-                armSoftWarn(remainingSoft);
-              } else if (!softWarnFired && remainingSoft <= 0) {
-                softWarnFired = true;
-                setProgressMessage('영상 생성이 조금 오래 걸리고 있어요. 잠시만 기다려주세요...');
-                callbacksRef.current.onSoftWarn?.();
-              }
-              if (remainingHard > 0) {
-                armHardTimeout(remainingHard);
-              } else {
-                armHardTimeout(5000);
-              }
-            }
-          });
-        }
-      } else if (nextState === 'background') {
-        // Full background: tear down everything. But do NOT treat iOS
-        // 'inactive' (notification banner, Control Center) as background —
-        // doing so destroys the Realtime channel and clears the poll timer
-        // for a momentary UI interruption, and the 'active' dispatch that
-        // follows can be dropped by the suspending gate in
-        // appStateCoordinator, leaving the poll loop dead permanently.
-        bgEnterTime = Date.now();
-        resumeBurstAborted = true;
-        pollAbort?.abort();
-        forceSyncAbort?.abort();
-        if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
-        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
-        if (softWarnTimer) { clearTimeout(softWarnTimer); softWarnTimer = null; }
-        if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-        if (realtimeChannel) {
-          try { supabase.removeChannel(realtimeChannel); } catch { /* ignore */ }
-          realtimeChannel = null;
-        }
+    // Pause runs in 'immediate' phase (synchronous) so timers/channels are
+    // cleared BEFORE the OS locks the bridge. If registered as 'deferred',
+    // setTimeout(0) never fires on iOS because the JS thread suspends —
+    // the channel stays alive with a dead WebSocket, and on foreground
+    // return multiple hooks simultaneously try to re-subscribe, flooding
+    // the native network module.
+    const handlePauseImmediate = (nextState: string) => {
+      if (nextState !== 'background') return;
+      bgEnterTime = Date.now();
+      resumeBurstAborted = true;
+      pollAbort?.abort();
+      forceSyncAbort?.abort();
+      if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (softWarnTimer) { clearTimeout(softWarnTimer); softWarnTimer = null; }
+      if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+      if (realtimeChannel) {
+        safeRemoveChannel(realtimeChannel);
+        realtimeChannel = null;
       }
     };
-    const unsubAppState = registerAppStateHandler('deferred', handleAppState);
+
+    const handleResumeDeferred = (nextState: string) => {
+      if (nextState !== 'active') return;
+      if (!cancelled && !settledRef.current) {
+        resumeBurstAborted = false;
+        if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+        onFlushComplete(() => {
+          if (cancelled || settledRef.current) return;
+          if (!realtimeChannel) {
+            try {
+              realtimeChannel = createRealtimeChannel();
+            } catch {
+              // Realtime unavailable — polling still works as fallback
+            }
+          }
+          runResumeBurst();
+
+          if (bgEnterTime !== null) {
+            const bgDuration = Date.now() - bgEnterTime;
+            bgEnterTime = null;
+            const elapsed = Date.now() - startTime - bgDuration;
+            const remainingSoft = SOFT_WARN_MS - elapsed;
+            const remainingHard = HARD_TIMEOUT_MS - elapsed;
+            if (!softWarnFired && remainingSoft > 0) {
+              armSoftWarn(remainingSoft);
+            } else if (!softWarnFired && remainingSoft <= 0) {
+              softWarnFired = true;
+              setProgressMessage('영상 생성이 조금 오래 걸리고 있어요. 잠시만 기다려주세요...');
+              callbacksRef.current.onSoftWarn?.();
+            }
+            if (remainingHard > 0) {
+              armHardTimeout(remainingHard);
+            } else {
+              armHardTimeout(5000);
+            }
+          }
+        });
+      }
+    };
+
+    const unsubPause = registerAppStateHandler('immediate', handlePauseImmediate);
+    const unsubResume = registerAppStateHandler('deferred', handleResumeDeferred);
 
     return () => {
       cleanup();
-      unsubAppState();
+      unsubPause();
+      unsubResume();
     };
   }, [jobId, scanId, settle]);
 

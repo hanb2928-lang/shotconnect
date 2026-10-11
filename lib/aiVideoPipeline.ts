@@ -1,6 +1,7 @@
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from './supabase';
+import { createChannel, safeRemoveChannel } from './channelManager';
 import { monotonicStart, monotonicElapsedSec, monotonicElapsedMs } from './timeUtils';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
@@ -112,46 +113,60 @@ function installBackgroundPause(opts: {
   let isBackgrounded = false;
   let bgEnterTime: number | null = null;
 
-  const handleAppState = (nextState: string) => {
-    if (nextState === 'background' || nextState === 'inactive') {
-      if (isBackgrounded || opts.isSettled()) return;
-      isBackgrounded = true;
-      bgEnterTime = Date.now();
-      opts.pause();
-      bgTimer = setTimeout(() => {
-        if (opts.isSettled()) return;
-        opts.onBackgroundTimeout();
-      }, BG_MAX_WAIT_MS);
-    } else if (nextState === 'active') {
-      if (!isBackgrounded || opts.isSettled()) return;
-      isBackgrounded = false;
-      if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
-      // On iOS, setTimeout is paused while backgrounded, so bgTimer may
-      // never have fired even if BG_MAX_WAIT_MS has elapsed. Check the
-      // actual elapsed time and fire the timeout if exceeded.
-      if (bgEnterTime !== null) {
-        const bgDuration = Date.now() - bgEnterTime;
-        bgEnterTime = null;
-        if (bgDuration >= BG_MAX_WAIT_MS) {
-          if (!opts.isSettled()) {
-            opts.onBackgroundTimeout();
-            return;
-          }
+  // Pause MUST run in the 'immediate' phase (synchronous, before the OS
+  // locks the native bridge). If registered as 'deferred', the coordinator
+  // schedules it via setTimeout(0) — but on iOS the JS thread suspends
+  // before that macrotask fires, so pause() NEVER runs. Timers and Realtime
+  // channels stay alive in the background. On foreground return, the
+  // coordinator's deferredQueue = [] wipes the stale pause queue, then
+  // resume() stacks NEW timers/channels on top of the still-alive old ones
+  // → bridge flood → watchdog kill.
+  //
+  // Resume stays 'deferred' because it touches the bridge (setupChannel,
+  // DB queries) and must wait for the flush window.
+  const handlePauseImmediate = (nextState: string) => {
+    if (nextState !== 'background') return;
+    if (isBackgrounded || opts.isSettled()) return;
+    isBackgrounded = true;
+    bgEnterTime = Date.now();
+    opts.pause();
+    bgTimer = setTimeout(() => {
+      if (opts.isSettled()) return;
+      opts.onBackgroundTimeout();
+    }, BG_MAX_WAIT_MS);
+  };
+
+  const handleResumeDeferred = (nextState: string) => {
+    if (nextState !== 'active') return;
+    if (!isBackgrounded || opts.isSettled()) return;
+    isBackgrounded = false;
+    if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+    // On iOS, setTimeout is paused while backgrounded, so bgTimer may
+    // never have fired even if BG_MAX_WAIT_MS has elapsed. Check the
+    // actual elapsed time and fire the timeout if exceeded.
+    if (bgEnterTime !== null) {
+      const bgDuration = Date.now() - bgEnterTime;
+      bgEnterTime = null;
+      if (bgDuration >= BG_MAX_WAIT_MS) {
+        if (!opts.isSettled()) {
+          opts.onBackgroundTimeout();
+          return;
         }
       }
-      try {
-        opts.resume();
-      } catch {
-        // resume() can throw if channel setup fails on foreground return.
-        // Swallowing prevents the AppState handler from crashing the app.
-      }
+    }
+    try {
+      opts.resume();
+    } catch {
+      // resume() can throw if channel setup fails on foreground return.
     }
   };
 
-  const unsubAppState = registerAppStateHandler('deferred', handleAppState);
+  const unsubImmediate = registerAppStateHandler('immediate', handlePauseImmediate);
+  const unsubDeferred = registerAppStateHandler('deferred', handleResumeDeferred);
   return () => {
     if (bgTimer) clearTimeout(bgTimer);
-    unsubAppState();
+    unsubImmediate();
+    unsubDeferred();
   };
 }
 
@@ -645,11 +660,12 @@ function waitForVideoCompletion(
     let runwayFallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
     let isBackgrounded = false;
     let appSub: (() => void) | null = null;
-    let muxFallbackArmed = false;
+    let appSubImmediate: (() => void) | null = null;
+
 
     const cleanup = () => {
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        safeRemoveChannel(channel);
         channel = null;
       }
       if (pollTimer) clearTimeout(pollTimer);
@@ -665,6 +681,7 @@ function waitForVideoCompletion(
       if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
       if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
       appSub?.();
+      appSubImmediate?.();
     };
 
     const finish = (fn: () => void) => {
@@ -695,11 +712,20 @@ function waitForVideoCompletion(
     const handleRow = (row: VideoJobRow) => {
       _dbg('handleRow', { status: row.status, step: row.step, hasVideoUrl: !!row.video_url });
       if (row.status === 'SUCCESS' && row.video_url) {
-        // Don't resolve immediately on raw video_url — muxing may still be
-        // running. Check scans.muxed_video_url first; if not ready, arm a
-        // 15s fallback to the raw URL (muxing isn't triggered for single
-        // videos, only multi-clip merges).
-        checkScanVideoUrl(row.video_url);
+        const videoUrl = row.video_url;
+        // Resolve immediately — muxing is a separate post-generation step
+        // handled by the result page, not this pipeline.
+        report('completed', 1.0, 'AI 비디오 생성 완료');
+        finish(() => resolve({
+          videoUrl,
+          jobId: submitData.taskId,
+          motionPrompt: submitData.motionPrompt,
+          durationSec: submitData.durationSec,
+          aspectRatio: submitData.aspectRatio,
+          variationSeed: submitData.variationSeed,
+          persisted: true,
+          provider: 'runway',
+        }));
         return true;
       }
       if (row.status === 'FAILED') {
@@ -755,8 +781,10 @@ function waitForVideoCompletion(
       }
     };
 
-    // Also check scans.video_url for the persisted URL (webhook writes here too)
-    const checkScanVideoUrl = async (rawFallbackUrl?: string) => {
+    // Check scans for the persisted URL (webhook writes here too).
+    // Prefers muxed_video_url (final product with audio) but falls back
+    // to video_url (raw render). Muxing is a separate post-generation step.
+    const checkScanVideoUrl = async () => {
       if (settled || !scanId) return;
       try {
         _dbg('checkScanVideoUrl:start');
@@ -766,9 +794,9 @@ function waitForVideoCompletion(
           .eq('id', scanId)
           .maybeSingle();
         if (error || !data) { _dbg('checkScanVideoUrl:no-data'); return; }
-        const finalUrl = data.muxed_video_url;
+        const finalUrl = data.muxed_video_url ?? data.video_url;
         if (finalUrl) {
-          _dbg('checkScanVideoUrl:FOUND muxed', { url: finalUrl.slice(0, 80) });
+          _dbg('checkScanVideoUrl:FOUND', { url: finalUrl.slice(0, 80) });
           report('completed', 1.0, 'AI 비디오 생성 완료');
           finish(() => resolve({
             videoUrl: finalUrl,
@@ -780,64 +808,6 @@ function waitForVideoCompletion(
             persisted: true,
             provider: 'runway',
           }));
-          return;
-        }
-        // muxed_video_url not ready. If we have a raw fallback URL, wait
-        // 15s for muxed to arrive, then fall back to raw.
-        if (rawFallbackUrl && !muxFallbackArmed) {
-          muxFallbackArmed = true;
-          report('generating', 0.97, '영상 렌더링 완료! 음성 합성 중...');
-          setTimeout(() => {
-            if (settled) return;
-            // Re-check muxed one more time
-            supabase.from('scans').select('muxed_video_url').eq('id', scanId).maybeSingle()
-              .then(
-                ({ data: recheck }: { data: { muxed_video_url?: string | null } | null }) => {
-                  if (settled) return;
-                  const muxed = recheck?.muxed_video_url;
-                  if (muxed) {
-                    report('completed', 1.0, 'AI 비디오 생성 완료');
-                    finish(() => resolve({
-                      videoUrl: muxed,
-                      jobId: submitData.taskId,
-                      motionPrompt: submitData.motionPrompt,
-                      durationSec: submitData.durationSec,
-                      aspectRatio: submitData.aspectRatio,
-                      variationSeed: submitData.variationSeed,
-                      persisted: true,
-                      provider: 'runway',
-                    }));
-                  } else {
-                    _dbg('checkScanVideoUrl:fallback-to-raw');
-                    report('completed', 1.0, 'AI 비디오 생성 완료');
-                    finish(() => resolve({
-                      videoUrl: rawFallbackUrl,
-                      jobId: submitData.taskId,
-                      motionPrompt: submitData.motionPrompt,
-                      durationSec: submitData.durationSec,
-                      aspectRatio: submitData.aspectRatio,
-                      variationSeed: submitData.variationSeed,
-                      persisted: true,
-                      provider: 'runway',
-                    }));
-                  }
-                },
-                () => {
-                  if (settled) return;
-                  report('completed', 1.0, 'AI 비디오 생성 완료');
-                  finish(() => resolve({
-                    videoUrl: rawFallbackUrl,
-                    jobId: submitData.taskId,
-                    motionPrompt: submitData.motionPrompt,
-                    durationSec: submitData.durationSec,
-                    aspectRatio: submitData.aspectRatio,
-                    variationSeed: submitData.variationSeed,
-                    persisted: true,
-                    provider: 'runway',
-                  }));
-                },
-              );
-          }, 15_000);
         }
       } catch (err) {
         _dbg('checkScanVideoUrl:error', { err: err instanceof Error ? err.message : String(err) });
@@ -852,11 +822,10 @@ function waitForVideoCompletion(
       if (settled || !scanId) return;
       _dbg('setupChannel');
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        safeRemoveChannel(channel);
         channel = null;
       }
-      channel = supabase
-        .channel(`video-job:${scanId}:${submitData.taskId}`)
+      channel = createChannel(`video-job:${scanId}:${submitData.taskId}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
@@ -907,7 +876,7 @@ function waitForVideoCompletion(
       reconnectTimer = setTimeout(() => {
         if (settled) return;
         if (channel) {
-          try { supabase.removeChannel(channel); } catch { /* ignore */ }
+          safeRemoveChannel(channel);
           channel = null;
         }
         setupChannel();
@@ -1059,7 +1028,7 @@ function waitForVideoCompletion(
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        safeRemoveChannel(channel);
         channel = null;
       }
       bgTimer = setTimeout(() => {
@@ -1111,15 +1080,21 @@ function waitForVideoCompletion(
       });
     };
 
-    const handleAppState = (nextState: string) => {
+    // Pause runs in 'immediate' phase (synchronous) so timers/channels are
+    // cleared BEFORE the OS locks the bridge on background. Resume runs in
+    // 'deferred' phase so bridge work waits for the flush window.
+    const handlePauseImmediate = (nextState: string) => {
       if (nextState === 'background') {
-        // Don't treat iOS 'inactive' as background — only full background.
         pauseBackground();
-      } else if (nextState === 'active') {
+      }
+    };
+    const handleResumeDeferred = (nextState: string) => {
+      if (nextState === 'active') {
         resumeBackground();
       }
     };
-    appSub = registerAppStateHandler('deferred', handleAppState);
+    appSubImmediate = registerAppStateHandler('immediate', handlePauseImmediate);
+    appSub = registerAppStateHandler('deferred', handleResumeDeferred);
 
     // Initial DB check in case the webhook already completed before we subscribed
     _dbg('initial-check');
@@ -1451,7 +1426,7 @@ export function subscribeVideoJob(
 
   const cleanup = () => {
     if (channel) {
-      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      safeRemoveChannel(channel);
       channel = null;
     }
     if (pollTimer) clearTimeout(pollTimer);
@@ -1469,7 +1444,7 @@ export function subscribeVideoJob(
     reconnectTimer = setTimeout(() => {
       if (settled) return;
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        safeRemoveChannel(channel);
         channel = null;
       }
       setupChannel();
@@ -1480,11 +1455,10 @@ export function subscribeVideoJob(
     if (settled) return;
     _dbg('setupChannel');
     if (channel) {
-      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      safeRemoveChannel(channel);
       channel = null;
     }
-    channel = supabase
-      .channel(`video-job:${scanId}:${taskId}`)
+    channel = createChannel(`video-job:${scanId}:${taskId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
@@ -1672,9 +1646,13 @@ export function subscribeVideoJob(
       if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
       if (overallTimeoutTimer) clearTimeout(overallTimeoutTimer);
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        safeRemoveChannel(channel);
         channel = null;
       }
+      // Reset the Runway fallback flag so it can re-fire on resume.
+      // Without this, the Runway direct-poll backup is permanently
+      // disabled after the first background cycle.
+      runwayFallbackStarted = false;
     },
     resume: () => {
       pollBackoffAttempt = 0;
@@ -1698,12 +1676,24 @@ export function subscribeVideoJob(
           callback({ status: 'FAILED', error: msg });
         });
       }, 240_000);
-      setupChannel();
-      scheduleNextPoll();
-      checkAndNotify();
-      startRunwayPollFallback();
+      // Clear stale timers before re-arming — rapid inactive↔active
+      // oscillations on iOS can stack timers if resume fires before
+      // the previous cycle's timers were cleared.
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
+      // Defer ALL bridge work through onFlushComplete to avoid the
+      // reconnect-storm bridge flood on foreground return. This matches
+      // waitForVideoCompletion's resumeBackground pattern.
+      onFlushComplete(() => {
+        if (settled) return;
+        setupChannel();
+        scheduleNextPoll();
+        checkAndNotify();
+        startRunwayPollFallback();
+        resumeBurstCount = 0;
+        runResumeBurst();
+      });
     },
     onBackgroundTimeout: () => {
       settled = true;
@@ -1929,7 +1919,7 @@ export function subscribeHdUpgrade(
 
   const cleanup = () => {
     if (channel) {
-      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      safeRemoveChannel(channel);
       channel = null;
     }
     if (pollTimer) clearTimeout(pollTimer);
@@ -1946,7 +1936,7 @@ export function subscribeHdUpgrade(
     reconnectTimer = setTimeout(() => {
       if (settled) return;
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        safeRemoveChannel(channel);
         channel = null;
       }
       setupChannel();
@@ -1956,11 +1946,10 @@ export function subscribeHdUpgrade(
   const setupChannel = () => {
     if (settled) return;
     if (channel) {
-      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      safeRemoveChannel(channel);
       channel = null;
     }
-    channel = supabase
-      .channel(`hd-upgrade:${scanId}:${draftJobId}`)
+    channel = createChannel(`hd-upgrade:${scanId}:${draftJobId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
@@ -2047,7 +2036,7 @@ export function subscribeHdUpgrade(
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (hdOverallTimeoutTimer) clearTimeout(hdOverallTimeoutTimer);
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        safeRemoveChannel(channel);
         channel = null;
       }
     },
@@ -2067,11 +2056,20 @@ export function subscribeHdUpgrade(
           callback({ status: 'FAILED', error: '고화질 업그레이드가 4분(240초)을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
         });
       }, 240_000);
-      setupChannel();
-      scheduleNextPoll();
-      checkAndNotify();
+      // Clear stale timers before re-arming to prevent timer stacking.
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      onFlushComplete(() => { resumeBurstCount = 0; runResumeBurst(); });
+      // Defer ALL bridge work through onFlushComplete to avoid the
+      // reconnect-storm bridge flood on foreground return.
+      onFlushComplete(() => {
+        if (settled) return;
+        setupChannel();
+        scheduleNextPoll();
+        checkAndNotify();
+        resumeBurstCount = 0;
+        runResumeBurst();
+      });
     },
     onBackgroundTimeout: () => {
       settled = true;
