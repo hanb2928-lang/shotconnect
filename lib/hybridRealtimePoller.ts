@@ -31,7 +31,7 @@ export interface HybridPollConfig {
 
 export const DEFAULT_HYBRID_CONFIG: HybridPollConfig = {
   healthyPollMs: 15_000,
-  degradedPollMs: 3_000,
+  degradedPollMs: 2_000,
   maxPollMs: 30_000,
   backoffFactor: 1.8,
 };

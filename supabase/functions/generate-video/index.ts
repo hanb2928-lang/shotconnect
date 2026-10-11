@@ -316,7 +316,8 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
 
   const isDraft = body.draft === true;
   const requestedDuration = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 30);
-  const durationSec = requestedDuration;
+  // Drafts cap at 5s — shorter clips render in roughly half the time on Runway.
+  const durationSec = isDraft ? Math.min(requestedDuration, 5) : requestedDuration;
 
   const sanitizedProductName = sanitizeVideoProductName(body.productName);
   const sanitizedCaptionText = sanitizeVideoText(body.captionText);
@@ -471,10 +472,10 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
   // into the full render path, which can exceed the client timeout on native.
   const isDraft = body.draft === true || body.isDraft === true;
   const hdUpscale = body.hdUpscale === true;
-  // Drafts always use 720p/24fps even when HD is requested — the HD upgrade
-  // stage handles the high-res pass separately.
-  const resolution = isDraft ? "720p" : (body.resolution ?? (hdUpscale ? "1080p" : "720p"));
-  const fps = isDraft ? 24 : (body.fps ?? (hdUpscale ? 30 : 24));
+  // Drafts render at 480p/12fps to minimise Runway inference time. The HD
+  // upgrade stage handles the high-res pass separately.
+  const resolution = isDraft ? "480p" : (body.resolution ?? (hdUpscale ? "1080p" : "720p"));
+  const fps = isDraft ? 12 : (body.fps ?? (hdUpscale ? 30 : 24));
 
   await updateVideoJobStep(scanId, internalJobId, "submitting");
 
@@ -1529,8 +1530,15 @@ async function submitRunwayTask(
       duration: clampedDuration,
       ratio: ratioValue,
     };
-    if (resolution) payload.resolution = isSeedance ? "720p" : resolution;
-    if (fps != null) payload.fps = isSeedance ? Math.min(fps, 24) : fps;
+    // Drafts: force 480p and cap fps at 12 regardless of seedance clamping.
+    // This roughly halves the inference step count on Runway's side.
+    if (isDraft) {
+      payload.resolution = "480p";
+      payload.fps = 12;
+    } else if (resolution) {
+      payload.resolution = isSeedance ? "720p" : resolution;
+      if (fps != null) payload.fps = isSeedance ? Math.min(fps, 24) : fps;
+    }
     if (hasImage && promptImage) {
       payload.promptImage = promptImage;
     }

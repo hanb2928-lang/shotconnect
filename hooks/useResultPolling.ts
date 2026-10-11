@@ -18,7 +18,7 @@ export interface ResultPollingOptions {
   onSoftWarn?: () => void;
 }
 
-const POLL_FIRST_DELAY_MS = 5000;
+const POLL_FIRST_DELAY_MS = 2000;
 const SOFT_WARN_MS = 120_000;
 const HARD_TIMEOUT_MS = 240_000; // 4 min circuit breaker — no job may exceed this
 const POLL_ERROR_WINDOW_MS = 60_000;
@@ -27,7 +27,7 @@ const MAX_POLL_ERRORS_IN_WINDOW = 8;
 /**
  * Encapsulates Runway direct polling and DB force-sync for a video job.
  *
- * - Polls the `generate-video` edge function in `poll` mode every 5 seconds.
+ * - Polls the `generate-video` edge function in `poll` mode every 2 seconds.
  * - Falls back to a direct `video_jobs` DB query (force sync) if the edge
  *   function call fails repeatedly.
  * - Fires a soft warning after 120 seconds and a hard timeout at 600 seconds.
@@ -372,7 +372,7 @@ export function useResultPolling(
         // stretch. When the DB shows SUCCESS-without-URL, every second
         // counts — the URL may land in the next query.
         if (!cancelled && !settledRef.current) {
-          pollTimer = setTimeout(pollOnce, 3000);
+          pollTimer = setTimeout(pollOnce, 2000);
         }
         return;
       }

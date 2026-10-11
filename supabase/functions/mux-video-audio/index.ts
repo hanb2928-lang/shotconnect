@@ -177,10 +177,9 @@ Deno.serve(async (req: Request) => {
     await acquireMuxSlot();
 
     try {
-    // Download both files
     const [videoResp, audioResp] = await Promise.all([
-      fetchWithTimeout(videoUrl, { timeoutMs: 60_000 }),
-      fetchWithTimeout(audioUrl, { timeoutMs: 60_000 }),
+      fetchWithTimeout(videoUrl, { timeoutMs: 30_000 }),
+      fetchWithTimeout(audioUrl, { timeoutMs: 30_000 }),
     ]);
 
     if (!videoResp.ok) {
@@ -221,62 +220,12 @@ Deno.serve(async (req: Request) => {
     const { fetchFile } = ffUtil;
 
     const ffmpeg = new FFmpeg();
-
-    // === DEBUG: FFmpeg stderr/log listener — capture EVERY line FFmpeg
-    // emits and write it to both console.log and the scans table so we
-    // can see exactly where it stalls in real time. ===
-    const debugLog: string[] = [];
-    ffmpeg.on("log", ({ type, message }: { type: string; message: string }) => {
-      const line = `[ffmpeg:${type}] ${message}`;
-      console.log(line);
-      debugLog.push(line);
-      // Keep only the last 200 lines to avoid memory bloat
-      if (debugLog.length > 200) debugLog.shift();
-    });
-    ffmpeg.on("progress", ({ progress, time }: { progress: number; time: number }) => {
-      const line = `[ffmpeg:progress] ${Math.round(progress * 100)}% @ ${time}us`;
-      console.log(line);
-      debugLog.push(line);
-      if (debugLog.length > 200) debugLog.shift();
-    });
-
-    console.log("[mux-video-audio] FFmpeg loading WASM core...");
-    const loadStart = Date.now();
     await ffmpeg.load({ coreURL, wasmURL });
-    console.log(`[mux-video-audio] FFmpeg WASM loaded in ${Date.now() - loadStart}ms`);
-
-    // Helper: flush accumulated debug logs to scans.error_message so the
-    // user can see them in the DB in real time.
-    const flushDebugLogs = async (prefix: string) => {
-      if (!scanId || !supabaseUrl || !serviceRoleKey) return;
-      try {
-        const blob = debugLog.join("\n");
-        const truncated = (prefix + "\n" + blob).slice(0, 1800);
-        const controller = new AbortController();
-        const tid = setTimeout(() => controller.abort(), 5000);
-        await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${encodeURIComponent(scanId)}`, {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${serviceRoleKey}`,
-            apikey: serviceRoleKey,
-            "Content-Type": "application/json",
-            Prefer: "return=minimal",
-          },
-          body: JSON.stringify({ error_message: truncated }),
-          signal: controller.signal,
-        });
-        clearTimeout(tid);
-      } catch (err) {
-        console.error('[mux-video-audio] flushDebugLogs failed:', err);
-      }
-    };
 
     // Timeout guard: if FFmpeg exec hangs (OOM, missing font, corrupt
-    // input), terminate after 180s instead of blocking the worker forever.
-    // Raised from 120s — audio resampling + muxing can take longer when
-    // the source sample rate differs from 48kHz, and 120s was cutting it
-    // close enough to cause spurious timeouts on longer clips.
-    const FFMPEG_EXEC_TIMEOUT_MS = 180_000;
+    // input), terminate after 60s. Stream-copy muxing of a 5-30s clip
+    // completes in 1-5s; 60s is ample headroom while avoiding dead waits.
+    const FFMPEG_EXEC_TIMEOUT_MS = 60_000;
     let execTimedOut = false;
     const execTimeout = setTimeout(() => {
       execTimedOut = true;
@@ -294,12 +243,8 @@ Deno.serve(async (req: Request) => {
     };
 
     try {
-      console.log(`[mux-video-audio] Writing input files: video=${videoBlob.size}bytes audio=${audioBlob.size}bytes`);
-      const writeStart = Date.now();
       await ffmpeg.writeFile("input_video.mp4", await fetchFile(videoBlob));
       await ffmpeg.writeFile("input_audio.mp3", await fetchFile(audioBlob));
-      console.log(`[mux-video-audio] Input files written in ${Date.now() - writeStart}ms`);
-      await flushDebugLogs("[stage:inputs-written]");
 
       // Build ffmpeg args. When targetDurationSec is provided, use -t to
       // enforce the output duration and pad audio with silence so the video
@@ -413,51 +358,35 @@ Deno.serve(async (req: Request) => {
         "output.mp4",
       ];
 
-      console.log("[mux-video-audio] FFmpeg exec (stream copy):", JSON.stringify(copyArgs));
-      await flushDebugLogs("[stage:ffmpeg-copy-start]");
       const execStart = Date.now();
       try {
         await ffmpeg.exec(copyArgs);
-        console.log(`[mux-video-audio] FFmpeg stream copy completed in ${Date.now() - execStart}ms`);
-        await flushDebugLogs("[stage:ffmpeg-copy-done]");
       } catch (copyErr) {
         console.error(`[mux-video-audio] FFmpeg stream copy FAILED after ${Date.now() - execStart}ms:`, copyErr);
-        await flushDebugLogs("[stage:ffmpeg-copy-failed]");
         // Stream copy failed — likely VFR PTS irregularity. Retry with
         // re-encode. Reset the timeout flag for the second attempt.
         execTimedOut = false;
         clearTimeout(execTimeout);
         const execTimeout2 = setTimeout(() => {
           execTimedOut = true;
-          console.error("[mux-video-audio] FFmpeg re-encode TIMEOUT — terminating");
           try { ffmpeg.terminate(); } catch { /* already terminated */ }
         }, FFMPEG_EXEC_TIMEOUT_MS);
-        console.log("[mux-video-audio] FFmpeg exec (re-encode):", JSON.stringify(reencodeArgs));
-        await flushDebugLogs("[stage:ffmpeg-reencode-start]");
         const reencodeStart = Date.now();
         try {
           await ffmpeg.exec(reencodeArgs);
-          console.log(`[mux-video-audio] FFmpeg re-encode completed in ${Date.now() - reencodeStart}ms`);
-          await flushDebugLogs("[stage:ffmpeg-reencode-done]");
         } finally {
           clearTimeout(execTimeout2);
         }
       }
 
       if (execTimedOut) {
-        await flushDebugLogs("[stage:ffmpeg-timeout]");
         throw new Error("FFmpeg 실행 시간이 초과되었습니다 (VFR 정규화 또는 인코딩 실패 가능).");
       }
 
-      console.log("[mux-video-audio] Reading output.mp4 from virtual FS...");
-      // Guard readFile with a timeout — if the WASM worker is unresponsive
-      // after exec (partial OOM, stuck MEMFS), terminate and throw instead
-      // of hanging until the isolate is hard-killed at ~300s.
-      const READ_FILE_TIMEOUT_MS = 30_000;
+      const READ_FILE_TIMEOUT_MS = 10_000;
       let readTimedOut = false;
       const readTimeout = setTimeout(() => {
         readTimedOut = true;
-        console.error("[mux-video-audio] readFile TIMEOUT — terminating worker");
         try { ffmpeg.terminate(); } catch { /* already terminated */ }
       }, READ_FILE_TIMEOUT_MS);
       let output: Uint8Array;
@@ -469,7 +398,6 @@ Deno.serve(async (req: Request) => {
       if (readTimedOut) {
         throw new Error("FFmpeg 출력 파일 읽기가 시간 초과되었습니다 (WASM 워커 응답 없음).");
       }
-      console.log(`[mux-video-audio] Output file read: ${output.byteLength} bytes`);
       const outputBlob = new Blob([output], { type: "video/mp4" });
 
       // Wall-clock budget check: if download + FFmpeg already consumed
@@ -477,11 +405,10 @@ Deno.serve(async (req: Request) => {
       // the upload and getting killed mid-transfer by the Edge Runtime.
       const elapsedMs = Date.now() - muxStartTime;
       if (elapsedMs > MUX_WALL_CLOCK_BUDGET_MS - 30_000) {
-        await flushDebugLogs(`[stage:wall-clock-exceeded ${elapsedMs}ms]`);
         await cleanupFfmpeg();
         try { ffmpeg.terminate(); } catch { /* already terminated */ }
         return new Response(
-          JSON.stringify({ error: `합성 시간이 초과되었습니다 (${Math.round(elapsedMs / 1000)}초). 다시 시도해주세요.`, debugLog: debugLog.slice(-50) }),
+          JSON.stringify({ error: `합성 시간이 초과되었습니다 (${Math.round(elapsedMs / 1000)}초). 다시 시도해주세요.` }),
           { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
@@ -505,7 +432,6 @@ Deno.serve(async (req: Request) => {
       const uploadPath = `videos/${fileName}`;
       const uploadUrl = `${supabaseUrl}/storage/v1/object/${uploadPath}`;
 
-      console.log(`[mux-video-audio] Uploading muxed video to storage: ${outputBlob.size}bytes`);
       const uploadResp = await fetchWithTimeout(uploadUrl, {
         method: "POST",
         headers: {
@@ -514,9 +440,8 @@ Deno.serve(async (req: Request) => {
           "x-upsert": "true",
         },
         body: outputBlob,
-        timeoutMs: 90_000,
+        timeoutMs: 30_000,
       });
-      console.log(`[mux-video-audio] Upload response: ${uploadResp.status}`);
 
       await cleanupPromise;
 
@@ -556,7 +481,6 @@ Deno.serve(async (req: Request) => {
       // guarantee virtual FS cleanup and process termination to prevent
       // zombie processes and memory leaks.
       console.error("[mux-video-audio] FFmpeg FATAL:", ffmpegErr);
-      await flushDebugLogs(`[stage:ffmpeg-fatal ${(ffmpegErr instanceof Error ? ffmpegErr.message : String(ffmpegErr)).slice(0, 200)}]`);
       await cleanupFfmpeg();
       try { ffmpeg.terminate(); } catch { /* already terminated */ }
       throw ffmpegErr;
