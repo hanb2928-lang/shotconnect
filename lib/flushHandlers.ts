@@ -79,10 +79,13 @@ export function registerDefaultFlushHandlers(): void {
       }
     });
 
-    registerAppStateHandler('deferred', (nextState: string) => {
+    registerAppStateHandler('immediate', (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
-        flushPendingToL2().catch(() => {});
-        runProactiveFlush(true).catch(() => {});
+        // mediaCacheClear() is called by the immediate handler above which
+        // already clears L1 + L2 pending. No deferred bridge-touching work
+        // should run on background — the JS thread suspends and setTimeout(0)
+        // deferred tasks fire on the next foreground return with stale state,
+        // flooding the bridge during the reconnect storm.
       }
     });
   }

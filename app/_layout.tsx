@@ -189,17 +189,11 @@ export default function RootLayout() {
     const unsubFlush = registerAppStateHandler('immediate', (nextState: string) => {
       if (nextState === 'active') armFlushWindow();
     });
-    const unsubSocketReset = registerAppStateHandler('deferred', (nextState: string) => {
-      if (nextState === 'active') {
-        try { supabase.removeAllChannels(); } catch { /* ignore */ }
-      }
-    });
     const sub = AppState.addEventListener('change', (nextState: string) => {
       dispatchAppStateChange(nextState);
     });
     return () => {
       unsubFlush();
-      unsubSocketReset();
       sub.remove();
       cancelPendingDeferred();
     };
@@ -346,7 +340,7 @@ export default function RootLayout() {
     runBootSweep().catch(() => {});
     runStorageGC().catch(() => {});
     startPeriodicStorageGC();
-    return () => { stopPeriodicStorageGC(); };
+    const cleanups: (() => void)[] = [() => stopPeriodicStorageGC()];
 
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const onHidden = () => {
@@ -357,7 +351,7 @@ export default function RootLayout() {
         }
       };
       document.addEventListener('visibilitychange', onHidden);
-      return () => document.removeEventListener('visibilitychange', onHidden);
+      cleanups.push(() => document.removeEventListener('visibilitychange', onHidden));
     }
 
     if (Platform.OS !== 'web') {
@@ -365,8 +359,9 @@ export default function RootLayout() {
       const intervalId = setInterval(() => {
         sweepTempFiles().catch(() => {});
       }, RUNTIME_SWEEP_INTERVAL_MS);
-      return () => clearInterval(intervalId);
+      cleanups.push(() => clearInterval(intervalId));
     }
+    return () => { cleanups.forEach((fn) => fn()); };
   }, []);
 
   // Deep link handling
