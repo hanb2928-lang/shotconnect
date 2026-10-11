@@ -194,12 +194,6 @@ Deno.serve(async (req: Request) => {
       await ffmpeg.writeFile("input_video.mp4", await fetchFile(videoBlob));
       await ffmpeg.writeFile("input_audio.mp3", await fetchFile(audioBlob));
 
-      // Merge: hard-capped at 720p with ultrafast + zerolatency tuning.
-      // ultrafast uses the fewest reference frames and smallest motion
-      // estimation buffers; zerolatency disables frame lookahead and
-      // B-frames, cutting peak RAM usage by ~60% vs default preset.
-      // This keeps the WASM process well under the Edge Runtime memory
-      // ceiling so the OS never targets it for OOM killing.
       // Build ffmpeg args. When targetDurationSec is provided, use -t to
       // enforce the output duration and pad audio with silence so the video
       // isn't cut short. Without a target, fall back to -shortest.
@@ -256,26 +250,68 @@ Deno.serve(async (req: Request) => {
       } else {
         ffmpegArgs.push("-shortest");
       }
-      // Use -c:v copy to skip video re-encoding entirely — the mux
-      // function's job is to combine audio + video, not transcode. Runway
-      // already outputs at the correct resolution. Re-encoding with libx264
-      // in ffmpeg.wasm was the #1 cause of the 95-97% timeout trap: the
-      // full video re-encode pushed FFmpeg past its exec timeout, the Edge
-      // Runtime killed the function, and the client showed "300초 초과".
-      // -ar 48000 normalizes the audio sample rate upfront so FFmpeg
-      // doesn't auto-detect and choose a slow resampling path.
-      ffmpegArgs.push(
-        "-c:v", "copy",
+      // Base output args shared by both paths: audio encoding + container.
+      const baseOutputArgs = [
         "-c:a", "aac",
         "-b:a", "128k",
         "-ar", "48000",
         "-movflags", "+faststart",
+      ];
+
+      // Fast path: -c:v copy skips video re-encoding entirely. Runway
+      // already outputs at the correct resolution, so transcoding is
+      // wasteful and was the #1 cause of the 95-97% timeout trap.
+      //
+      // -vsync cfr -r 30 normalizes Runway's variable frame rate (VFR)
+      // output to constant frame rate (CFR) at 30fps WITHOUT re-encoding.
+      // FFmpeg drops or duplicates frames in the bitstream to enforce
+      // even timing. Without this, VFR timestamps cause FFmpeg to stall
+      // during PTS calculation when muxing with audio — the stall pushes
+      // past the exec timeout and the client sees "300초 초과".
+      const copyArgs = [...ffmpegArgs,
+        "-vsync", "cfr",
+        "-r", "30",
+        "-c:v", "copy",
+        ...baseOutputArgs,
         "output.mp4",
-      );
-      await ffmpeg.exec(ffmpegArgs);
+      ];
+
+      // Fallback: if -c:v copy fails (VFR too irregular, codec mismatch,
+      // or FFmpeg stalls on PTS), re-encode with the lightest possible
+      // libx264 settings. This is slower but handles edge cases where
+      // stream copy can't produce a valid muxed output.
+      const reencodeArgs = [...ffmpegArgs,
+        "-vsync", "cfr",
+        "-r", "30",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
+        "-crf", "28",
+        "-vf", "scale=-2:720",
+        ...baseOutputArgs,
+        "output.mp4",
+      ];
+
+      try {
+        await ffmpeg.exec(copyArgs);
+      } catch (copyErr) {
+        // Stream copy failed — likely VFR PTS irregularity. Retry with
+        // re-encode. Reset the timeout flag for the second attempt.
+        execTimedOut = false;
+        clearTimeout(execTimeout);
+        const execTimeout2 = setTimeout(() => {
+          execTimedOut = true;
+          try { ffmpeg.terminate(); } catch { /* already terminated */ }
+        }, FFMPEG_EXEC_TIMEOUT_MS);
+        try {
+          await ffmpeg.exec(reencodeArgs);
+        } finally {
+          clearTimeout(execTimeout2);
+        }
+      }
 
       if (execTimedOut) {
-        throw new Error("FFmpeg 실행 시간이 초과되었습니다 (OOM 또는 폰트 로딩 실패 가능).");
+        throw new Error("FFmpeg 실행 시간이 초과되었습니다 (VFR 정규화 또는 인코딩 실패 가능).");
       }
 
       const output = await ffmpeg.readFile("output.mp4");
