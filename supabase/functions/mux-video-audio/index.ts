@@ -157,8 +157,8 @@ Deno.serve(async (req: Request) => {
             );
           }
         }
-      } catch {
-        // Non-fatal — proceed with full mux if the check fails
+      } catch (err) {
+        console.error('[mux-video-audio] idempotency check failed:', err);
       }
     }
 
@@ -266,7 +266,9 @@ Deno.serve(async (req: Request) => {
           signal: controller.signal,
         });
         clearTimeout(tid);
-      } catch { /* non-fatal — debug logging must never break the pipeline */ }
+      } catch (err) {
+        console.error('[mux-video-audio] flushDebugLogs failed:', err);
+      }
     };
 
     // Timeout guard: if FFmpeg exec hangs (OOM, missing font, corrupt
@@ -542,7 +544,7 @@ Deno.serve(async (req: Request) => {
           },
           body: JSON.stringify({ muxed_video_url: publicUrl }),
           timeoutMs: 10_000,
-        }).catch(() => { /* non-fatal */ });
+        }).catch((err) => { console.error('[mux-video-audio] DB update for muxed_video_url failed:', err); });
       }
 
       return new Response(

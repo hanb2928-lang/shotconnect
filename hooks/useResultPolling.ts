@@ -20,7 +20,7 @@ export interface ResultPollingOptions {
 
 const POLL_FIRST_DELAY_MS = 5000;
 const SOFT_WARN_MS = 120_000;
-const HARD_TIMEOUT_MS = 600_000;
+const HARD_TIMEOUT_MS = 240_000; // 4 min circuit breaker — no job may exceed this
 const POLL_ERROR_WINDOW_MS = 60_000;
 const MAX_POLL_ERRORS_IN_WINDOW = 8;
 
@@ -244,7 +244,8 @@ export function useResultPolling(
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
         return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
-      } catch {
+      } catch (err) {
+        console.error('[useResultPolling] forceSyncDb error:', err);
         return null;
       }
     };
@@ -293,7 +294,8 @@ export function useResultPolling(
           return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed', progress: 1.0 };
         }
         return { status: row.status, videoUrl: row.video_url, step: row.step, progress: row.progress };
-      } catch {
+      } catch (err) {
+        console.error('[useResultPolling] forceSyncByScan error:', err);
         return null;
       }
     };
@@ -357,7 +359,7 @@ export function useResultPolling(
 
       const elapsed = Date.now() - startTime;
       if (elapsed > HARD_TIMEOUT_MS) {
-        settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+        settle('timeout', '영상 생성이 4분(240초)을 초과했습니다. 다시 시도해주세요.');
         return;
       }
 
@@ -429,7 +431,8 @@ export function useResultPolling(
             applyProgress(!isNaN(bestProgress) && bestProgress > 0 ? bestProgress : null, (pollData.step as string) ?? null);
           }
         }
-      } catch {
+      } catch (err) {
+        console.error('[useResultPolling] pollOnce error:', err);
         const now = Date.now();
         pollErrorWindow.push(now);
         while (pollErrorWindow.length > 0 && now - pollErrorWindow[0] > POLL_ERROR_WINDOW_MS) {
@@ -495,7 +498,7 @@ export function useResultPolling(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       timeoutTimer = setTimeout(() => {
         if (!cancelled && !settledRef.current) {
-          settle('timeout', '영상 생성 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+          settle('timeout', '영상 생성이 4분(240초)을 초과했습니다. 다시 시도해주세요.');
         }
       }, delayMs);
     };

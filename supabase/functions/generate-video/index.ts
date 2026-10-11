@@ -78,8 +78,8 @@ const RETRY_INITIAL_DELAY_MS = 1500; // Base delay for first retry, doubled each
 const RUNWAY_SUBMIT_TIMEOUT_MS = 45000;
 const RUNWAY_POLL_TIMEOUT_MS = 10000;
 const EDGE_WALL_CLOCK_BUDGET_MS = 120000;
-const ZOMBIE_JOB_TIMEOUT_MS = 900000; // 15 minutes — must exceed server-poll budget (~12 min) + client hard timeout (10 min) so zombie guard only catches truly dead jobs
-const SERVER_POLL_MAX_ATTEMPTS = 120; // ~12 min of polling with jitter — matches client-side 600s hard timeout + zombie guard, covers HD upscale + long renders + queue delays
+const ZOMBIE_JOB_TIMEOUT_MS = 240000; // 4 min — aligned with client circuit breaker, not 15 min
+const SERVER_POLL_MAX_ATTEMPTS = 48; // ~4 min of polling with jitter — aligned with 240s circuit breaker
 const SERVER_POLL_INITIAL_DELAY_MS = 2000;
 const SERVER_POLL_MAX_DELAY_MS = 5000;
 const SERVER_POLL_SELF_INVOKE_TIMEOUT_MS = 15000; // AbortController timeout for self-reinvocation fetch
@@ -1077,8 +1077,8 @@ async function checkVideoJobStatus(scanId: string, taskId: string): Promise<{ st
         };
       }
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.error('[generate-video] checkVideoJobStatus error:', err);
   }
   return null;
 }
@@ -1106,8 +1106,8 @@ async function checkWebhookResult(scanId: string): Promise<string | null> {
         return finalUrl;
       }
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.error('[generate-video] checkWebhookResult error:', err);
   }
   return null;
 }
@@ -1140,7 +1140,8 @@ async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, is
     clearTimeout(timeoutId);
     if (!resp.ok && resp.status === 409) return false;
     return true;
-  } catch {
+  } catch (err) {
+    console.error('[generate-video] saveVideoJob error:', err);
     return false;
   }
 }
@@ -1162,8 +1163,8 @@ async function updateRunwayTaskId(scanId: string, internalJobId: string, runwayT
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-  } catch {
-    // non-fatal — server-poll can still find the job via task_id
+  } catch (err) {
+    console.error('[generate-video] updateRunwayTaskId error:', err);
   }
 }
 
@@ -1185,7 +1186,8 @@ async function findJobByIdempotencyKey(idempotencyKey: string): Promise<{ taskId
     const rows = await resp.json() as Array<{ task_id: string; status: string }>;
     if (rows.length === 0) return null;
     return { taskId: rows[0].task_id, status: rows[0].status };
-  } catch {
+  } catch (err) {
+    console.error('[generate-video] findJobByIdempotencyKey error:', err);
     return null;
   }
 }
@@ -1215,7 +1217,8 @@ async function findLatestJobByScanId(scanId: string): Promise<{ status: string; 
       runwayTaskId: row.runway_task_id ?? undefined,
       step: (row as { step?: string }).step ?? undefined,
     };
-  } catch {
+  } catch (err) {
+    console.error('[generate-video] findLatestJobByScanId error:', err);
     return null;
   }
 }
@@ -1255,8 +1258,8 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
         };
       }
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.error('[generate-video] findJobByRunwayTaskId error:', err);
   }
   return null;
 }
@@ -1285,9 +1288,8 @@ async function persistVideoInBackground(originalUrl: string, scanId: string, tas
         clearTimeout(persistTimeoutId);
       }
     }
-  } catch {
-    // Background upload failed — the original Runway URL is already stored
-    // in video_jobs.video_url, so the user can still view the video.
+  } catch (err) {
+    console.error('[generate-video] persistVideoInBackground error:', err);
   }
 }
 
@@ -1310,8 +1312,8 @@ async function markVideoJobComplete(scanId: string, taskId: string, videoUrl: st
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.error('[generate-video] markVideoJobComplete error:', err);
   }
 }
 
@@ -1334,8 +1336,8 @@ async function markVideoJobFailed(scanId: string, taskId: string, errMsg: string
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.error('[generate-video] markVideoJobFailed error:', err);
   }
 }
 
@@ -1367,8 +1369,8 @@ async function updateVideoJobStep(scanId: string, taskId: string, step: string):
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.error('[generate-video] updateVideoJobStep error:', err);
   }
 }
 
@@ -1410,8 +1412,8 @@ async function fetchScanImageUrl(scanId: string): Promise<string | null> {
         return rows[0].edited_image_url ?? rows[0].image_url ?? null;
       }
     }
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.error('[generate-video] fetchScanImageUrl error:', err);
   }
   return null;
 }
