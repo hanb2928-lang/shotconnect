@@ -97,6 +97,51 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const simTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const nudgeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const generationTokenRef = useRef(0);
+  const mountedRef = useRef(true);
+  const terminalLockRef = useRef(false);
+
+  // Single guarded entry point for completion transitions. Prevents
+  // double-mutate when concurrent async paths (Realtime, polling, foreground
+  // sync, completion fallback, step stall guard) race to deliver a terminal
+  // result in the same millisecond — and prevents setState on an unmounted
+  // component when a callback fires after the provider unmounts.
+  const transitionToCompleted = useCallback((videoUrl: string) => {
+    if (!mountedRef.current) return;
+    if (terminalLockRef.current) return;
+    terminalLockRef.current = true;
+    generationTokenRef.current++;
+    clearActiveVideoJob();
+    jobIdRef.current = null;
+    setJobId(null);
+    setIsGenerating(false);
+    serverProgRef.current = 1.0;
+    setError(null);
+    if (outputModeRef.current === 'image') {
+      setResultImageUrl(videoUrl);
+    } else {
+      setResultVideoUrl(videoUrl);
+    }
+    setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+    notifyVideoCompleted();
+  }, []);
+
+  // Single guarded entry point for error/failure transitions.
+  const transitionToError = useCallback((errMsg: string, opts?: { backgroundTransition?: boolean }) => {
+    if (!mountedRef.current) return;
+    if (terminalLockRef.current) return;
+    terminalLockRef.current = true;
+    generationTokenRef.current++;
+    clearActiveVideoJob();
+    jobIdRef.current = null;
+    setJobId(null);
+    setIsGenerating(false);
+    setVideoProgress(null);
+    serverProgRef.current = null;
+    setError(errMsg);
+    if (opts?.backgroundTransition) {
+      setBackgroundTransition(true);
+    }
+  }, []);
 
   // Keep-awake during generation
   useEffect(() => {
@@ -122,6 +167,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   // orphaned fetch callbacks from updating state on an unmounted component.
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       if (abortRef.current) {
         abortRef.current.abort();
         abortRef.current = null;
@@ -159,14 +205,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         // most reliable completion signal.
         const scanFinalUrl = scanResult.data?.muxed_video_url || scanResult.data?.video_url;
         if (scanFinalUrl) {
-          clearActiveVideoJob();
           if (active.jobId.startsWith('hd-')) {
             outputModeRef.current = 'video';
           }
-          setResultVideoUrl(scanFinalUrl);
-          serverProgRef.current = 1.0;
-          setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-          notifyVideoCompleted();
+          transitionToCompleted(scanFinalUrl);
           return;
         }
 
@@ -179,23 +221,21 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         }
         const row = data as { status: string; video_url: string | null; error_message: string | null };
         if (row.status === 'SUCCESS') {
-          clearActiveVideoJob();
           const finalUrl = row.video_url;
           if (finalUrl) {
-            setResultVideoUrl(finalUrl);
-            serverProgRef.current = 1.0;
-            setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-            notifyVideoCompleted();
+            transitionToCompleted(finalUrl);
+          } else {
+            clearActiveVideoJob();
           }
           return;
         }
         if (row.status === 'FAILED') {
-          clearActiveVideoJob();
-          setError(row.error_message ?? '영상 생성에 실패했습니다.');
+          transitionToError(row.error_message ?? '영상 생성에 실패했습니다.');
           return;
         }
         if (active.scanId) scanIdRef.current = active.scanId;
         jobIdRef.current = active.jobId;
+        terminalLockRef.current = false;
         setJobId(active.jobId);
         setIsGenerating(true);
         genStartRef.current = Date.now();
@@ -243,18 +283,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                   .maybeSingle();
                 const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
                 if (scanFinalUrl) {
-                  clearActiveVideoJob();
-                  jobIdRef.current = null;
-                  setJobId(null);
-                  setIsGenerating(false);
-                  if (outputModeRef.current === 'image') {
-                    setResultImageUrl(scanFinalUrl);
-                  } else {
-                    setResultVideoUrl(scanFinalUrl);
-                  }
-                  serverProgRef.current = 1.0;
-                  setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-                  notifyVideoCompleted();
+                  transitionToCompleted(scanFinalUrl);
                   return;
                 }
               }
@@ -264,18 +293,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             if (row.status === 'SUCCESS') {
               const finalUrl = row.video_url;
               if (finalUrl) {
-                clearActiveVideoJob();
-                jobIdRef.current = null;
-                setJobId(null);
-                setIsGenerating(false);
-                if (outputModeRef.current === 'image') {
-                  setResultImageUrl(finalUrl);
-                } else {
-                  setResultVideoUrl(finalUrl);
-                }
-                serverProgRef.current = 1.0;
-                setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-                notifyVideoCompleted();
+                transitionToCompleted(finalUrl);
               } else {
                 // SUCCESS but video_url is null/empty — the server wrote the
                 // status before the URL. Try scans.video_url / muxed_video_url
@@ -289,18 +307,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                       .maybeSingle();
                     const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
                     if (scanFinalUrl) {
-                      clearActiveVideoJob();
-                      jobIdRef.current = null;
-                      setJobId(null);
-                      setIsGenerating(false);
-                      if (outputModeRef.current === 'image') {
-                        setResultImageUrl(scanFinalUrl);
-                      } else {
-                        setResultVideoUrl(scanFinalUrl);
-                      }
-                      serverProgRef.current = 1.0;
-                      setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-                      notifyVideoCompleted();
+                      transitionToCompleted(scanFinalUrl);
                       return;
                     }
                   } catch {
@@ -313,17 +320,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 serverProgRef.current = Math.max(serverProgRef.current ?? 0, 0.90);
               }
             } else if (row.status === 'FAILED') {
-              clearActiveVideoJob();
-              jobIdRef.current = null;
-              setJobId(null);
-              setIsGenerating(false);
-              setVideoProgress(null);
-              serverProgRef.current = null;
-              setError(row.error_message ?? '영상 생성에 실패했습니다.');
+              transitionToError(row.error_message ?? '영상 생성에 실패했습니다.');
             } else {
               // Still in progress — nudge progress forward to show the UI is alive.
               // Monotonic guard: never let a stale DB read regress progress below
               // what the UI already shows (race condition on background→foreground).
+              if (!mountedRef.current) return;
               const stepProg = stepToProgress(row.step);
               if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
                 serverProgRef.current = Math.max(serverProgRef.current ?? 0, stepProg);
@@ -437,18 +439,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               if (scanData) {
                 const scanFinalUrl = scanData.muxed_video_url || scanData.video_url;
                 if (scanFinalUrl) {
-                  clearActiveVideoJob();
-                  jobIdRef.current = null;
-                  setJobId(null);
-                  setIsGenerating(false);
-                  serverProgRef.current = 1.0;
-                  if (outputModeRef.current === 'image') {
-                    setResultImageUrl(scanFinalUrl);
-                  } else {
-                    setResultVideoUrl(scanFinalUrl);
-                  }
-                  setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-                  notifyVideoCompleted();
+                  transitionToCompleted(scanFinalUrl);
                   return;
                 }
               }
@@ -465,18 +456,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             }
             const row = data as { status: string; video_url: string | null; error_message: string | null };
             if (row.status === 'SUCCESS' && row.video_url) {
-              clearActiveVideoJob();
-              jobIdRef.current = null;
-              setJobId(null);
-              setIsGenerating(false);
-              serverProgRef.current = 1.0;
-              if (outputModeRef.current === 'image') {
-                setResultImageUrl(row.video_url);
-              } else {
-                setResultVideoUrl(row.video_url);
-              }
-              setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-              notifyVideoCompleted();
+              transitionToCompleted(row.video_url);
             } else if (row.status === 'SUCCESS' && !row.video_url) {
               // SUCCESS but video_url is null — the server wrote the status
               // before the URL. Don't classify as "in progress" (which would
@@ -486,13 +466,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               completionFallbackRef.current = setTimeout(checkCompletionFallback, 3_000);
               return;
             } else if (row.status === 'FAILED') {
-              clearActiveVideoJob();
-              jobIdRef.current = null;
-              setJobId(null);
-              setIsGenerating(false);
-              setVideoProgress(null);
-              serverProgRef.current = null;
-              setError(row.error_message ?? '영상 생성에 실패했습니다.');
+              transitionToError(row.error_message ?? '영상 생성에 실패했습니다.');
             } else {
               // Job still in progress — retry after delay instead of bailing
               completionRetryRef.attempts++;
@@ -507,13 +481,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             // so the retry loop terminates instead of looping forever.
             completionRetryRef.attempts++;
             if (completionRetryRef.attempts >= completionRetryRef.max) {
-              jobIdRef.current = null;
-              setJobId(null);
-              setIsGenerating(false);
-              setVideoProgress(null);
-              serverProgRef.current = null;
-              setBackgroundTransition(true);
-              setError('영상 생성 완료 확인에 실패했습니다. 앱을 재실행 후 결과 탭에서 확인해주세요.');
+              transitionToError('영상 생성 완료 확인에 실패했습니다. 앱을 재실행 후 결과 탭에서 확인해주세요.', { backgroundTransition: true });
             } else {
               completionFallbackRef.current = setTimeout(checkCompletionFallback, 5_000);
             }
@@ -570,11 +538,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const armHardTimeout = (delayMs: number) => {
       if (hardTimeoutTimer) clearTimeout(hardTimeoutTimer);
       hardTimeoutTimer = setTimeout(() => {
-        jobIdRef.current = null;
-        setJobId(null);
-        setIsGenerating(false);
-        setVideoProgress(null);
-        setBackgroundTransition(true);
+        if (!mountedRef.current || terminalLockRef.current) return;
+        transitionToError('영상 생성 시간이 초과되었습니다. 다시 시도해주세요.', { backgroundTransition: true });
       }, delayMs);
     };
 
@@ -628,30 +593,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const polling = useResultPolling(jobId, {
     scanId: scanIdRef.current,
     onCompleted: (videoUrl) => {
-      generationTokenRef.current++;
-      jobIdRef.current = null;
-      setJobId(null);
-      setIsGenerating(false);
-      clearActiveVideoJob();
-      serverProgRef.current = 1.0;
-      setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-      if (outputModeRef.current === 'image') {
-        setResultImageUrl(videoUrl);
-      } else {
-        setResultVideoUrl(videoUrl);
-      }
-      notifyVideoCompleted();
+      transitionToCompleted(videoUrl);
     },
     onError: (errMsg) => {
-      generationTokenRef.current++;
-      jobIdRef.current = null;
-      setJobId(null);
-      setIsGenerating(false);
-      clearActiveVideoJob();
-      setVideoProgress((prev) => prev ? { ...prev, phase: 'error', progress: 0, message: errMsg } : null);
-      serverProgRef.current = null;
       logError(new Error(errMsg), { component: 'VideoGenProvider', action: 'polling.onError' });
-      setError(friendlyError(new Error(errMsg), errMsg));
+      transitionToError(friendlyError(new Error(errMsg), errMsg));
     },
   });
 
@@ -794,18 +740,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                   if (scanData) {
                     const scanFinalUrl = scanData.muxed_video_url || scanData.video_url;
                     if (scanFinalUrl) {
-                      clearActiveVideoJob();
-                      jobIdRef.current = null;
-                      setJobId(null);
-                      setIsGenerating(false);
-                      serverProgRef.current = 1.0;
-                      if (outputModeRef.current === 'image') {
-                        setResultImageUrl(scanFinalUrl);
-                      } else {
-                        setResultVideoUrl(scanFinalUrl);
-                      }
-                      setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-                      notifyVideoCompleted();
+                      transitionToCompleted(scanFinalUrl);
                       return;
                     }
                   }
@@ -820,26 +755,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 if (dbErr || !data) return;
                 const row = data as { status: string; video_url: string | null; error_message: string | null };
                 if (row.status === 'SUCCESS' && row.video_url) {
-                  clearActiveVideoJob();
-                  jobIdRef.current = null;
-                  setJobId(null);
-                  setIsGenerating(false);
-                  serverProgRef.current = 1.0;
-                  if (outputModeRef.current === 'image') {
-                    setResultImageUrl(row.video_url);
-                  } else {
-                    setResultVideoUrl(row.video_url);
-                  }
-                  setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-                  notifyVideoCompleted();
+                  transitionToCompleted(row.video_url);
                 } else if (row.status === 'FAILED') {
-                  clearActiveVideoJob();
-                  jobIdRef.current = null;
-                  setJobId(null);
-                  setIsGenerating(false);
-                  setVideoProgress(null);
-                  serverProgRef.current = null;
-                  setError(row.error_message ?? '영상 생성에 실패했습니다.');
+                  transitionToError(row.error_message ?? '영상 생성에 실패했습니다.');
                 }
               } catch {
                 // DB unreachable — reset stall timer so we retry on next tick
@@ -884,6 +802,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     if (generateLockRef.current) return;
     if (isGenerating || jobIdRef.current) return;
     generateLockRef.current = true;
+    terminalLockRef.current = false;
     outputModeRef.current = params.outputMode;
     productNameRef.current = params.productName;
     abortRef.current = new AbortController();
@@ -1026,9 +945,6 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         try { await supabase.from('scans').delete().eq('id', orphanedScanId); } catch {}
       }
       const phase = jobIdRef.current ? 'ai-generation' : 'image-upload';
-      jobIdRef.current = null;
-      setIsGenerating(false);
-      setVideoProgress(null);
       const userMsg = friendlyError(err, phase === 'image-upload'
         ? '이미지 업로드에 실패했습니다. 네트워크 연결을 확인하고 잠시 후 다시 시도해주세요.'
         : 'AI 영상 생성 요청에 실패했습니다. 잠시 후 다시 시도해주세요.');
@@ -1037,7 +953,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         action: 'startGeneration',
         extra: { phase, genMode: params.genMode, platform: params.platform },
       });
-      setError(userMsg);
+      transitionToError(userMsg);
     } finally {
       if (nudgeTimer) clearInterval(nudgeTimer);
       if (nudgeTimerRef.current) { clearInterval(nudgeTimerRef.current); nudgeTimerRef.current = null; }
@@ -1049,6 +965,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
 
   const clearGeneration = useCallback(() => {
     generationTokenRef.current++;
+    terminalLockRef.current = false;
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -1099,16 +1016,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
       const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
       if (scanFinalUrl) {
-        clearActiveVideoJob();
-        setError(null);
-        if (outputModeRef.current === 'image') {
-          setResultImageUrl(scanFinalUrl);
-        } else {
-          setResultVideoUrl(scanFinalUrl);
-        }
-        serverProgRef.current = 1.0;
-        setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-        notifyVideoCompleted();
+        transitionToCompleted(scanFinalUrl);
         return true;
       }
       const isSoft = active.jobId.startsWith('soft-') || active.jobId.startsWith('hd-soft-');
@@ -1119,16 +1027,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       if (dbError || !data) return false;
       const row = data as { status: string; video_url: string | null; error_message: string | null; step: string | null };
       if (row.status === 'SUCCESS' && row.video_url) {
-        clearActiveVideoJob();
-        setError(null);
-        if (outputModeRef.current === 'image') {
-          setResultImageUrl(row.video_url);
-        } else {
-          setResultVideoUrl(row.video_url);
-        }
-        serverProgRef.current = 1.0;
-        setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-        notifyVideoCompleted();
+        transitionToCompleted(row.video_url);
         return true;
       }
       if (row.status === 'FAILED') {
@@ -1137,6 +1036,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       }
       scanIdRef.current = active.scanId;
       jobIdRef.current = active.jobId;
+      terminalLockRef.current = false;
       setJobId(active.jobId);
       setIsGenerating(true);
       genStartRef.current = Date.now();
