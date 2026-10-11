@@ -2090,6 +2090,13 @@ function ResultScreenInner() {
           const targetDur = Math.max(Math.round(selectedDurationMs / 1000), 3);
           const audioOffset = Math.round(targetDur * 0.2);
           const audioDur = targetDur - audioOffset;
+          // Client-side timeout: abort the invoke if the server takes longer
+          // than 200s. The server-side FFmpeg exec timeout is 180s, so this
+          // fires just after — giving the server a chance to return its own
+          // error message first, which is more informative than a client abort.
+          const MUX_CLIENT_TIMEOUT_MS = 200_000;
+          const muxTimeoutId = setTimeout(() => muxAbortController.abort(), MUX_CLIENT_TIMEOUT_MS);
+
           const { data, error: invokeError } = await supabase.functions.invoke('mux-video-audio', {
             body: {
               videoUrl: generatedVideoUrl,
@@ -2101,6 +2108,8 @@ function ResultScreenInner() {
             },
             signal: muxAbortController.signal,
           });
+
+          clearTimeout(muxTimeoutId);
 
           if (cancelled) return;
 

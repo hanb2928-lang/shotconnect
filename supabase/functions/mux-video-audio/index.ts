@@ -172,8 +172,11 @@ Deno.serve(async (req: Request) => {
     await ffmpeg.load({ coreURL, wasmURL });
 
     // Timeout guard: if FFmpeg exec hangs (OOM, missing font, corrupt
-    // input), terminate after 120s instead of blocking the worker forever.
-    const FFMPEG_EXEC_TIMEOUT_MS = 120_000;
+    // input), terminate after 180s instead of blocking the worker forever.
+    // Raised from 120s — audio resampling + muxing can take longer when
+    // the source sample rate differs from 48kHz, and 120s was cutting it
+    // close enough to cause spurious timeouts on longer clips.
+    const FFMPEG_EXEC_TIMEOUT_MS = 180_000;
     let execTimedOut = false;
     const execTimeout = setTimeout(() => {
       execTimedOut = true;
@@ -253,14 +256,19 @@ Deno.serve(async (req: Request) => {
       } else {
         ffmpegArgs.push("-shortest");
       }
+      // Use -c:v copy to skip video re-encoding entirely — the mux
+      // function's job is to combine audio + video, not transcode. Runway
+      // already outputs at the correct resolution. Re-encoding with libx264
+      // in ffmpeg.wasm was the #1 cause of the 95-97% timeout trap: the
+      // full video re-encode pushed FFmpeg past its exec timeout, the Edge
+      // Runtime killed the function, and the client showed "300초 초과".
+      // -ar 48000 normalizes the audio sample rate upfront so FFmpeg
+      // doesn't auto-detect and choose a slow resampling path.
       ffmpegArgs.push(
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-tune", "zerolatency",
-        "-crf", "28",
-        "-vf", "scale=-2:720",
+        "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "128k",
+        "-ar", "48000",
         "-movflags", "+faststart",
         "output.mp4",
       );
