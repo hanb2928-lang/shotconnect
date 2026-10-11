@@ -77,7 +77,7 @@ interface GenerateAiVideoOptions {
 
 const SUBMIT_MAX_RETRIES = 2;
 const SUBMIT_RETRY_DELAY_MS = 500;
-const REALTIME_TIMEOUT_MS = 300_000;
+const REALTIME_TIMEOUT_MS = 600_000;
 const REALTIME_SOFT_WARN_MS = 120_000;
 const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 12000;
 const RUNWAY_POLL_FALLBACK_START_MS = 20_000;
@@ -109,11 +109,13 @@ function installBackgroundPause(opts: {
 }): () => void {
   let bgTimer: ReturnType<typeof setTimeout> | null = null;
   let isBackgrounded = false;
+  let bgEnterTime: number | null = null;
 
   const handleAppState = (nextState: string) => {
     if (nextState === 'background' || nextState === 'inactive') {
       if (isBackgrounded || opts.isSettled()) return;
       isBackgrounded = true;
+      bgEnterTime = Date.now();
       opts.pause();
       bgTimer = setTimeout(() => {
         if (opts.isSettled()) return;
@@ -123,7 +125,25 @@ function installBackgroundPause(opts: {
       if (!isBackgrounded || opts.isSettled()) return;
       isBackgrounded = false;
       if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
-      opts.resume();
+      // On iOS, setTimeout is paused while backgrounded, so bgTimer may
+      // never have fired even if BG_MAX_WAIT_MS has elapsed. Check the
+      // actual elapsed time and fire the timeout if exceeded.
+      if (bgEnterTime !== null) {
+        const bgDuration = Date.now() - bgEnterTime;
+        bgEnterTime = null;
+        if (bgDuration >= BG_MAX_WAIT_MS) {
+          if (!opts.isSettled()) {
+            opts.onBackgroundTimeout();
+            return;
+          }
+        }
+      }
+      try {
+        opts.resume();
+      } catch {
+        // resume() can throw if channel setup fails on foreground return.
+        // Swallowing prevents the AppState handler from crashing the app.
+      }
     }
   };
 
@@ -834,7 +854,7 @@ function waitForVideoCompletion(
         await Promise.all([checkDb(), checkScanVideoUrl()]);
         if (!settled) {
           const elapsedSec = monotonicElapsedSec(startTime);
-          const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.97);
+          const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.99);
           const healthHint = channelHealth === ChannelHealth.HEALTHY
             ? ''
             : ' (실시간 연결 불안정 — 폴링으로 대체 중)';
@@ -931,9 +951,9 @@ function waitForVideoCompletion(
       report('generating', 0.85, `렌더링이 조금 오래 걸리고 있어요 (${elapsedSec}초). 백그라운드에서 계속 진행 중입니다...`);
     }, REALTIME_SOFT_WARN_MS);
 
-    // Overall timeout — 5 minutes. Don't orphan the job; inform the user.
+    // Overall timeout — 10 minutes. Don't orphan the job; inform the user.
     timeoutTimer = setTimeout(() => {
-      const msg = `비디오 생성이 5분을 초과했습니다. 서버에서는 계속 렌더링 중일 수 있어요. 잠시 후 이 페이지를 다시 방문하면 완성된 영상을 확인할 수 있습니다.`;
+      const msg = `비디오 생성이 10분을 초과했습니다. 서버에서는 계속 렌더링 중일 수 있어요. 잠시 후 이 페이지를 다시 방문하면 완성된 영상을 확인할 수 있습니다.`;
       report('error', 0, msg);
       finish(() => reject(new Error(msg)));
     }, REALTIME_TIMEOUT_MS);
@@ -1383,7 +1403,7 @@ export function subscribeVideoJob(
             } else {
               const stepProgress = stepToProgress(row.step);
               const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-              const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.97);
+              const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.99);
               const effectiveProgress = stepProgress != null
                 ? Math.max(stepProgress, timeProgress)
                 : timeProgress;
@@ -1497,9 +1517,10 @@ export function subscribeVideoJob(
     }, interval);
   };
 
-  // Overall timeout — 5 minutes. After this, do one final check and if
-  // still not complete, force a FAILED with a retry message instead of
-  // leaving the user stuck at a frozen progress percentage forever.
+  // Overall timeout — 10 minutes (aligned with useResultPolling's
+  // HARD_TIMEOUT_MS). After this, do one final check and if still not
+  // complete, force a FAILED with a retry message instead of leaving the
+  // user stuck at a frozen progress percentage forever.
   const overallTimeoutTimer = setTimeout(() => {
     if (settled) return;
     checkAndNotify().then(() => {
@@ -1507,9 +1528,9 @@ export function subscribeVideoJob(
       settled = true;
       cleanup();
       removeBgPause();
-      callback({ status: 'FAILED', error: '비디오 생성이 5분을 초과했습니다. 서버에서는 완료되었을 수 있어요. 잠시 후 결과 페이지를 다시 방문하면 완성된 영상을 확인할 수 있습니다.' });
+      callback({ status: 'FAILED', error: '비디오 생성이 10분을 초과했습니다. 서버에서는 완료되었을 수 있어요. 잠시 후 결과 페이지를 다시 방문하면 완성된 영상을 확인할 수 있습니다.' });
     });
-  }, 300_000);
+  }, 600_000);
 
   setupChannel();
   scheduleNextPoll();
@@ -1863,9 +1884,9 @@ export function subscribeHdUpgrade(
       settled = true;
       cleanup();
       removeBgPause();
-      callback({ status: 'FAILED', error: '고화질 업그레이드가 5분을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
+      callback({ status: 'FAILED', error: '고화질 업그레이드가 10분을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
     });
-  }, 300_000);
+  }, 600_000);
 
   setupChannel();
   scheduleNextPoll();

@@ -180,7 +180,7 @@ export function SocialShortFormShare({
             </Animated.View>
           </Animated.View>
           <Animated.View style={introStyle}>
-            <Text style={styles.introPhrase}>"{INTRO_PHRASES[selectedIntro]}"</Text>
+            <Text style={styles.introPhrase}>{`"${INTRO_PHRASES[selectedIntro]}"`}</Text>
           </Animated.View>
         </View>
 

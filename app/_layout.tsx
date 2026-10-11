@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform, TextInput, AppState } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack , SplashScreen } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
-import { SplashScreen } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import {
   PlusJakartaSans_400Regular,
@@ -22,15 +21,6 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 import { AffiliateToastProvider } from '@/components/AffiliateToast';
 import { VideoGenProvider } from '@/hooks/useVideoGen';
 import { VideoGenGlobalToast } from '@/components/VideoGenGlobalToast';
-const NetworkBanner = lazy(() =>
-  import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
-);
-const VideoJobRecoveryToast = lazy(() =>
-  import('@/components/VideoJobRecoveryToast').then((m) => ({ default: m.VideoJobRecoveryToast })),
-);
-const UploadDebugOverlay = lazy(() =>
-  import('@/components/UploadDebugOverlay').then((m) => ({ default: m.UploadDebugOverlay })),
-);
 import { I18nProvider, useI18n } from '@/hooks/useI18n';
 import { AppThemeProvider } from '@/hooks/useAppTheme';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -48,6 +38,15 @@ import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
 import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase } from '@/lib/supabase';
 import { armFlushWindow } from '@/lib/foregroundFlushGuard';
+const NetworkBanner = lazy(() =>
+  import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
+);
+const VideoJobRecoveryToast = lazy(() =>
+  import('@/components/VideoJobRecoveryToast').then((m) => ({ default: m.VideoJobRecoveryToast })),
+);
+const UploadDebugOverlay = lazy(() =>
+  import('@/components/UploadDebugOverlay').then((m) => ({ default: m.UploadDebugOverlay })),
+);
 
 installGlobalErrorHandlers();
 

@@ -9,8 +9,7 @@ import {
   TextInput,
   Platform,
   ActivityIndicator,
-} from 'react-native';
-import { Image } from 'react-native';
+ Image } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import {
   Sparkles,

@@ -111,7 +111,7 @@ export function HyperHumanEngineCard({
               />
             </TouchableOpacity>
           </View>
-          <Text style={styles.hookText}>"{hookResult.hook}"</Text>
+          <Text style={styles.hookText}>{`"${hookResult.hook}"`}</Text>
           <Text style={styles.hookCaptionPreview} numberOfLines={3}>{hookResult.caption}</Text>
         </View>
       )}
@@ -181,7 +181,7 @@ export function HyperHumanEngineCard({
             <View key={m.id} style={styles.markerChip}>
               <Text style={styles.markerEmoji}>{getEffectEmoji(m.effect)}</Text>
               <Text style={styles.markerTime}>{m.timeSec.toFixed(1)}s</Text>
-              <Text style={styles.markerKeyword}>"{m.keyword}"</Text>
+              <Text style={styles.markerKeyword}>{`"${m.keyword}"`}</Text>
             </View>
           ))}
         </ScrollView>

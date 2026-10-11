@@ -27,9 +27,14 @@ export function useAppLifecycleSync(onForegroundSync?: () => void | Promise<void
       lastForegroundAt = now;
       const run = (async () => {
         try {
-          await ensureFreshSession();
+          await Promise.race([
+            ensureFreshSession(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('session-refresh-timeout')), 10_000),
+            ),
+          ]);
         } catch {
-          // Token refresh failure is non-fatal — callers retry on their own.
+          // Token refresh failure or timeout is non-fatal — callers retry on their own.
         }
         try {
           await callbackRef.current?.();

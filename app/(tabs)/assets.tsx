@@ -21,6 +21,18 @@ import type { FlatList as FlatListType } from 'react-native';
 import { CachedImage } from '@/components/CachedImage';
 import { FolderOpen, Trash2, Download, Film, Image as ImageIcon, X, Calendar, Youtube, Instagram, FileText, Smartphone, Share2, CircleCheck as CheckCircle2, Clock, CircleDashed, Link2, Crop, Rocket, TrendingUp, Repeat2, ListFilter as Filter, ArrowDownUp, Music2, Sparkles, ArrowRight, Pin, Copy, Check, Zap, Lightbulb, Users, Volume2, Type, Flame, ChevronDown, ChevronUp, Hash, QrCode, Store, Settings, ChartBar as BarChart3 } from 'lucide-react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { theme } from '@/lib/theme';
+import { fetchSavedAssets, deleteSavedAsset, updateAssetUploadStatus } from '@/lib/savedAssets';
+import type { SavedAsset } from '@/types/database';
+import { AssetsSkeleton } from '@/components/AssetsSkeleton';
+import { useTabBarHeight } from '@/hooks/useTabBarHeight';
+import { useSafeTop } from '@/hooks/useSafeTop';
+import { useI18n } from '@/hooks/useI18n';
+import {
+  getDeepLink, buildPlatformCaption, getCaptionTemplate,
+  type UploadPlatformKey,
+} from '@/lib/platformUpload';
+import { getTrendingSuggestions } from '@/lib/trendingHashtags';
 let _mediaLibrary: typeof import('expo-media-library') | null = null;
 async function getMediaLibrary() {
   if (!_mediaLibrary) _mediaLibrary = await import('expo-media-library');
@@ -36,18 +48,6 @@ async function getClipboard() {
   if (!_clipboard) _clipboard = await import('expo-clipboard');
   return _clipboard;
 }
-import { theme } from '@/lib/theme';
-import { fetchSavedAssets, deleteSavedAsset, updateAssetUploadStatus } from '@/lib/savedAssets';
-import type { SavedAsset } from '@/types/database';
-import { AssetsSkeleton } from '@/components/AssetsSkeleton';
-import { useTabBarHeight } from '@/hooks/useTabBarHeight';
-import { useSafeTop } from '@/hooks/useSafeTop';
-import { useI18n } from '@/hooks/useI18n';
-import {
-  getDeepLink, buildPlatformCaption, getCaptionTemplate,
-  type UploadPlatformKey,
-} from '@/lib/platformUpload';
-import { getTrendingSuggestions } from '@/lib/trendingHashtags';
 
 
 const CARD_GAP = 12;
@@ -715,7 +715,7 @@ function AssetsScreenInner() {
                 <Crop size={24} color={theme.colors.accent[400]} strokeWidth={2} />
               </View>
               <Text style={styles.reexportTitle}>플랫폼별 재내보내기</Text>
-              <Text style={styles.reexportSubtitle}>'{reexportAsset?.title}'을(를) 다른 플랫폼 규격으로 자동 재가공합니다</Text>
+              <Text style={styles.reexportSubtitle}>{`'${reexportAsset?.title}'을(를) 다른 플랫폼 규격으로 자동 재가공합니다`}</Text>
             </View>
             {reexportDone ? (
               <View style={styles.reexportDoneCard}>
@@ -837,7 +837,7 @@ function AssetsScreenInner() {
                 <Repeat2 size={24} color={theme.colors.accent[400]} strokeWidth={2} />
               </View>
               <Text style={styles.remixTitle}>1클릭 리믹스</Text>
-              <Text style={styles.remixSubtitle}>'{remixAsset?.title}'의 핵심 요소만 교체하여 새 버전을 만드세요</Text>
+              <Text style={styles.remixSubtitle}>{`'${remixAsset?.title}'의 핵심 요소만 교체하여 새 버전을 만드세요`}</Text>
             </View>
 
             {remixDone ? (
@@ -870,7 +870,7 @@ function AssetsScreenInner() {
                         </View>
                         <View style={styles.remixHookInfo}>
                           <Text style={styles.remixHookLabel}>{hook.label}</Text>
-                          <Text style={styles.remixHookText} numberOfLines={2}>"{hook.text}"</Text>
+                          <Text style={styles.remixHookText} numberOfLines={2}>{`"${hook.text}"`}</Text>
                         </View>
                         {selected && (
                           <View style={[styles.remixCheck, { backgroundColor: hook.color }]}>
@@ -943,7 +943,7 @@ function AssetsScreenInner() {
                 <Share2 size={24} color={theme.colors.warning[400]} strokeWidth={2} />
               </View>
               <Text style={styles.statusTitle}>게시 상태 관리</Text>
-              <Text style={styles.statusSubtitle} numberOfLines={1}>'{statusPickerAsset?.title}'</Text>
+              <Text style={styles.statusSubtitle} numberOfLines={1}>{`'${statusPickerAsset?.title}'`}</Text>
             </View>
             <View style={styles.statusOptions}>
               {(['not_uploaded', 'scheduled', 'uploaded'] as UploadStatus[]).map((status) => {

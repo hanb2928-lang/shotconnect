@@ -88,6 +88,11 @@ export function ShoppingMatchCard({
   const [localShortUrl, setLocalShortUrl] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const { showAffiliateToast } = useAffiliateToast();
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const handleOpen = (url: string) => {
     showAffiliateToast(url);
@@ -332,12 +337,6 @@ export function ShoppingMatchCard({
     setInputPlatformName('');
     setError(null);
   };
-
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
 
   const handleRemoveLink = async () => {
     const result = await onRemoveCustomLink?.(selectedProductIndex);

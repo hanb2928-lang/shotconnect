@@ -85,7 +85,7 @@ export const WebCameraView = forwardRef<WebCameraHandle, WebCameraViewProps>(fun
   const recordingPromiseRef = useRef<Promise<VideoRecordingResult> | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRecordingRef = useRef(false);
-  const trackListenersRef = useRef<Array<{ track: MediaStreamTrack; handler: () => void }>>([]);
+  const trackListenersRef = useRef<{ track: MediaStreamTrack; handler: () => void }[]>([]);
   const pulseScale = useSharedValue(1);
   const registerPause = usePauseAnimationsOnBackground();
 

@@ -1,6 +1,5 @@
 import { memo, useCallback, useRef, useEffect } from 'react';
-import { Platform } from 'react-native';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ViewStyle } from 'react-native';
+import { Platform , View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ViewStyle } from 'react-native';
 import { Plus, Check, Upload, UserSquare2, Link2, AlertCircle } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { CachedImage } from '@/components/CachedImage';

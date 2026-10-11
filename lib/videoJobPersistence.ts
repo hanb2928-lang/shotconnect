@@ -52,6 +52,9 @@ export async function saveActiveVideoJob(jobId: string, step: string, scanId?: s
     startedAt: now,
     lastUpdated: now,
   };
+  // Re-check before writing — a clear may have landed while we were
+  // building the data object, which would resurrect a cleared job.
+  if (clearGeneration > saveGeneration) return;
   await setItem(ACTIVE_VIDEO_JOB_KEY, JSON.stringify(data));
 }
 
@@ -59,6 +62,9 @@ export async function updateActiveVideoJobStep(step: string, progress?: number):
   if (clearGeneration > saveGeneration) return;
   const active = await getActiveVideoJob();
   if (!active) return;
+  // Re-check after the async read — a clear may have landed during the
+  // getActiveVideoJob await, making this update stale.
+  if (clearGeneration > saveGeneration) return;
   active.step = step;
   if (progress !== undefined && !isNaN(progress) && isFinite(progress)) {
     active.progress = Math.max(0, Math.min(1, progress));

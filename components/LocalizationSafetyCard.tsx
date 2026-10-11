@@ -162,7 +162,7 @@ export function LocalizationSafetyCard({
         <View style={styles.transBox}>
           <Sparkles size={12} color={theme.colors.accent[400]} strokeWidth={2} />
           <Text style={styles.transText}>
-            현지 톤: {preset.toneName} — "{preset.examplePhrase}"
+            현지 톤: {preset.toneName} — {`"${preset.examplePhrase}"`}
           </Text>
         </View>
       )}

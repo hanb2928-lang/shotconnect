@@ -208,6 +208,20 @@ function evictOldestContext(): void {
     addBreadcrumb('gl', `Context pool evicted oldest (pool size was ${contextPool.length + 1})`, 'warning');
     return;
   }
+  // All contexts are retained — force-evict the oldest one to prevent
+  // unbounded pool growth. A retained context that's evicted will simply
+  // be recreated on next use.
+  if (contextPool.length > 0) {
+    const entry = contextPool[0];
+    entry.retained = false;
+    invalidateContext(entry.gl);
+    try {
+      const ext = entry.gl.getExtension('WEBGL_lose_context');
+      ext?.loseContext();
+    } catch {}
+    contextPool.splice(0, 1);
+    addBreadcrumb('gl', `Context pool force-evicted retained context (pool size was ${contextPool.length + 1})`, 'warning');
+  }
 }
 
 function releaseContext(gl: WebGL2RenderingContext): void {

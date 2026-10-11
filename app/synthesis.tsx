@@ -508,7 +508,9 @@ function SynthesisScreenInner() {
     if (draft.mood) setMood(draft.mood as ProductMood);
     if (draft.platform) setPlatform(draft.platform as PlatformMode);
     if (draft.scanId) scanIdRef.current = draft.scanId;
-    if (draft.resultVideoUrl) setResultVideoUrl(draft.resultVideoUrl);
+    // setResultVideoUrl is a no-op (result state is managed by the global
+    // VideoGenContext). The result video will be shown when the user
+    // navigates to the result page, which loads the scan from DB.
     setResumeDraftId(draft.id);
     await loadDraft(draft.id);
   }, [loadDraft]);

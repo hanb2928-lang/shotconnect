@@ -18,7 +18,7 @@ export interface ResultPollingOptions {
   onSoftWarn?: () => void;
 }
 
-const POLL_FIRST_DELAY_MS = 8000;
+const POLL_FIRST_DELAY_MS = 5000;
 const SOFT_WARN_MS = 120_000;
 const HARD_TIMEOUT_MS = 600_000;
 const POLL_ERROR_WINDOW_MS = 60_000;
@@ -305,12 +305,40 @@ export function useResultPolling(
     const pollOnce = async () => {
       if (cancelled || settledRef.current) return;
 
-      // At 85%+, the forced completion guard is already running a
-      // DB force-sync. Skip redundant edge function polls to avoid lock
-      // conflicts and wasted network requests on native.
+      // At 85%+, skip the edge function poll (which is redundant at this
+      // stage) but still do a DB force-sync to detect completion. Without
+      // this DB check, the only completion detector left is the Realtime
+      // websocket — which is unreliable on native (disconnects on background,
+      // network transitions, and memory pressure). This was the root cause
+      // of the 95-97% bottleneck: polling stopped at 85% and the Realtime
+      // websocket was the only path left, so if it dropped, the user was
+      // stuck until the 10-minute hard timeout.
       if (highestProgressSeen >= 0.85) {
-        const delayMs = hybridPoller.nextPollDelayMs();
-        pollTimer = setTimeout(pollOnce, delayMs);
+        const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
+        if (cancelled || settledRef.current) return;
+        if (dbResult) {
+          if (dbResult.step) {
+            const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
+              ? dbResult.progress
+              : stepToProgress(dbResult.step);
+            applyProgress(sp, dbResult.step);
+          }
+          handleResult(dbResult.status, dbResult.videoUrl);
+          if (settledRef.current) return;
+        }
+        // Also check scans.video_url — the webhook may have written the
+        // result directly to scans without the video_jobs row updating.
+        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
+          const scanResult = await forceSyncByScan();
+          if (!cancelled && !settledRef.current && scanResult) {
+            handleResult(scanResult.status, scanResult.videoUrl);
+            if (settledRef.current) return;
+          }
+        }
+        if (!cancelled && !settledRef.current) {
+          const delayMs = hybridPoller.nextPollDelayMs();
+          pollTimer = setTimeout(pollOnce, delayMs);
+        }
         return;
       }
 
@@ -466,8 +494,8 @@ export function useResultPolling(
     armSoftWarn(SOFT_WARN_MS);
     armHardTimeout(HARD_TIMEOUT_MS);
 
-    // Start polling — first poll fires at 500ms for instant status check,
-    // subsequent polls use the adaptive backoff starting at 1500ms.
+    // Start polling — first poll fires at 5s for an initial status check,
+    // subsequent polls use the adaptive backoff schedule.
     pollTimer = setTimeout(pollOnce, POLL_FIRST_DELAY_MS);
 
     // Resume pump: on foreground return, immediately poll once + run a DB
@@ -524,27 +552,32 @@ export function useResultPolling(
               }
             }
             runResumeBurst();
-          });
 
-          // Re-arm soft warn and hard timeout with remaining time so
-          // background duration does not count toward the user's wait.
-          if (bgEnterTime !== null) {
-            const bgDuration = Date.now() - bgEnterTime;
-            bgEnterTime = null;
-            const elapsed = Date.now() - startTime - bgDuration;
-            const remainingSoft = SOFT_WARN_MS - elapsed;
-            const remainingHard = HARD_TIMEOUT_MS - elapsed;
-            if (!softWarnFired && remainingSoft > 0) {
-              armSoftWarn(remainingSoft);
-            } else if (!softWarnFired && remainingSoft <= 0) {
-              softWarnFired = true;
-              setProgressMessage('영상 생성이 조금 오래 걸리고 있어요. 잠시만 기다려주세요...');
-              callbacksRef.current.onSoftWarn?.();
+            // Re-arm soft warn and hard timeout AFTER the resume burst so
+            // they don't fire before the DB check has a chance to detect
+            // completion. Without this, the hard timeout could fire during
+            // the flush window, declaring the job timed out before any DB
+            // check runs.
+            if (bgEnterTime !== null) {
+              const bgDuration = Date.now() - bgEnterTime;
+              bgEnterTime = null;
+              const elapsed = Date.now() - startTime - bgDuration;
+              const remainingSoft = SOFT_WARN_MS - elapsed;
+              const remainingHard = HARD_TIMEOUT_MS - elapsed;
+              if (!softWarnFired && remainingSoft > 0) {
+                armSoftWarn(remainingSoft);
+              } else if (!softWarnFired && remainingSoft <= 0) {
+                softWarnFired = true;
+                setProgressMessage('영상 생성이 조금 오래 걸리고 있어요. 잠시만 기다려주세요...');
+                callbacksRef.current.onSoftWarn?.();
+              }
+              if (remainingHard > 0) {
+                armHardTimeout(remainingHard);
+              } else {
+                armHardTimeout(5000);
+              }
             }
-            if (remainingHard > 0) {
-              armHardTimeout(remainingHard);
-            }
-          }
+          });
         }
       } else if (nextState === 'background' || nextState === 'inactive') {
         // Graceful pause: abort all in-flight network requests, clear ALL

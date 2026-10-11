@@ -1,9 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, TextInput , Platform } from 'react-native';
 import { Link2, Copy, Check, ExternalLink, Plus, X, ShoppingBag } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import * as Clipboard from 'expo-clipboard';
-import { Platform } from 'react-native';
 import {
   getOrCreateLinkInBio,
   updateLinkInBio,

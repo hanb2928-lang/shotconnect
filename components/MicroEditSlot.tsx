@@ -68,7 +68,7 @@ export function MicroEditSlot({ onReviewLineChange, onFootageSelect }: MicroEdit
       <View style={styles.sectionBox}>
         <Text style={styles.sectionLabel}>나만의 사용 후기 1줄</Text>
         <Text style={styles.sectionHint}>
-          AI 시나리오 중 "실제 사용평" 파트에 직접 적은 한 줄이 자연스럽게 통합됩니다.
+          AI 시나리오 중 &quot;실제 사용평&quot; 파트에 직접 적은 한 줄이 자연스럽게 통합됩니다.
         </Text>
         {editing ? (
           <View style={styles.editRow}>
@@ -92,7 +92,7 @@ export function MicroEditSlot({ onReviewLineChange, onFootageSelect }: MicroEdit
             activeOpacity={0.7}
           >
             {reviewLine.trim() ? (
-              <Text style={styles.reviewText}>"{reviewLine.trim()}"</Text>
+              <Text style={styles.reviewText}>{`"${reviewLine.trim()}"`}</Text>
             ) : (
               <Text style={styles.reviewPlaceholder}>탭하여 한 줄 후기 적기</Text>
             )}

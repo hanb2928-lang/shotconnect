@@ -106,41 +106,42 @@ export function useOrphanJobRecovery(
     setIsChecking(true);
 
     try {
-      await ensureFreshSession();
-    } catch { /* non-fatal */ }
+      try {
+        await ensureFreshSession();
+      } catch { /* non-fatal */ }
 
-    const storedId = await getStoredScanId();
-    const storedAt = await getStoredScanAt();
+      const storedId = await getStoredScanId();
+      const storedAt = await getStoredScanAt();
 
-    if (storedId) {
-      const scan = await checkScanCompletion(storedId);
-      if (mountedRef.current && scan) {
-        const hasResult = scan.video_url || scan.muxed_video_url || scan.edited_image_url;
-        if (hasResult) {
-          setLastRecoveryScan(scan);
-          callbackRef.current(scan);
-          forgetActiveScan();
-          setIsChecking(false);
-          return;
-        }
-        if (storedAt && now - storedAt > 15 * 60_000) {
-          forgetActiveScan();
+      if (storedId) {
+        const scan = await checkScanCompletion(storedId);
+        if (mountedRef.current && scan) {
+          const hasResult = scan.video_url || scan.muxed_video_url || scan.edited_image_url;
+          if (hasResult) {
+            setLastRecoveryScan(scan);
+            try { callbackRef.current(scan); } catch { /* non-fatal */ }
+            forgetActiveScan();
+            return;
+          }
+          if (storedAt && now - storedAt > 15 * 60_000) {
+            forgetActiveScan();
+          }
         }
       }
+
+      const recentScans = await queryOrphanedScans();
+      if (!mountedRef.current) return;
+
+      const orphan = recentScans.find(
+        (s) => s.video_url || s.muxed_video_url || s.edited_image_url,
+      );
+      if (orphan) {
+        setLastRecoveryScan(orphan);
+        try { callbackRef.current(orphan); } catch { /* non-fatal */ }
+      }
+    } finally {
+      if (mountedRef.current) setIsChecking(false);
     }
-
-    const recentScans = await queryOrphanedScans();
-    if (!mountedRef.current) { setIsChecking(false); return; }
-
-    const orphan = recentScans.find(
-      (s) => s.video_url || s.muxed_video_url || s.edited_image_url,
-    );
-    if (orphan) {
-      setLastRecoveryScan(orphan);
-      callbackRef.current(orphan);
-    }
-
-    setIsChecking(false);
   }, []);
 
   const triggerRecoveryCheck = useCallback(() => {

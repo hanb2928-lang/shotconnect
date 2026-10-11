@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Platform } from 'react-native';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { Platform , View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Link2, Copy, Check, CircleAlert as AlertCircle } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { theme } from '@/lib/theme';

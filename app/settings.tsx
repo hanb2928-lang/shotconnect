@@ -24,7 +24,7 @@ import { theme as staticTheme } from '@/lib/theme';
 import { useAppTheme } from '@/hooks/useAppTheme';
 import type { ThemePreset } from '@/lib/theme';
 import { getItem, setItem } from '@/lib/storage';
-import { getUserSettings, updateUserSettings } from '@/lib/settings';
+import { getUserSettings, updateUserSettings , invalidateSettingsCache, updateUserSettings as persistUserSettings } from '@/lib/settings';
 import { uploadAssetBlob } from '@/lib/savedAssets';
 import { clearLogoCache } from '@/lib/logoWatermark';
 import { TTS_VOICES, DEFAULT_TTS_VOICE } from '@/lib/ttsVoices';
@@ -41,7 +41,6 @@ import { addRevenueRecord, fetchRevenueRecords, deleteRevenueRecord } from '@/li
 import { formatKRW } from '@/lib/dashboard';
 import { useMascotSettings, type MascotStyle } from '@/hooks/useMascotSettings';
 import { useWebPush } from '@/hooks/useWebPush';
-import { invalidateSettingsCache, updateUserSettings as persistUserSettings } from '@/lib/settings';
 import { useI18n } from '@/hooks/useI18n';
 import { SUPPORTED_LANGUAGES, type AppLanguage } from '@/lib/i18n';
 import {
@@ -647,7 +646,7 @@ function SettingsScreenInner() {
                 </View>
                 <Text style={styles.tutorialStepTitle}>1단계: 제휴 링크 입력</Text>
                 <Text style={styles.tutorialStepDesc}>
-                  가상 상품 '무선 블루투스 이어폰'의 제휴 링크를 입력해보세요. 쿠팡 파트너스 링크를 자동으로 생성하거나 직접 입력할 수 있어요.
+                  가상 상품 &apos;무선 블루투스 이어폰&apos;의 제휴 링크를 입력해보세요. 쿠팡 파트너스 링크를 자동으로 생성하거나 직접 입력할 수 있어요.
                 </Text>
                 <View style={styles.tutorialMockCard}>
                   <Text style={styles.tutorialMockLabel}>가상 상품</Text>
@@ -709,7 +708,7 @@ function SettingsScreenInner() {
                   </View>
                   <View style={styles.tutorialMockAiRow}>
                     <Sparkles size={14} color={theme.colors.accent[400]} strokeWidth={2} />
-                    <Text style={styles.tutorialMockAiText}>카피: "한 번 쓰면 못 놓는 무선 자유"</Text>
+                    <Text style={styles.tutorialMockAiText}>카피: &quot;한 번 쓰면 못 놓는 무선 자유&quot;</Text>
                   </View>
                   <View style={styles.tutorialMockAiRow}>
                     <Film size={14} color={theme.colors.warning[400]} strokeWidth={2} />
@@ -745,7 +744,7 @@ function SettingsScreenInner() {
                   <View style={styles.tutorialDisclosureBox}>
                     <Check size={14} color={theme.colors.success[400]} strokeWidth={2} />
                     <Text style={styles.tutorialDisclosureText}>
-                      "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+                      &quot;이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.&quot;
                     </Text>
                   </View>
                   <Text style={styles.tutorialCompleteHint}>

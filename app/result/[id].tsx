@@ -18,7 +18,7 @@ import {
   useWindowDimensions,
   Animated,
   Easing,
-} from 'react-native';
+ Share as RNShare } from 'react-native';
 import {
   ArrowLeft,
   Share2,
@@ -40,7 +40,7 @@ import {
   CircleAlert,
   ChevronDown,
   ChevronUp,
-} from 'lucide-react-native';
+ BellRing, ScanText as ScanTextIcon , TrendingUp as TrendingUpIcon, Hash as HashIcon, PenLine, LayoutTemplate, ShoppingBag as ShoppingBagIcon, Wand as Wand2, Film as FilmIcon, Lightbulb, Store, BookOpen, Rocket, Users, Globe, Share2 as Share2Icon, Palette as PaletteIcon, Clock, Camera as CameraIcon, Sun as SunIcon, ShieldCheck as ShieldIcon, Link2 as Link2Icon, User as UserIcon, SlidersHorizontal as SlidersIcon, Pencil as PencilIcon, Sparkles as SparklesIcon, Zap as ZapIcon, Scissors as ScissorsIcon, Youtube, Music2, Instagram, MonitorPlay, FileText, AudioLines, Video as VideoIcon, Image as ImageIcon, AlertCircle as AlertCircleIcon, Loader2 as Loader2Icon, Download, Upload, Settings2, RotateCcw, CheckCircle2 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { getThumbnailUrl } from '@/lib/imageUtils';
 import { supabase } from '@/lib/supabase';
@@ -54,10 +54,9 @@ import { captureRef } from 'react-native-view-shot';
 import { uploadAssetBlobWithProgress, uploadAssetFromFileUriWithProgress, saveAssetRecord } from '@/lib/savedAssets';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
-import { readUriAsBase64 } from '@/lib/imageEdit';
-import { cleanBase64, uint8ArrayToBase64 } from '@/lib/base64';
-import { Share as RNShare } from 'react-native';
-import type { Scan, UserSettings, AffiliateLink, CustomAffiliateLink, DetectedProduct, PlatformKey, CustomReview } from '@/types/database';
+import { readUriAsBase64 , getImageSize, prepareImageForApi } from '@/lib/imageEdit';
+import { cleanBase64, uint8ArrayToBase64 , urlToDataUrl } from '@/lib/base64';
+import type { Scan, UserSettings, AffiliateLink, CustomAffiliateLink, DetectedProduct, PlatformKey, CustomReview , LocalStoreInfo } from '@/types/database';
 import { STICKER_POSITIONS, TEXT_POSITIONS } from '@/components/TemplateCard';
 import type { StickerPosition, TextPosition } from '@/components/TemplateCard';
 import { StickerLinkControls } from '@/components/StickerLink';
@@ -70,13 +69,11 @@ import { PlatformTabs, BoardTabs, getPlatformMediaType, platformSupportsBoth } f
 import type { MediaType as BoardMediaType } from '@/components/PlatformTabs';
 import { MultiPlatformExport } from '@/components/MultiPlatformExport';
 import type { AffiliatePlatformKey } from '@/components/AffiliatePlatformSwitch';
-import type { LocalStoreInfo } from '@/types/database';
 import { ReviewInput } from '@/components/ReviewInput';
 import { CopyWriter } from '@/components/CopyWriter';
 import { VariantGenerator, type Variant } from '@/components/VariantGenerator';
 import { SmartScheduler } from '@/components/SmartScheduler';
 import { OcrTextExtractor } from '@/components/OcrTextExtractor';
-import { BellRing, ScanText as ScanTextIcon } from 'lucide-react-native';
 import { LocalStoreCard } from '@/components/LocalStoreCard';
 import { ShortFormTipsCard } from '@/components/ShortFormTipsCard';
 import { ViralPredictor } from '@/components/ViralPredictor';
@@ -88,8 +85,6 @@ import { TrendCopyBar } from '@/components/TrendCopyBar';
 import { HashtagCopyBar } from '@/components/HashtagCopyBar';
 import { createShortLink } from '@/lib/shortUrl';
 import { recommendStickerStyle, recommendStickerSize, getCardStyleForPlatform } from '@/lib/stickerRecommend';
-import { urlToDataUrl } from '@/lib/base64';
-import { getImageSize, prepareImageForApi } from '@/lib/imageEdit';
 import { compressForEdgeFunction } from '@/lib/parallelImageCompress';
 import { fetchMatchedTrendingHashtags, getTrendingSuggestions } from '@/lib/trendingHashtags';
 import { LoadingScreen } from '@/components/LoadingScreen';
@@ -109,7 +104,6 @@ import type { FeatureCategory, ScanMode, MediaType } from '@/components/FeatureT
 import { subscribeToJob } from '@/lib/jobQueue';
 import { finalizeAnalysisFromJob, triggerTTS } from '@/lib/asyncAnalysis';
 import type { RenderJob } from '@/lib/jobQueue';
-import { TrendingUp as TrendingUpIcon, Hash as HashIcon, PenLine, LayoutTemplate, ShoppingBag as ShoppingBagIcon, Wand as Wand2, Film as FilmIcon, Lightbulb, Store, BookOpen, Rocket, Users, Globe, Share2 as Share2Icon, Palette as PaletteIcon, Clock, Camera as CameraIcon, Sun as SunIcon, ShieldCheck as ShieldIcon, Link2 as Link2Icon, User as UserIcon, SlidersHorizontal as SlidersIcon, Pencil as PencilIcon, Sparkles as SparklesIcon, Zap as ZapIcon, Scissors as ScissorsIcon, Youtube, Music2, Instagram, MonitorPlay, FileText, AudioLines, Video as VideoIcon, Image as ImageIcon, AlertCircle as AlertCircleIcon, Loader2 as Loader2Icon, Download, Upload, Settings2, RotateCcw, CheckCircle2 } from 'lucide-react-native';
 import { LightingContextStudio } from '@/components/LightingContextStudio';
 import { QuickTweakPanel } from '@/components/QuickTweakPanel';
 import { AccountSafetyChecker } from '@/components/AccountSafetyChecker';
@@ -453,6 +447,8 @@ function ResultScreenInner() {
   const [recommendedStyle, setRecommendedStyle] = useState<StyleRecommendation | null>(null);
   const [styleAppliedKey, setStyleAppliedKey] = useState<string | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle');
+  const analysisStatusRef = useRef(analysisStatus);
+  analysisStatusRef.current = analysisStatus;
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [ttsUrl, setTtsUrl] = useState<string | null>(null);
@@ -2231,7 +2227,6 @@ function ResultScreenInner() {
   // generated hooks/captions appear without requiring a manual reload.
   useEffect(() => {
     if (!scan) return;
-    let skipInitial = true;
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
@@ -2239,10 +2234,6 @@ function ResultScreenInner() {
 
     const onPayload = () => {
       if (!mountedRef.current) return;
-      if (skipInitial) {
-        skipInitial = false;
-        return;
-      }
       Promise.resolve(
         supabase
           .from('scans')
@@ -2389,7 +2380,7 @@ function ResultScreenInner() {
       if (!mountedRef.current) return;
       if (Date.now() - analysisStartTime > ANALYSIS_TIMEOUT_MS) {
         clearInterval(pollInterval);
-        if (mountedRef.current && analysisStatus === 'processing') {
+        if (mountedRef.current && analysisStatusRef.current === 'processing') {
           setAnalysisStatus('error');
           setAnalysisError('분석 시간이 초과되었습니다. 다시 시도해주세요.');
         }
@@ -2414,7 +2405,7 @@ function ResultScreenInner() {
         pollErrorCount++;
         if (pollErrorCount >= MAX_POLL_ERRORS) {
           clearInterval(pollInterval);
-          if (mountedRef.current && analysisStatus === 'processing') {
+          if (mountedRef.current && analysisStatusRef.current === 'processing') {
             setAnalysisStatus('error');
             setAnalysisError('네트워크 연결이 불안정하여 분석 상태를 확인할 수 없습니다. 다시 시도해주세요.');
           }

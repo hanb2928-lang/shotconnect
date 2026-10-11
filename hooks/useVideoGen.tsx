@@ -201,6 +201,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         jobIdRef.current = active.jobId;
         setJobId(active.jobId);
         setIsGenerating(true);
+        genStartRef.current = Date.now();
+        if (!active.jobId.startsWith('hd-')) {
+          outputModeRef.current = 'video';
+        }
         const restoreProgress = active.progress > 0 ? Math.min(active.progress, 0.9) : 0.5;
         setVideoProgress({ phase: 'generating', progress: restoreProgress, message: '이전 생성 작업을 복구하는 중...', elapsedSec: 0, serverStep: active.step });
       } catch {
@@ -456,7 +460,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               throw new Error('Completion retry limit reached');
             }
           } catch {
-            // Only bail out after exhausting retries or on hard DB failure
+            // Increment attempts on ANY error (including DB lookup failures)
+            // so the retry loop terminates instead of looping forever.
+            completionRetryRef.attempts++;
             if (completionRetryRef.attempts >= completionRetryRef.max) {
               jobIdRef.current = null;
               setJobId(null);
@@ -572,6 +578,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const polling = useResultPolling(jobId, {
     scanId: scanIdRef.current,
     onCompleted: (videoUrl) => {
+      generationTokenRef.current++;
       jobIdRef.current = null;
       setJobId(null);
       setIsGenerating(false);
@@ -586,6 +593,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       notifyVideoCompleted();
     },
     onError: (errMsg) => {
+      generationTokenRef.current++;
       jobIdRef.current = null;
       setJobId(null);
       setIsGenerating(false);
@@ -1082,6 +1090,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       jobIdRef.current = active.jobId;
       setJobId(active.jobId);
       setIsGenerating(true);
+      genStartRef.current = Date.now();
+      if (!active.jobId.startsWith('hd-')) {
+        outputModeRef.current = 'video';
+      }
       setError(null);
       const restoreProgress = active.progress > 0 ? Math.min(active.progress, 0.9) : 0.3;
       setVideoProgress({ phase: 'generating', progress: restoreProgress, message: '서버에서 진행 중인 작업을 연결하는 중...', elapsedSec: 0, serverStep: row.step ?? active.step });

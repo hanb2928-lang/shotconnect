@@ -17,14 +17,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import type { CameraView as CameraViewType } from 'expo-camera';
-const CameraView = lazy(() => import('expo-camera').then((m) => ({ default: m.CameraView })));
 import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { useNativeBridgeReady } from '@/hooks/useNativeBridgeReady';
-let _ImagePicker: typeof import('expo-image-picker') | null = null;
-async function getImagePicker() {
-  if (!_ImagePicker) _ImagePicker = await import('expo-image-picker');
-  return _ImagePicker;
-}
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, Video } from 'lucide-react-native';
@@ -47,40 +41,46 @@ import { logError } from '@/lib/errorLogger';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { getItem, setItem } from '@/lib/storage';
-const CreditPurchaseModal = lazy(() =>
-  import('@/components/CreditPurchaseModal').then((m) => ({ default: m.CreditPurchaseModal })),
-);
 import { pickImageWeb, isWebPlatform } from '@/lib/webImagePicker';
 import { checkVideoAssetSpecs } from '@/lib/smartResize';
 import type { WebCameraHandle } from '@/components/WebCameraView';
-const WebCameraView = lazy(() =>
-  import('@/components/WebCameraView').then((m) => ({ default: m.WebCameraView })),
-);
 import type { AngleShot, AngleGuide } from '@/components/MultiAngleCaptureGuide';
-const MultiAngleCaptureGuide = lazy(() =>
-  import('@/components/MultiAngleCaptureGuide').then((m) => ({ default: m.MultiAngleCaptureGuide })),
-);
 import { TriggerBanner } from '@/components/TriggerBanner';
 import type { StudioSliderValues } from '@/components/StudioPremiumPanel';
-const StudioPremiumAccordion = lazy(() =>
-  import('@/components/StudioPremiumPanel').then((m) => ({ default: m.StudioPremiumAccordion })),
-);
-const PostCaptureWorkflow = lazy(() =>
-  import('@/components/PostCaptureWorkflow').then((m) => ({ default: m.PostCaptureWorkflow })),
-);
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
 import type { StereoPipelineProgress } from '@/lib/stereoPipeline';
-let _stereoMod: typeof import('@/lib/stereoPipeline') | null = null;
-async function getStereoMod() {
-  if (!_stereoMod) _stereoMod = await import('@/lib/stereoPipeline');
-  return _stereoMod;
-}
 import { acquirePipelineLock, releasePipelineLock, isPipelineLocked } from '@/lib/pipelineLock';
 import { generateIdempotencyKey } from '@/lib/aiVideoPipeline';
 import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import { ProcessingBarrier } from '@/components/ProcessingBarrier';
 import { captureSnapshot, clearSnapshot, rollbackToSnapshot, classifyFailure, getRetryStrategy } from '@/lib/selfHeal';
 import { useOrphanJobRecovery, rememberActiveScan, forgetActiveScan } from '@/hooks/useOrphanJobRecovery';
+const CameraView = lazy(() => import('expo-camera').then((m) => ({ default: m.CameraView })));
+let _ImagePicker: typeof import('expo-image-picker') | null = null;
+async function getImagePicker() {
+  if (!_ImagePicker) _ImagePicker = await import('expo-image-picker');
+  return _ImagePicker;
+}
+const CreditPurchaseModal = lazy(() =>
+  import('@/components/CreditPurchaseModal').then((m) => ({ default: m.CreditPurchaseModal })),
+);
+const WebCameraView = lazy(() =>
+  import('@/components/WebCameraView').then((m) => ({ default: m.WebCameraView })),
+);
+const MultiAngleCaptureGuide = lazy(() =>
+  import('@/components/MultiAngleCaptureGuide').then((m) => ({ default: m.MultiAngleCaptureGuide })),
+);
+const StudioPremiumAccordion = lazy(() =>
+  import('@/components/StudioPremiumPanel').then((m) => ({ default: m.StudioPremiumAccordion })),
+);
+const PostCaptureWorkflow = lazy(() =>
+  import('@/components/PostCaptureWorkflow').then((m) => ({ default: m.PostCaptureWorkflow })),
+);
+let _stereoMod: typeof import('@/lib/stereoPipeline') | null = null;
+async function getStereoMod() {
+  if (!_stereoMod) _stereoMod = await import('@/lib/stereoPipeline');
+  return _stereoMod;
+}
 
 async function runFittingPipeline(
   shots: AngleShot[],
@@ -1015,7 +1015,9 @@ function CameraScreenInner() {
         }
       }
     } catch (err) {
+      stereoOverlayRef.current = false;
       if (isMountedRef.current) {
+        setStereoOverlayVisible(false);
         rollbackToSnapshot();
         setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
         setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
@@ -1045,13 +1047,16 @@ function CameraScreenInner() {
           );
           if (!isMountedRef.current) { multiAngleCaptureInProgressRef.current = false; return null; }
           if (result?.url) {
-            multiAngleCaptureInProgressRef.current = false;
             // Fetch the uploaded image and convert to base64 for the
             // multi-angle capture interface. The image was already
             // uploaded to Storage by captureFrame — this fetch is
             // lightweight (compressed JPEG, typically <200KB).
             try {
               const resp = await fetch(result.url);
+              if (!resp.ok) {
+                multiAngleCaptureInProgressRef.current = false;
+                return null;
+              }
               const blob = await resp.blob();
               const dataUrl = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader();
@@ -1059,6 +1064,7 @@ function CameraScreenInner() {
                 reader.onerror = () => reject(reader.error);
                 reader.readAsDataURL(blob);
               });
+              multiAngleCaptureInProgressRef.current = false;
               return { base64: cleanBase64(dataUrl), mimeType: result.mimeType };
             } catch {
               multiAngleCaptureInProgressRef.current = false;

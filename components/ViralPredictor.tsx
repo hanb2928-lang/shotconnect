@@ -154,7 +154,7 @@ export function ViralPredictor({
           </View>
           <View style={styles.guideStep}>
             <Text style={styles.guideStepNum}>2</Text>
-            <Text style={styles.guideStepText}>"바이럴 점수 예측하기" 버튼을 누르면 AI가 트렌드를 분석합니다</Text>
+            <Text style={styles.guideStepText}>&quot;바이럴 점수 예측하기&quot; 버튼을 누르면 AI가 트렌드를 분석합니다</Text>
           </View>
           <View style={styles.guideStep}>
             <Text style={styles.guideStepNum}>3</Text>
@@ -162,7 +162,7 @@ export function ViralPredictor({
           </View>
           <View style={styles.guideStep}>
             <Text style={styles.guideStepNum}>4</Text>
-            <Text style={styles.guideStepText}>AI 최적화 제안의 "적용" 버튼으로 카피를 개선하고 다시 예측하세요</Text>
+            <Text style={styles.guideStepText}>AI 최적화 제안의 &quot;적용&quot; 버튼으로 카피를 개선하고 다시 예측하세요</Text>
           </View>
           <View style={styles.guideTipRow}>
             <Lightbulb size={10} color={theme.colors.warning[400]} strokeWidth={2} />

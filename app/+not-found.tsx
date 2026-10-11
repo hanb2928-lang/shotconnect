@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useRouter } from 'expo-router';
-import { Stack } from 'expo-router';
+import { useRouter , Stack } from 'expo-router';
 import { StyleSheet, View, ActivityIndicator } from 'react-native';
 import { theme } from '@/lib/theme';
 

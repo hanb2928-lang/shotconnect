@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect , lazy, Suspense } from 'react';
 import { SafeLazyLoad } from '@/components/ErrorBoundary';
 import {
   View,
@@ -46,13 +46,16 @@ import {
   compositeOnBackground,
 } from '@/lib/imageEdit';
 import type { BackgroundStyle } from '@/components/BackgroundPicker';
+import { cleanBase64 } from '@/lib/base64';
+import type { Scan, CustomAffiliateLink } from '@/types/database';
+import { CachedImage } from '@/components/CachedImage';
+import { BootFallback } from '@/components/BootFallback';
 const BackgroundPicker = lazy(() =>
   import('@/components/BackgroundPicker').then((m) => ({ default: m.BackgroundPicker })),
 );
 const BgRemoveEditor = lazy(() =>
   import('@/components/BgRemoveEditor').then((m) => ({ default: m.BgRemoveEditor })),
 );
-import { cleanBase64 } from '@/lib/base64';
 let _removeBgOnDevice: typeof import('@/lib/removeBgOnDevice') | null = null;
 async function getRemoveBgOnDevice() {
   if (!_removeBgOnDevice) _removeBgOnDevice = await import('@/lib/removeBgOnDevice');
@@ -73,10 +76,6 @@ async function getFileSystem() {
   if (!_fileSystem) _fileSystem = await import('expo-file-system/legacy');
   return _fileSystem;
 }
-import type { Scan, CustomAffiliateLink } from '@/types/database';
-import { CachedImage } from '@/components/CachedImage';
-import { lazy, Suspense } from 'react';
-import { BootFallback } from '@/components/BootFallback';
 
 type EditMode = 'none' | 'text' | 'sticker';
 

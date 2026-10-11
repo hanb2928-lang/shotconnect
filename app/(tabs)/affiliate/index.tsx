@@ -1765,7 +1765,7 @@ function AffiliateScreenInner() {
                   <View style={styles.reassuranceBanner}>
                     <Sparkles size={13} color={theme.colors.warning[400]} strokeWidth={2} />
                     <Text style={styles.reassuranceText}>
-                      스타일 선택은 선택사항이에요. 그냥 'AI 만화숏폼 자동 생성' 버튼만 눌러도 한 번에 끝납니다.
+                      스타일 선택은 선택사항이에요. 그냥 &apos;AI 만화숏폼 자동 생성&apos; 버튼만 눌러도 한 번에 끝납니다.
                     </Text>
                   </View>
 
@@ -1915,7 +1915,7 @@ function AffiliateScreenInner() {
                 <View style={styles.reassuranceBanner}>
                   <Sparkles size={13} color={theme.colors.primary[400]} strokeWidth={2} />
                   <Text style={styles.reassuranceText}>
-                    '열기' 버튼을 누르면 홍보 문구가 자동 복사되고 플랫폼 앱이 열립니다. 그대로 붙여넣기만 하면 발행 완료!
+                    &apos;열기&apos; 버튼을 누르면 홍보 문구가 자동 복사되고 플랫폼 앱이 열립니다. 그대로 붙여넣기만 하면 발행 완료!
                   </Text>
                 </View>
               </>
