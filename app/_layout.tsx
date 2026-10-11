@@ -36,7 +36,7 @@ import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
 import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler } from '@/lib/appStateCoordinator';
-import { supabase } from '@/lib/supabase';
+import { supabase, resetSessionCache } from '@/lib/supabase';
 import { armFlushWindow } from '@/lib/foregroundFlushGuard';
 const NetworkBanner = lazy(() =>
   import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
@@ -194,6 +194,7 @@ export default function RootLayout() {
         // instant the process resumes on foreground return, pile-driving the
         // bridge alongside the flush-window callbacks and triggering OOM.
         cancelPendingDeferred();
+        resetSessionCache();
         armFlushWindow();
       }
     });

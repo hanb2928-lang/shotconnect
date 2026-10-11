@@ -68,6 +68,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 let sessionPromise: Promise<void> | null = null;
 let sessionCachedAt = 0;
 const SESSION_CACHE_TTL_MS = 5000;
+const SESSION_FETCH_TIMEOUT_MS = 3_000;
+
+export function resetSessionCache(): void {
+  sessionPromise = null;
+  sessionCachedAt = 0;
+}
 
 export async function ensureFreshSession(): Promise<void> {
   const now = Date.now();
@@ -76,14 +82,21 @@ export async function ensureFreshSession(): Promise<void> {
   sessionCachedAt = now;
   sessionPromise = (async () => {
     try {
-      const { data } = await supabase.auth.getSession();
-      const session = data.session;
-      if (session?.expires_at) {
-        const nowSec = Math.floor(Date.now() / 1000);
-        if (session.expires_at - nowSec <= 120) {
-          await supabase.auth.refreshSession().catch(() => {});
-        }
-      }
+      await Promise.race([
+        (async () => {
+          const { data } = await supabase.auth.getSession();
+          const session = data.session;
+          if (session?.expires_at) {
+            const nowSec = Math.floor(Date.now() / 1000);
+            if (session.expires_at - nowSec <= 120) {
+              await supabase.auth.refreshSession().catch(() => {});
+            }
+          }
+        })(),
+        new Promise<void>((resolve) =>
+          setTimeout(resolve, SESSION_FETCH_TIMEOUT_MS),
+        ),
+      ]);
     } catch {
       // Token refresh failure is non-fatal — the resume fetch will simply
       // use whatever token is available and retry via the normal poll loop.
