@@ -809,7 +809,9 @@ function waitForVideoCompletion(
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
           (payload) => {
             if (!payload.new) return;
-            if (isInFlushWindow()) return;
+            const isTerminal = (payload.new as { status?: string }).status === 'SUCCESS'
+              || (payload.new as { status?: string }).status === 'FAILED';
+            if (isInFlushWindow() && !isTerminal) return;
             try {
               channelHealth = ChannelHealth.HEALTHY;
               pollBackoffAttempt = 0;
@@ -1057,7 +1059,8 @@ function waitForVideoCompletion(
     };
 
     const handleAppState = (nextState: string) => {
-      if (nextState === 'background' || nextState === 'inactive') {
+      if (nextState === 'background') {
+        // Don't treat iOS 'inactive' as background — only full background.
         pauseBackground();
       } else if (nextState === 'active') {
         resumeBackground();
@@ -1434,7 +1437,9 @@ export function subscribeVideoJob(
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
-          if (isInFlushWindow()) return;
+          const isTerminal = (payload.new as { status?: string }).status === 'SUCCESS'
+            || (payload.new as { status?: string }).status === 'FAILED';
+          if (isInFlushWindow() && !isTerminal) return;
           try {
             channelHealth = ChannelHealth.HEALTHY;
             pollBackoffAttempt = 0;
@@ -1473,7 +1478,8 @@ export function subscribeVideoJob(
         { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
-          if (isInFlushWindow()) return;
+          // Do NOT drop scans events during flush window — muxed_video_url
+          // is the most reliable terminal completion signal.
           try {
             const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
             const finalUrl = row.muxed_video_url || row.video_url;
@@ -1907,7 +1913,9 @@ export function subscribeHdUpgrade(
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
         (payload) => {
           if (!payload.new) return;
-          if (isInFlushWindow()) return;
+          const isTerminal = (payload.new as { status?: string }).status === 'SUCCESS'
+            || (payload.new as { status?: string }).status === 'FAILED';
+          if (isInFlushWindow() && !isTerminal) return;
           try {
             channelHealth = ChannelHealth.HEALTHY;
             pollBackoffAttempt = 0;

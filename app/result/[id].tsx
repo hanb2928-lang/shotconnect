@@ -1120,9 +1120,11 @@ function ResultScreenInner() {
       const draftProgressTimer = setInterval(() => {
         if (!mountedRef.current || videoJobSettledRef.current) return;
         const elapsed = Math.round((Date.now() - draftStartTime) / 1000);
-        // Asymptotic progress curve — approaches 0.97 so the user sees near-complete
+        // Asymptotic progress curve — approaches 0.95 so the user sees near-complete
         // progress while waiting for the server-side webhook/poll to deliver the result.
-        const simulated = Math.min(0.08 + 0.89 * (1 - Math.exp(-elapsed / 30)), 0.97);
+        // Was 0.97 which caused the visible "stuck at 97%" symptom. 0.95 gives the
+        // creep timer room to advance visually while the server delivers the result.
+        const simulated = Math.min(0.08 + 0.87 * (1 - Math.exp(-elapsed / 30)), 0.95);
         setVideoGenProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           // Never regress progress — the server/poll/Realtime may have set it higher
@@ -1807,7 +1809,7 @@ function ResultScreenInner() {
                 if (mountedRef.current) {
                   setVideoGenProgress({
                     phase: 'generating',
-                    progress: Math.min(numericProgress, 0.85),
+                    progress: Math.min(numericProgress, 0.95),
                     message: `AI가 영상을 렌더링하고 있어요${pctLabel}`,
                     elapsedSec: elapsed,
                   });
@@ -1978,7 +1980,8 @@ function ResultScreenInner() {
             if (mountedRef.current && !channel) connectChannel();
           });
         }
-      } else if (nextState === 'background' || nextState === 'inactive') {
+      } else if (nextState === 'background') {
+        // Don't treat iOS 'inactive' as background — only full background.
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         if (channel) {
           try { supabase.removeChannel(channel); } catch { /* ignore */ }
@@ -2027,7 +2030,8 @@ function ResultScreenInner() {
     if (!acquirePipelineLock('mux')) return;
 
     const handleMuxAppState = (nextState: string) => {
-      if (nextState === 'background' || nextState === 'inactive') {
+      if (nextState === 'background') {
+        // Don't treat iOS 'inactive' as background — only full background.
         // Atomic snapshot: persist current mux state so it can be restored
         // if the OS kills the process while backgrounded. Without this, the
         // muxDoneRef guard prevents re-entry but the user loses all visible
