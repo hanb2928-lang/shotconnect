@@ -298,7 +298,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
                 const timeProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
                 const merged = Math.max(prev.progress, timeProgress, stepProg ?? 0);
-                const clampMax = 0.85;
+                const clampMax = 0.99;
                 return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(clampMax, merged || 0)) };
               });
             }
@@ -337,8 +337,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const clampMax = 0.85;
-          const timeBasedProgress = Math.min(0.85, 0.15 + elapsed * 0.006);
+          const clampMax = 0.99;
+          const timeBasedProgress = Math.min(0.90, 0.15 + elapsed * 0.006);
           const serverProg = serverProgRef.current;
           const safeServer = (serverProg !== null && !isNaN(serverProg) && isFinite(serverProg)) ? serverProg : null;
           const baseProgress = Math.max(prev.progress, timeBasedProgress);
@@ -351,7 +351,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       creepTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const creepCeiling = 0.85;
+          const creepCeiling = 0.92;
           if (prev.progress >= creepCeiling) return prev;
           const serverProg = serverProgRef.current;
           const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, creepCeiling) : creepCeiling;
@@ -365,7 +365,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       hardGuardTimer = setInterval(() => {
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const guardCeiling = 0.85;
+          const guardCeiling = 0.90;
           if (prev.progress >= guardCeiling) return prev;
           const forced = Math.min(prev.progress + 0.10, guardCeiling);
           const serverProg = serverProgRef.current;
@@ -379,7 +379,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       // 85% means rendering is underway and the result should be in the DB
       // soon. If the DB check finds the job still in progress, retry after
       // a delay instead of bailing out with a timeout error.
-      const COMPLETION_FALLBACK_DELAY_MS = 15_000;
+      const COMPLETION_FALLBACK_DELAY_MS = 5_000;
       const completionRetryRef = completionRetry;
       const checkCompletionFallback = () => {
         const currentJobId = jobIdRef.current;
@@ -454,7 +454,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               // Job still in progress — retry after delay instead of bailing
               completionRetryRef.attempts++;
               if (completionRetryRef.attempts < completionRetryRef.max) {
-                completionFallbackRef.current = setTimeout(checkCompletionFallback, 15_000);
+                completionFallbackRef.current = setTimeout(checkCompletionFallback, 5_000);
                 return;
               }
               throw new Error('Completion retry limit reached');
@@ -471,7 +471,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               serverProgRef.current = null;
               setBackgroundTransition(true);
             } else {
-              completionFallbackRef.current = setTimeout(checkCompletionFallback, 15_000);
+              completionFallbackRef.current = setTimeout(checkCompletionFallback, 5_000);
             }
           }
         })();
@@ -486,7 +486,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           if (prev.progress >= 0.85) {
             if (renderStallSinceRef.current === null) {
               renderStallSinceRef.current = Date.now();
-            } else if (Date.now() - renderStallSinceRef.current >= COMPLETION_FALLBACK_DELAY_MS) {
+            } else if (Date.now() - renderStallSinceRef.current >= 5_000) {
               if (!completionFallbackRef.current && jobIdRef.current) {
                 completionFallbackRef.current = setTimeout(checkCompletionFallback, 0);
               }
@@ -497,7 +497,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           }
           return prev;
         });
-      }, 10000);
+      }, 5000);
     };
 
     const stopTimers = () => {
@@ -611,7 +611,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const sp = polling.serverProgress;
     serverProgRef.current = sp;
     if (sp !== null && !isNaN(sp) && isFinite(sp) && sp > 0 && isGenerating) {
-      const clamped = Math.max(0, Math.min(0.85, sp));
+      const clamped = Math.max(0, Math.min(0.99, sp));
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (isNaN(clamped) || clamped <= prev.progress) return prev;

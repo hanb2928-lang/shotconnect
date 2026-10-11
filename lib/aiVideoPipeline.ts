@@ -627,6 +627,12 @@ function waitForVideoCompletion(
     let channelHealth: ChannelHealth = ChannelHealth.DISCONNECTED;
     let reconnectAttempts = 0;
     let pollBackoffAttempt = 0;
+    const _dbg = (stage: string, extra?: unknown) => {
+      const elapsed = monotonicElapsedSec(startTime);
+      console.log(`[aiVideoPipeline:waitForVideoCompletion] t=${elapsed}s stage=${stage}`, extra ?? '');
+      addBreadcrumb('video', `waitForVideoCompletion: ${stage}`, 'warning', { elapsedSec: elapsed, ...(extra && typeof extra === 'object' ? extra as Record<string, unknown> : {}) });
+    };
+    _dbg('init', { taskId: submitData.taskId, scanId });
 
     // All timers declared early so cleanup/fullCleanup/finish can reference them
     // without hitting a temporal dead zone (TDZ).
@@ -684,7 +690,9 @@ function waitForVideoCompletion(
     }
 
     const handleRow = (row: VideoJobRow) => {
+      _dbg('handleRow', { status: row.status, step: row.step, hasVideoUrl: !!row.video_url });
       if (row.status === 'SUCCESS' && row.video_url) {
+        _dbg('SUCCESS — resolving');
         report('completed', 1.0, 'AI 비디오 생성 완료');
         finish(() => resolve({
           videoUrl: row.video_url!,
@@ -700,6 +708,7 @@ function waitForVideoCompletion(
       }
       if (row.status === 'FAILED') {
         const msg = row.error_message ?? 'Runway 비디오 생성에 실패했습니다.';
+        _dbg('FAILED — rejecting', { msg });
         report('error', 0, msg);
         finish(() => reject(new Error(msg)));
         return true;
@@ -722,6 +731,7 @@ function waitForVideoCompletion(
     const checkDb = async () => {
       if (settled || !scanId) return;
       try {
+        _dbg('checkDb:start');
         let query = supabase
           .from('video_jobs')
           .select('status, step, video_url, error_message')
@@ -734,11 +744,12 @@ function waitForVideoCompletion(
         }
         const { data, error } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
         if (error) throw new Error(error.message);
-        if (!data) return;
+        if (!data) { _dbg('checkDb:no-data'); return; }
         consecutivePollFailures = 0;
         handleRow(data as VideoJobRow);
       } catch (err) {
         consecutivePollFailures++;
+        _dbg('checkDb:error', { consecutivePollFailures, err: err instanceof Error ? err.message : String(err) });
         logError(err, { component: 'aiVideoPipeline', action: 'checkDb', extra: { consecutivePollFailures } });
         if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
           const msg = POLL_FAIL_MESSAGE;
@@ -752,14 +763,16 @@ function waitForVideoCompletion(
     const checkScanVideoUrl = async () => {
       if (settled || !scanId) return;
       try {
+        _dbg('checkScanVideoUrl:start');
         const { data, error } = await supabase
           .from('scans')
           .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        if (error || !data) return;
+        if (error || !data) { _dbg('checkScanVideoUrl:no-data'); return; }
         const finalUrl = data.muxed_video_url ?? data.video_url;
-        if (!finalUrl) return;
+        if (!finalUrl) { _dbg('checkScanVideoUrl:no-url'); return; }
+        _dbg('checkScanVideoUrl:FOUND', { url: finalUrl.slice(0, 80) });
         report('completed', 1.0, 'AI 비디오 생성 완료');
         finish(() => resolve({
           videoUrl: finalUrl,
@@ -772,6 +785,7 @@ function waitForVideoCompletion(
           provider: 'runway',
         }));
       } catch (err) {
+        _dbg('checkScanVideoUrl:error', { err: err instanceof Error ? err.message : String(err) });
         logError(err, { component: 'aiVideoPipeline', action: 'checkScanVideoUrl' });
       }
     };
@@ -781,6 +795,7 @@ function waitForVideoCompletion(
 
     const setupChannel = () => {
       if (settled || !scanId) return;
+      _dbg('setupChannel');
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
         channel = null;
@@ -805,6 +820,7 @@ function waitForVideoCompletion(
         )
         .subscribe((status: string) => {
           if (settled) return;
+          _dbg('channel:subscribe', { status });
           if (status === 'SUBSCRIBED') {
             channelHealth = ChannelHealth.HEALTHY;
             reconnectAttempts = 0;
@@ -822,10 +838,14 @@ function waitForVideoCompletion(
     };
 
     const scheduleReconnect = () => {
-      if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
+      if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) {
+        _dbg('scheduleReconnect:exhausted', { reconnectAttempts });
+        return;
+      }
       if (reconnectTimer) clearTimeout(reconnectTimer);
       const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts) * JITTER();
       reconnectAttempts++;
+      _dbg('scheduleReconnect', { attempt: reconnectAttempts, delayMs: Math.round(delayMs) });
       report('generating', 0.12, `실시간 연결이 불안정합니다. 재연결 시도 중 (${reconnectAttempts}/${CHANNEL_MAX_RECONNECT_ATTEMPTS})...`);
       reconnectTimer = setTimeout(() => {
         if (settled) return;
@@ -837,6 +857,7 @@ function waitForVideoCompletion(
       }, delayMs);
     };
 
+    _dbg('setupChannel:initial');
     setupChannel();
 
     // Safety-net: adaptive DB poll with exponential backoff.
@@ -880,6 +901,7 @@ function waitForVideoCompletion(
     // (runwayPollTimer declared early above for TDZ safety)
     const startRunwayPollFallback = () => {
       if (settled || runwayPollTimer) return;
+      _dbg('startRunwayPollFallback');
       // Skip Runway API direct poll when the task ID is a soft-fallback
       // placeholder — the real Runway task ID is unknown, so this poll
       // would always fail. The DB poll by scanId will catch the result.
@@ -902,7 +924,9 @@ function waitForVideoCompletion(
             scheduleNext(); return;
           }
           const resp = data as { status?: string; videoUrl?: string; error?: string };
+          _dbg('runwayPoll:resp', { status: resp.status, hasVideoUrl: !!resp.videoUrl });
           if (resp.status === 'SUCCESS' && resp.videoUrl) {
+            _dbg('runwayPoll:SUCCESS');
             report('completed', 1.0, 'AI 비디오 생성 완료');
             finish(() => resolve({
               videoUrl: resp.videoUrl!,
@@ -924,6 +948,7 @@ function waitForVideoCompletion(
           }
         } catch (err) {
           consecutivePollFailures++;
+          _dbg('runwayPoll:error', { consecutivePollFailures, err: err instanceof Error ? err.message : String(err) });
           addBreadcrumb('video', 'Runway poll fallback failed', 'warning', { taskId: submitData.taskId, consecutivePollFailures });
           logError(err, { component: 'aiVideoPipeline', action: 'runwayPollFallback' });
           if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
@@ -948,11 +973,13 @@ function waitForVideoCompletion(
     softWarnTimer = setTimeout(() => {
       if (settled) return;
       const elapsedSec = monotonicElapsedSec(startTime);
+      _dbg('softWarn', { elapsedSec });
       report('generating', 0.85, `렌더링이 조금 오래 걸리고 있어요 (${elapsedSec}초). 백그라운드에서 계속 진행 중입니다...`);
     }, REALTIME_SOFT_WARN_MS);
 
     // Overall timeout — 10 minutes. Don't orphan the job; inform the user.
     timeoutTimer = setTimeout(() => {
+      _dbg('HARD_TIMEOUT', { elapsedSec: monotonicElapsedSec(startTime) });
       const msg = `비디오 생성이 10분을 초과했습니다. 서버에서는 계속 렌더링 중일 수 있어요. 잠시 후 이 페이지를 다시 방문하면 완성된 영상을 확인할 수 있습니다.`;
       report('error', 0, msg);
       finish(() => reject(new Error(msg)));
@@ -965,6 +992,7 @@ function waitForVideoCompletion(
     const pauseBackground = () => {
       if (isBackgrounded || settled) return;
       isBackgrounded = true;
+      _dbg('pauseBackground');
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -1005,6 +1033,7 @@ function waitForVideoCompletion(
     const resumeBackground = () => {
       if (!isBackgrounded || settled) return;
       isBackgrounded = false;
+      _dbg('resumeBackground');
       if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
       pollBackoffAttempt = 0;
       reconnectAttempts = 0;
@@ -1031,6 +1060,7 @@ function waitForVideoCompletion(
     appSub = registerAppStateHandler('deferred', handleAppState);
 
     // Initial DB check in case the webhook already completed before we subscribed
+    _dbg('initial-check');
     checkDb();
     checkScanVideoUrl();
   });
@@ -1235,10 +1265,17 @@ export function subscribeVideoJob(
 
   const isSoftTaskId = taskId.startsWith('soft-') || taskId.startsWith('hd-soft-');
   const pollStartTime = Date.now();
+  const _dbg = (stage: string, extra?: unknown) => {
+    const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
+    console.log(`[aiVideoPipeline:subscribeVideoJob] t=${elapsedSec}s stage=${stage}`, extra ?? '');
+    addBreadcrumb('video', `subscribeVideoJob: ${stage}`, 'warning', { elapsedSec, ...(extra && typeof extra === 'object' ? extra as Record<string, unknown> : {}) });
+  };
+  _dbg('init', { scanId, taskId, isSoftTaskId });
 
   const checkAndNotify = async () => {
     if (settled) return;
     try {
+      _dbg('checkAndNotify:start');
       let query = supabase
         .from('video_jobs')
         .select('status, step, video_url, error_message')
@@ -1253,6 +1290,7 @@ export function subscribeVideoJob(
       const { data, error } = await query.maybeSingle();
       if (error) throw new Error(error.message);
       if (!data) {
+        _dbg('checkAndNotify:no-job-row');
         // No job row found — try scans.video_url as a fallback (webhook may
         // have completed without the video_jobs row being visible yet).
         try {
@@ -1263,6 +1301,7 @@ export function subscribeVideoJob(
             .maybeSingle();
           const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
           if (scanFinalUrl) {
+            _dbg('checkAndNotify:scan-fallback-SUCCESS');
             settled = true;
             cleanup();
             callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanFinalUrl });
@@ -1273,6 +1312,7 @@ export function subscribeVideoJob(
       }
       consecutivePollFailures = 0;
       const row = data as VideoJobRow;
+      _dbg('checkAndNotify:row', { status: row.status, step: row.step, hasVideoUrl: !!row.video_url });
       if (row.status === 'SUCCESS' && row.video_url) {
         settled = true;
         cleanup();
@@ -1280,6 +1320,7 @@ export function subscribeVideoJob(
         return;
       }
       if (row.status === 'FAILED') {
+        _dbg('checkAndNotify:FAILED');
         settled = true;
         cleanup();
         callback({ status: 'FAILED', step: row.step, progress: 0, error: row.error_message ?? '비디오 생성에 실패했습니다.' });
@@ -1296,6 +1337,7 @@ export function subscribeVideoJob(
           .maybeSingle();
         const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
         if (scanFinalUrl) {
+          _dbg('checkAndNotify:scan-video-url-SUCCESS');
           settled = true;
           cleanup();
           callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: scanFinalUrl });
@@ -1307,7 +1349,7 @@ export function subscribeVideoJob(
       // time-based creep, so the UI never freezes at a stale percentage.
       const stepProgress = stepToProgress(row.step);
       const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-      const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.97);
+      const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.99);
       const effectiveProgress = stepProgress != null
         ? Math.max(stepProgress, timeProgress)
         : timeProgress;
@@ -1318,6 +1360,7 @@ export function subscribeVideoJob(
       });
     } catch (err) {
       consecutivePollFailures++;
+      _dbg('checkAndNotify:error', { consecutivePollFailures, err: err instanceof Error ? err.message : String(err) });
       logError(err, { component: 'aiVideoPipeline', action: 'subscribeVideoJob.checkAndNotify', extra: { consecutivePollFailures } });
       if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
         settled = true;
@@ -1373,6 +1416,7 @@ export function subscribeVideoJob(
 
   const setupChannel = () => {
     if (settled) return;
+    _dbg('setupChannel');
     if (channel) {
       try { supabase.removeChannel(channel); } catch { /* ignore */ }
       channel = null;
@@ -1440,6 +1484,7 @@ export function subscribeVideoJob(
       )
       .subscribe((status: string) => {
         if (settled) return;
+        _dbg('channel:subscribe', { status });
         if (status === 'SUBSCRIBED') {
           channelHealth = ChannelHealth.HEALTHY;
           reconnectAttempts = 0;
@@ -1457,6 +1502,7 @@ export function subscribeVideoJob(
   const startRunwayPollFallback = () => {
     if (settled || runwayFallbackStarted || isSoftTaskId) return;
     runwayFallbackStarted = true;
+    _dbg('startRunwayPollFallback');
     const runwayPoll = async () => {
       if (settled) return;
       try {
@@ -1476,7 +1522,9 @@ export function subscribeVideoJob(
           }
         } else {
           const resp = data as { status?: string; videoUrl?: string; error?: string };
+          _dbg('runwayPoll:resp', { status: resp.status, hasVideoUrl: !!resp.videoUrl });
           if (resp.status === 'SUCCESS' && resp.videoUrl) {
+            _dbg('runwayPoll:SUCCESS');
             settled = true;
             cleanup();
             callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: resp.videoUrl });
@@ -1489,7 +1537,8 @@ export function subscribeVideoJob(
             return;
           }
         }
-      } catch {
+      } catch (err) {
+        _dbg('runwayPoll:error', { err: err instanceof Error ? err.message : String(err) });
         // non-fatal — DB poll will catch the result
       }
       if (!settled) {
@@ -1523,6 +1572,7 @@ export function subscribeVideoJob(
   // user stuck at a frozen progress percentage forever.
   const overallTimeoutTimer = setTimeout(() => {
     if (settled) return;
+    _dbg('HARD_TIMEOUT', { elapsedSec: Math.round((Date.now() - pollStartTime) / 1000) });
     checkAndNotify().then(() => {
       if (settled) return;
       settled = true;
@@ -1532,6 +1582,7 @@ export function subscribeVideoJob(
     });
   }, 600_000);
 
+  _dbg('initial-setup');
   setupChannel();
   scheduleNextPoll();
   checkAndNotify();

@@ -305,15 +305,17 @@ export function useResultPolling(
     const pollOnce = async () => {
       if (cancelled || settledRef.current) return;
 
-      // At 85%+, skip the edge function poll (which is redundant at this
-      // stage) but still do a DB force-sync to detect completion. Without
-      // this DB check, the only completion detector left is the Realtime
-      // websocket — which is unreliable on native (disconnects on background,
-      // network transitions, and memory pressure). This was the root cause
-      // of the 95-97% bottleneck: polling stopped at 85% and the Realtime
-      // websocket was the only path left, so if it dropped, the user was
-      // stuck until the 10-minute hard timeout.
+      // At 85%+, do BOTH the edge function poll AND a DB force-sync.
+      // The edge function poll queries Runway directly — this is critical
+      // because the server-poll self-reinvocation chain can break silently
+      // (network timeout, edge function cold start), leaving the DB stuck
+      // at PROCESSING forever. Without the edge function poll, the only
+      // completion paths left are the Realtime websocket (unreliable on
+      // native) and the webhook (which can also fail). This was the root
+      // cause of the 97% bottleneck: polling stopped calling the edge
+      // function at 85%+, so if server-poll broke, the job was stuck.
       if (highestProgressSeen >= 0.85) {
+        // First: DB force-sync (fast, catches webhook completions)
         const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
         if (cancelled || settledRef.current) return;
         if (dbResult) {
@@ -335,9 +337,34 @@ export function useResultPolling(
             if (settledRef.current) return;
           }
         }
+        // Second: edge function poll (queries Runway directly, can detect
+        // completion even when server-poll chain broke). Skip for soft
+        // task IDs — the edge function can't find them by fake ID.
+        if (!cancelled && !settledRef.current && !isSoftTaskId) {
+          try {
+            const { data: pollData } = await supabase.functions.invoke('generate-video', {
+              body: { mode: 'poll', taskId: jobId, scanId: scanId ?? undefined },
+            });
+            if (!cancelled && !settledRef.current && pollData && typeof pollData === 'object') {
+              const status = pollData.status as string;
+              if (status === 'SUCCESS' && pollData.videoUrl) {
+                handleResult(status, pollData.videoUrl as string);
+                if (settledRef.current) return;
+              } else if (status === 'FAILED') {
+                handleResult(status, null, (pollData.error as string) ?? undefined);
+                if (settledRef.current) return;
+              }
+            }
+          } catch {
+            // Edge function poll failed — DB sync above is the fallback
+          }
+        }
+        // Use a fast fixed interval at 85%+ — the job could complete at
+        // any moment, so 8s ensures we catch it quickly. The old code used
+        // hybridPoller.nextPollDelayMs() which backed off to 30s, causing
+        // users to wait 30+ seconds between checks at the critical moment.
         if (!cancelled && !settledRef.current) {
-          const delayMs = hybridPoller.nextPollDelayMs();
-          pollTimer = setTimeout(pollOnce, delayMs);
+          pollTimer = setTimeout(pollOnce, 8000);
         }
         return;
       }
