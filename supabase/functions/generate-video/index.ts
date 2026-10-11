@@ -408,6 +408,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
       durationSec,
       aspectRatio,
       isDraft,
+      draft: isDraft,
       hdUpscale,
       resolution,
       fps,
@@ -465,7 +466,10 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
 
   const aspectRatio = body.aspectRatio ?? "9:16";
   const durationSec = Math.min(Math.max(Math.round(body.durationSec ?? 5), 2), 30);
-  const isDraft = body.draft === true;
+  // The async submit payload uses both names across client/server boundaries.
+  // Preserve the original draft mode instead of silently upgrading a draft
+  // into the full render path, which can exceed the client timeout on native.
+  const isDraft = body.draft === true || body.isDraft === true;
   const hdUpscale = body.hdUpscale === true;
   // Drafts always use 720p/24fps even when HD is requested — the HD upgrade
   // stage handles the high-res pass separately.

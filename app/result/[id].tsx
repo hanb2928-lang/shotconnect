@@ -2311,7 +2311,10 @@ function ResultScreenInner() {
             if (mountedRef.current && !channel) connectChannel();
           });
         }
-      } else if (nextState === 'background' || nextState === 'inactive') {
+      } else if (nextState === 'background') {
+        // iOS uses inactive for transient interruptions such as Control Center
+        // and notification banners. Only full background should tear down this
+        // completion channel.
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         if (channel) {
           try { supabase.removeChannel(channel); } catch { /* ignore */ }
