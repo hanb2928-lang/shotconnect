@@ -770,7 +770,7 @@ function waitForVideoCompletion(
           .eq('id', scanId)
           .maybeSingle();
         if (error || !data) { _dbg('checkScanVideoUrl:no-data'); return; }
-        const finalUrl = data.muxed_video_url ?? data.video_url;
+        const finalUrl = data.muxed_video_url || data.video_url;
         if (!finalUrl) { _dbg('checkScanVideoUrl:no-url'); return; }
         _dbg('checkScanVideoUrl:FOUND', { url: finalUrl.slice(0, 80) });
         report('completed', 1.0, 'AI 비디오 생성 완료');
@@ -1299,7 +1299,7 @@ export function subscribeVideoJob(
             .select('video_url, muxed_video_url')
             .eq('id', scanId)
             .maybeSingle();
-          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
           if (scanFinalUrl) {
             _dbg('checkAndNotify:scan-fallback-SUCCESS');
             settled = true;
@@ -1335,7 +1335,7 @@ export function subscribeVideoJob(
           .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
         if (scanFinalUrl) {
           _dbg('checkAndNotify:scan-video-url-SUCCESS');
           settled = true;
@@ -1470,7 +1470,7 @@ export function subscribeVideoJob(
           if (isInFlushWindow()) return;
           try {
             const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-            const finalUrl = row.muxed_video_url ?? row.video_url;
+            const finalUrl = row.muxed_video_url || row.video_url;
             if (finalUrl) {
               if (settled) return;
               settled = true;
@@ -1539,7 +1539,14 @@ export function subscribeVideoJob(
         }
       } catch (err) {
         _dbg('runwayPoll:error', { err: err instanceof Error ? err.message : String(err) });
-        // non-fatal — DB poll will catch the result
+        consecutivePollFailures++;
+        if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          settled = true;
+          cleanup();
+          removeBgPause();
+          callback({ status: 'FAILED', error: POLL_FAIL_MESSAGE });
+          return;
+        }
       }
       if (!settled) {
         runwayPollTimer = setTimeout(runwayPoll, RUNWAY_POLL_FALLBACK_INTERVAL_MS);
@@ -1570,7 +1577,7 @@ export function subscribeVideoJob(
   // HARD_TIMEOUT_MS). After this, do one final check and if still not
   // complete, force a FAILED with a retry message instead of leaving the
   // user stuck at a frozen progress percentage forever.
-  const overallTimeoutTimer = setTimeout(() => {
+  let overallTimeoutTimer = setTimeout(() => {
     if (settled) return;
     _dbg('HARD_TIMEOUT', { elapsedSec: Math.round((Date.now() - pollStartTime) / 1000) });
     checkAndNotify().then(() => {
@@ -1603,6 +1610,21 @@ export function subscribeVideoJob(
     resume: () => {
       pollBackoffAttempt = 0;
       reconnectAttempts = 0;
+      // Re-arm the overall timeout — it was cleared on pause, and without
+      // it the poll loop has no iteration bound, causing the permanent
+      // 97-99% stall after a single background→foreground cycle.
+      if (overallTimeoutTimer) clearTimeout(overallTimeoutTimer);
+      overallTimeoutTimer = setTimeout(() => {
+        if (settled) return;
+        _dbg('HARD_TIMEOUT_AFTER_RESUME', { elapsedSec: Math.round((Date.now() - pollStartTime) / 1000) });
+        checkAndNotify().then(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          removeBgPause();
+          callback({ status: 'FAILED', error: '비디오 생성이 10분을 초과했습니다. 서버에서는 완료되었을 수 있어요. 잠시 후 결과 페이지를 다시 방문하면 완성된 영상을 확인할 수 있습니다.' });
+        });
+      }, 600_000);
       setupChannel();
       scheduleNextPoll();
       checkAndNotify();
@@ -1799,7 +1821,7 @@ export function subscribeHdUpgrade(
           .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
         if (scanFinalUrl) {
           settled = true;
           cleanup();
@@ -1928,7 +1950,7 @@ export function subscribeHdUpgrade(
 
   // Overall timeout — 5 minutes. Force a final check, then FAILED if still
   // not complete, instead of polling forever.
-  const hdOverallTimeoutTimer = setTimeout(() => {
+  let hdOverallTimeoutTimer = setTimeout(() => {
     if (settled) return;
     checkAndNotify().then(() => {
       if (settled) return;
@@ -1957,6 +1979,19 @@ export function subscribeHdUpgrade(
     resume: () => {
       pollBackoffAttempt = 0;
       reconnectAttempts = 0;
+      // Re-arm the overall timeout — it was cleared on pause, and without
+      // it the poll loop runs indefinitely after a background cycle.
+      if (hdOverallTimeoutTimer) clearTimeout(hdOverallTimeoutTimer);
+      hdOverallTimeoutTimer = setTimeout(() => {
+        if (settled) return;
+        checkAndNotify().then(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          removeBgPause();
+          callback({ status: 'FAILED', error: '고화질 업그레이드가 10분을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
+        });
+      }, 600_000);
       setupChannel();
       scheduleNextPoll();
       checkAndNotify();
@@ -2004,7 +2039,7 @@ export async function recoverVideoJob(
         .select('video_url, muxed_video_url')
         .eq('id', scanId)
         .maybeSingle();
-      const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+      const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
       if (scanFinalUrl) {
         return { videoUrl: scanFinalUrl, isHd: false, status: 'SUCCESS' };
       }

@@ -110,7 +110,12 @@ export function useResultPolling(
       if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
         const isStepChange = step !== null && step !== latestStepSeen;
         if (stepProg < highestProgressSeen && !isStepChange) return; // stale — reject
-        if (isStepChange) highestProgressSeen = stepProg;
+        // On step change, only update highestProgressSeen if the new step
+        // maps to a HIGHER progress. A stale Realtime payload carrying an
+        // older step (e.g. "submitting" arriving after "rendering") must
+        // not regress highestProgressSeen back below 0.85, which would
+        // re-activate the edge-function path and cause flapping.
+        if (isStepChange) highestProgressSeen = Math.max(highestProgressSeen, stepProg);
         else highestProgressSeen = Math.max(highestProgressSeen, stepProg);
         const elapsedSec = Math.round((Date.now() - startTime) / 1000);
         const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
@@ -183,7 +188,7 @@ export function useResultPolling(
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-              const finalUrl = row?.muxed_video_url ?? row?.video_url;
+              const finalUrl = row?.muxed_video_url || row?.video_url;
               if (finalUrl) {
                 handleResult('SUCCESS', finalUrl);
               }
@@ -267,7 +272,7 @@ export function useResultPolling(
             .select('video_url, muxed_video_url')
             .eq('id', scanId)
             .maybeSingle();
-          const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
           if (scanFinalUrl) {
             return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed', progress: 1.0 };
           }
@@ -283,7 +288,7 @@ export function useResultPolling(
           .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
         if (scanFinalUrl) {
           return { status: 'SUCCESS', videoUrl: scanFinalUrl, step: 'completed', progress: 1.0 };
         }
@@ -294,12 +299,17 @@ export function useResultPolling(
     };
 
     const handleResult = (status: string, videoUrl: string | null, errMsg?: string) => {
-      if (cancelled) return;
+      if (cancelled || settledRef.current) return;
       if (status === 'SUCCESS' && videoUrl) {
         settle('completed', undefined, videoUrl);
       } else if (status === 'FAILED') {
         settle('failed', errMsg ?? '영상 생성에 실패했습니다.');
       }
+      // If SUCCESS but videoUrl is null/empty, the server wrote the
+      // terminal status before the URL. Do NOT settle — keep polling so
+      // the next DB scan picks up the URL when it arrives. Without this,
+      // the DB-only 85%+ path loops every 6s until the 600s hard timeout,
+      // then reports "timeout" instead of completion.
     };
 
     const pollOnce = async () => {
@@ -384,7 +394,7 @@ export function useResultPolling(
           body: { mode: 'poll', taskId: jobId, scanId: scanId ?? undefined },
         });
 
-        if (pollAbort.signal.aborted || cancelled) return;
+        if (pollAbort.signal.aborted || cancelled || settledRef.current) return;
         if (pollData && typeof pollData === 'object') {
           // Do NOT reset the error window on a successful edge function response.
           // On a flaky network, sporadic successes would keep the count below
@@ -502,6 +512,7 @@ export function useResultPolling(
     // schedule. Only a single burst poll is fired (not 3) to avoid
     // contributing to the foreground thundering-herd — the normal poll
     // schedule resumes immediately after.
+    let resumeBurstAborted = false;
     const runResumeBurst = async () => {
       if (cancelled || settledRef.current) {
         resumeBurstTimer = null;
@@ -513,20 +524,29 @@ export function useResultPolling(
       // the DB directly to catch any completion that happened while
       // backgrounded. This fills the gap before the first poll cycle fires.
       const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
-      if (!cancelled && !settledRef.current && dbResult) {
+      if (cancelled || settledRef.current || resumeBurstAborted) { resumeBurstTimer = null; return; }
+      if (dbResult) {
+        if (dbResult.step) {
+          const sp = typeof dbResult.progress === 'number' && !isNaN(dbResult.progress) && dbResult.progress > 0
+            ? dbResult.progress
+            : stepToProgress(dbResult.step);
+          applyProgress(sp, dbResult.step);
+        }
         handleResult(dbResult.status, dbResult.videoUrl);
         if (settledRef.current) return;
       }
       // Also check scans.video_url — the webhook may have written the
       // result directly to scans without the video_jobs row updating.
-      if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
+      if (!cancelled && !settledRef.current && !resumeBurstAborted && scanId && !isSoftTaskId) {
         const scanResult = await forceSyncByScan();
-        if (!cancelled && !settledRef.current && scanResult) {
+        if (!cancelled && !settledRef.current && !resumeBurstAborted && scanResult) {
           handleResult(scanResult.status, scanResult.videoUrl);
           if (settledRef.current) return;
         }
       }
-      pollOnce();
+      if (!cancelled && !settledRef.current && !resumeBurstAborted) {
+        pollOnce();
+      }
       resumeBurstTimer = null;
     };
 
@@ -538,6 +558,7 @@ export function useResultPolling(
     const handleAppState = (nextState: string) => {
       if (nextState === 'active') {
         if (!cancelled && !settledRef.current) {
+          resumeBurstAborted = false;
           if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
           onFlushComplete(() => {
             if (cancelled || settledRef.current) return;
@@ -584,6 +605,7 @@ export function useResultPolling(
         // Realtime websocket so the OS can reclaim memory without
         // triggering orphaned-callback crashes or premature timeouts.
         bgEnterTime = Date.now();
+        resumeBurstAborted = true;
         pollAbort?.abort();
         forceSyncAbort?.abort();
         if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }

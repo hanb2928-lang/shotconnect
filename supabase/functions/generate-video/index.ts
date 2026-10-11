@@ -792,6 +792,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     }
     // Reschedule with buffer delay to give runway-submit time to persist the ID.
     // Includes retry-on-failure so a cold-start abort doesn't permanently break the chain.
+    const runwayIdWaitDelay = 7000;
     const rescheduleSelfInvoke = (retryNum: number) => {
       if (retryNum >= 3) {
         console.error(`[generate-video] server-poll runway-task-id wait exhausted retries for task ${taskId}`);
@@ -814,11 +815,11 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
           console.log(`[generate-video] server-poll runway-id-wait retry ${retryNum + 1}/3 in ${retryDelay}ms`);
           rescheduleSelfInvoke(retryNum + 1);
         });
-      }, bufferDelay);
+      }, runwayIdWaitDelay);
     };
     rescheduleSelfInvoke(0);
     return new Response(
-      JSON.stringify({ mode: "server-poll", status: "PROCESSING", progress: "Runway 작업 ID 대기 중...", taskId, nextPollInMs: bufferDelay, attempt: attempt + 1 }),
+      JSON.stringify({ mode: "server-poll", status: "PROCESSING", progress: "Runway 작업 ID 대기 중...", taskId, nextPollInMs: runwayIdWaitDelay, attempt: attempt + 1 }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }

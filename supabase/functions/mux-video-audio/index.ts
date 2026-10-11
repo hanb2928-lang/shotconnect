@@ -286,6 +286,9 @@ Deno.serve(async (req: Request) => {
       for (const f of ["input_video.mp4", "input_audio.mp3", "output.mp4"]) {
         try { await ffmpeg.deleteFile(f); } catch { /* already removed */ }
       }
+      // Always terminate the WASM worker to reclaim ~150-250MB of heap.
+      // Without this, every successful request leaks a full FFmpeg instance.
+      try { ffmpeg.terminate(); } catch { /* already terminated */ }
     };
 
     try {
@@ -445,7 +448,25 @@ Deno.serve(async (req: Request) => {
       }
 
       console.log("[mux-video-audio] Reading output.mp4 from virtual FS...");
-      const output = await ffmpeg.readFile("output.mp4");
+      // Guard readFile with a timeout — if the WASM worker is unresponsive
+      // after exec (partial OOM, stuck MEMFS), terminate and throw instead
+      // of hanging until the isolate is hard-killed at ~300s.
+      const READ_FILE_TIMEOUT_MS = 30_000;
+      let readTimedOut = false;
+      const readTimeout = setTimeout(() => {
+        readTimedOut = true;
+        console.error("[mux-video-audio] readFile TIMEOUT — terminating worker");
+        try { ffmpeg.terminate(); } catch { /* already terminated */ }
+      }, READ_FILE_TIMEOUT_MS);
+      let output: Uint8Array;
+      try {
+        output = await ffmpeg.readFile("output.mp4");
+      } finally {
+        clearTimeout(readTimeout);
+      }
+      if (readTimedOut) {
+        throw new Error("FFmpeg 출력 파일 읽기가 시간 초과되었습니다 (WASM 워커 응답 없음).");
+      }
       console.log(`[mux-video-audio] Output file read: ${output.byteLength} bytes`);
       const outputBlob = new Blob([output], { type: "video/mp4" });
 
@@ -465,6 +486,8 @@ Deno.serve(async (req: Request) => {
 
       // Start virtual FS cleanup concurrently with upload — no need to
       // await cleanup before starting the network transfer.
+      // cleanupFfmpeg now also terminates the worker, so fire it
+      // concurrently with the upload to reclaim memory during transfer.
       const cleanupPromise = cleanupFfmpeg();
 
       // Upload to Supabase Storage
@@ -552,7 +575,7 @@ Deno.serve(async (req: Request) => {
     const errMsg = err instanceof Error ? err.message : "알 수 없는 오류";
     console.error("[mux-video-audio] TOP-LEVEL ERROR:", errMsg, err instanceof Error ? err.stack : "");
     return new Response(
-      JSON.stringify({ error: `나레이션 합성 실패: ${errMsg}`, debugLog: debugLog.slice(-50) }),
+      JSON.stringify({ error: `나레이션 합성 실패: ${errMsg}` }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
