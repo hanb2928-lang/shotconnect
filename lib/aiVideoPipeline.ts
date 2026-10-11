@@ -645,6 +645,7 @@ function waitForVideoCompletion(
     let runwayFallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
     let isBackgrounded = false;
     let appSub: (() => void) | null = null;
+    let muxFallbackArmed = false;
 
     const cleanup = () => {
       if (channel) {
@@ -694,18 +695,11 @@ function waitForVideoCompletion(
     const handleRow = (row: VideoJobRow) => {
       _dbg('handleRow', { status: row.status, step: row.step, hasVideoUrl: !!row.video_url });
       if (row.status === 'SUCCESS' && row.video_url) {
-        _dbg('SUCCESS — resolving');
-        report('completed', 1.0, 'AI 비디오 생성 완료');
-        finish(() => resolve({
-          videoUrl: row.video_url!,
-          jobId: submitData.taskId,
-          motionPrompt: submitData.motionPrompt,
-          durationSec: submitData.durationSec,
-          aspectRatio: submitData.aspectRatio,
-          variationSeed: submitData.variationSeed,
-          persisted: true,
-          provider: 'runway',
-        }));
+        // Don't resolve immediately on raw video_url — muxing may still be
+        // running. Check scans.muxed_video_url first; if not ready, arm a
+        // 15s fallback to the raw URL (muxing isn't triggered for single
+        // videos, only multi-clip merges).
+        checkScanVideoUrl(row.video_url);
         return true;
       }
       if (row.status === 'FAILED') {
@@ -762,7 +756,7 @@ function waitForVideoCompletion(
     };
 
     // Also check scans.video_url for the persisted URL (webhook writes here too)
-    const checkScanVideoUrl = async () => {
+    const checkScanVideoUrl = async (rawFallbackUrl?: string) => {
       if (settled || !scanId) return;
       try {
         _dbg('checkScanVideoUrl:start');
@@ -772,20 +766,79 @@ function waitForVideoCompletion(
           .eq('id', scanId)
           .maybeSingle();
         if (error || !data) { _dbg('checkScanVideoUrl:no-data'); return; }
-        const finalUrl = data.muxed_video_url || data.video_url;
-        if (!finalUrl) { _dbg('checkScanVideoUrl:no-url'); return; }
-        _dbg('checkScanVideoUrl:FOUND', { url: finalUrl.slice(0, 80) });
-        report('completed', 1.0, 'AI 비디오 생성 완료');
-        finish(() => resolve({
-          videoUrl: finalUrl,
-          jobId: submitData.taskId,
-          motionPrompt: submitData.motionPrompt,
-          durationSec: submitData.durationSec,
-          aspectRatio: submitData.aspectRatio,
-          variationSeed: submitData.variationSeed,
-          persisted: true,
-          provider: 'runway',
-        }));
+        const finalUrl = data.muxed_video_url;
+        if (finalUrl) {
+          _dbg('checkScanVideoUrl:FOUND muxed', { url: finalUrl.slice(0, 80) });
+          report('completed', 1.0, 'AI 비디오 생성 완료');
+          finish(() => resolve({
+            videoUrl: finalUrl,
+            jobId: submitData.taskId,
+            motionPrompt: submitData.motionPrompt,
+            durationSec: submitData.durationSec,
+            aspectRatio: submitData.aspectRatio,
+            variationSeed: submitData.variationSeed,
+            persisted: true,
+            provider: 'runway',
+          }));
+          return;
+        }
+        // muxed_video_url not ready. If we have a raw fallback URL, wait
+        // 15s for muxed to arrive, then fall back to raw.
+        if (rawFallbackUrl && !muxFallbackArmed) {
+          muxFallbackArmed = true;
+          report('generating', 0.97, '영상 렌더링 완료! 음성 합성 중...');
+          setTimeout(() => {
+            if (settled) return;
+            // Re-check muxed one more time
+            supabase.from('scans').select('muxed_video_url').eq('id', scanId).maybeSingle()
+              .then(
+                ({ data: recheck }: { data: { muxed_video_url?: string | null } | null }) => {
+                  if (settled) return;
+                  const muxed = recheck?.muxed_video_url;
+                  if (muxed) {
+                    report('completed', 1.0, 'AI 비디오 생성 완료');
+                    finish(() => resolve({
+                      videoUrl: muxed,
+                      jobId: submitData.taskId,
+                      motionPrompt: submitData.motionPrompt,
+                      durationSec: submitData.durationSec,
+                      aspectRatio: submitData.aspectRatio,
+                      variationSeed: submitData.variationSeed,
+                      persisted: true,
+                      provider: 'runway',
+                    }));
+                  } else {
+                    _dbg('checkScanVideoUrl:fallback-to-raw');
+                    report('completed', 1.0, 'AI 비디오 생성 완료');
+                    finish(() => resolve({
+                      videoUrl: rawFallbackUrl,
+                      jobId: submitData.taskId,
+                      motionPrompt: submitData.motionPrompt,
+                      durationSec: submitData.durationSec,
+                      aspectRatio: submitData.aspectRatio,
+                      variationSeed: submitData.variationSeed,
+                      persisted: true,
+                      provider: 'runway',
+                    }));
+                  }
+                },
+                () => {
+                  if (settled) return;
+                  report('completed', 1.0, 'AI 비디오 생성 완료');
+                  finish(() => resolve({
+                    videoUrl: rawFallbackUrl,
+                    jobId: submitData.taskId,
+                    motionPrompt: submitData.motionPrompt,
+                    durationSec: submitData.durationSec,
+                    aspectRatio: submitData.aspectRatio,
+                    variationSeed: submitData.variationSeed,
+                    persisted: true,
+                    provider: 'runway',
+                  }));
+                },
+              );
+          }, 15_000);
+        }
       } catch (err) {
         _dbg('checkScanVideoUrl:error', { err: err instanceof Error ? err.message : String(err) });
         logError(err, { component: 'aiVideoPipeline', action: 'checkScanVideoUrl' });

@@ -99,6 +99,14 @@ export function useResultPolling(
     const pollErrorWindow: number[] = [];
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
+    // Muxing fallback: if video_jobs reaches SUCCESS but muxed_video_url
+    // never arrives (the mux-video-audio edge function is only invoked from
+    // the multi-clip merge path, not the standard single-video pipeline),
+    // fall back to the raw video_url after 15s. Without this, the poll
+    // would loop at 97% until the 240s hard timeout.
+    let muxingFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let rawVideoUrlForFallback: string | null = null;
+    const MUX_FALLBACK_MS = 15_000;
     // Monotonic guard: track the highest progress and latest step seen
     // across both realtime and polling. Stale realtime payloads that arrive
     // after a newer poll result (common on background→foreground transition)
@@ -166,8 +174,9 @@ export function useResultPolling(
               if (!row || typeof row.status !== 'string') return;
               if (row.status === 'SUCCESS') {
                 // Video render done — muxing (audio merge) may still be
-                // running. Show muxing message; scans table callback will
-                // deliver the final muxed_video_url.
+                // running. Arm fallback with raw URL in case muxed_video_url
+                // never arrives (single-video path doesn't trigger muxing).
+                if (row.video_url) armMuxFallback(row.video_url);
                 setProgressMessage('영상 렌더링 완료! 음성 합성 중...');
                 applyProgress(0.97, 'muxing');
               } else if (row.status === 'FAILED') {
@@ -228,12 +237,28 @@ export function useResultPolling(
       // Realtime unavailable — polling still works as fallback
     }
 
+    const armMuxFallback = (rawUrl: string) => {
+      if (muxingFallbackTimer || settledRef.current || cancelled) return;
+      rawVideoUrlForFallback = rawUrl;
+      muxingFallbackTimer = setTimeout(() => {
+        if (cancelled || settledRef.current) return;
+        // muxed_video_url never arrived — the mux-video-audio edge function
+        // is only invoked from the multi-clip merge path, not the standard
+        // single-video pipeline. Fall back to the raw video_url.
+        if (rawVideoUrlForFallback) {
+          setProgressMessage('영상 생성 완료');
+          settle('completed', undefined, rawVideoUrlForFallback);
+        }
+      }, MUX_FALLBACK_MS);
+    };
+
     const cleanup = () => {
       cancelled = true;
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+      if (muxingFallbackTimer) clearTimeout(muxingFallbackTimer);
       if (realtimeChannel) {
         try { supabase.removeChannel(realtimeChannel); } catch { /* ignore */ }
         realtimeChannel = null;
@@ -271,8 +296,9 @@ export function useResultPolling(
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
         if (row.status === 'SUCCESS') {
-          // Render is done but muxing may still be running. Don't return
-          // the raw video_url — wait for muxed_video_url on the next poll.
+          // Render is done but muxing may still be running. Capture the
+          // raw video_url for fallback and signal muxing state.
+          if (row.video_url) armMuxFallback(row.video_url);
           return { status: 'SUCCESS', videoUrl: null, step: 'muxing', progress: 0.97, isMuxing: true };
         }
         return { status: row.status, videoUrl: null, step: row.step, progress: row.progress };
@@ -307,9 +333,6 @@ export function useResultPolling(
           if (muxedUrl) {
             return { status: 'SUCCESS', videoUrl: muxedUrl, step: 'completed', progress: 1.0 };
           }
-          // scans.video_url may exist before muxing completes — it's the
-          // raw video without audio. Don't settle on it; keep polling for
-          // muxed_video_url.
         }
 
         // Check video_jobs for progress/step info and terminal status.
@@ -329,8 +352,8 @@ export function useResultPolling(
 
         if (row.status === 'SUCCESS') {
           // Video render is done but muxing (audio merge) may still be
-          // running. Signal muxing state so the UI can show a message
-          // instead of silently looping until the hard timeout.
+          // running. Capture raw URL for fallback.
+          if (row.video_url) armMuxFallback(row.video_url);
           return { status: 'SUCCESS', videoUrl: null, step: 'muxing', progress: 0.97, isMuxing: true };
         }
 
