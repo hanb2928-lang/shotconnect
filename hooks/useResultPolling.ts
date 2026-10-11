@@ -211,7 +211,7 @@ export function useResultPolling(
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-              const finalUrl = row?.muxed_video_url;
+              const finalUrl = row?.muxed_video_url ?? row?.video_url;
               if (finalUrl) {
                 handleResult('SUCCESS', finalUrl);
               }
@@ -283,8 +283,9 @@ export function useResultPolling(
             .eq('id', scanId)
             .maybeSingle();
           if (forceSyncAbort.signal.aborted) return null;
-          if (scanData?.muxed_video_url) {
-            return { status: 'SUCCESS', videoUrl: scanData.muxed_video_url, step: 'completed', progress: 1.0 };
+          const finalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          if (finalUrl) {
+            return { status: 'SUCCESS', videoUrl: finalUrl, step: 'completed', progress: 1.0 };
           }
         }
         let query = supabase
@@ -329,9 +330,9 @@ export function useResultPolling(
           .maybeSingle();
         if (forceSyncAbort.signal.aborted) return null;
         if (scanData) {
-          const muxedUrl = scanData.muxed_video_url;
-          if (muxedUrl) {
-            return { status: 'SUCCESS', videoUrl: muxedUrl, step: 'completed', progress: 1.0 };
+          const finalUrl = scanData.muxed_video_url ?? scanData.video_url;
+          if (finalUrl) {
+            return { status: 'SUCCESS', videoUrl: finalUrl, step: 'completed', progress: 1.0 };
           }
         }
 
