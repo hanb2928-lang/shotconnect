@@ -619,7 +619,10 @@ function waitForVideoCompletion(
     let appSub: (() => void) | null = null;
 
     const cleanup = () => {
-      if (channel) supabase.removeChannel(channel);
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
@@ -1322,7 +1325,10 @@ export function subscribeVideoJob(
   };
 
   const cleanup = () => {
-    if (channel) supabase.removeChannel(channel);
+    if (channel) {
+      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      channel = null;
+    }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (runwayPollTimer) clearTimeout(runwayPollTimer);
@@ -1755,7 +1761,10 @@ export function subscribeHdUpgrade(
   };
 
   const cleanup = () => {
-    if (channel) supabase.removeChannel(channel);
+    if (channel) {
+      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      channel = null;
+    }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (resumeBurstTimer) clearTimeout(resumeBurstTimer);

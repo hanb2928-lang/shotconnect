@@ -217,6 +217,7 @@ export function useResultPolling(
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
       if (realtimeChannel) {
         try { supabase.removeChannel(realtimeChannel); } catch { /* ignore */ }
+        realtimeChannel = null;
       }
       pollAbort?.abort();
       forceSyncAbort?.abort();

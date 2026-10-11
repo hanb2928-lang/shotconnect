@@ -147,6 +147,7 @@ export async function waitForJob<T = Record<string, unknown>>(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* channel already closed */ }
+        channel = undefined;
       }
     };
 

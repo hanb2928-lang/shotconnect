@@ -492,6 +492,8 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
     if (supabaseUrl && serviceRoleKey) {
       setTimeout(() => {
         const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
         fetch(selfUrl, {
           method: "POST",
           headers: {
@@ -505,7 +507,9 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
             scanId,
             variationSeed: 0,
           }),
-        }).catch(() => {
+          signal: controller.signal,
+        }).then(() => clearTimeout(timeoutId)).catch(() => {
+          clearTimeout(timeoutId);
           // Non-fatal — zombie-job guard will catch it if this fails.
         });
       }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS);
@@ -1143,16 +1147,23 @@ async function persistVideoInBackground(originalUrl: string, scanId: string, tas
     const persistedUrl = await uploadToStorage(originalUrl, scanId);
     if (persistedUrl) {
       await updateScanWithVideo(scanId, persistedUrl);
-      await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
-        method: "PATCH",
-        headers: {
-          apikey: serviceRoleKey,
-          Authorization: `Bearer ${serviceRoleKey}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({ video_url: persistedUrl }),
-      });
+      const persistController = new AbortController();
+      const persistTimeoutId = setTimeout(() => persistController.abort(), 10000);
+      try {
+        await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+          method: "PATCH",
+          headers: {
+            apikey: serviceRoleKey,
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({ video_url: persistedUrl }),
+          signal: persistController.signal,
+        });
+      } finally {
+        clearTimeout(persistTimeoutId);
+      }
     }
   } catch {
     // Background upload failed — the original Runway URL is already stored

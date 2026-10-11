@@ -1989,6 +1989,7 @@ function ResultScreenInner() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
       }
       bgVideoChannelRef.current = null;
       unsubHandler();
@@ -2319,6 +2320,7 @@ function ResultScreenInner() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
       }
       unsubHandler();
       unsubRecovery();
