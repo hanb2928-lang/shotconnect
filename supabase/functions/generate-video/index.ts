@@ -877,19 +877,42 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
   const runwayStep = RUNWAY_STATUS_TO_STEP[status.status] ?? "rendering";
   await updateVideoJobStep(scanId, internalJobId, runwayStep);
 
-  // Schedule the next poll via self-reinvocation
-  // Exponential backoff with full jitter to desynchronize concurrent jobs
+  // === SINGLE-SOURCE POLLING ARCHITECTURE ===
+  // Once the job reaches "rendering" (85%+), STOP the server-poll self-
+  // reinvocation chain. The client's DB-scan polling loop takes over as
+  // the sole completion detector. This eliminates the ping-pong where
+  // both server and client race to update the same DB row, causing
+  // bridge saturation and the 97% stall.
+  //
+  // The server still does ONE final poll per invocation (the
+  // pollRunwayTask call above) so the webhook or a one-shot server-poll
+  // can still catch completion — but it no longer chains indefinitely.
+  // The zombie guard (ZOMBIE_JOB_TIMEOUT_MS) remains as the safety net.
+  const isRendering = runwayStep === "rendering";
+
+  if (isRendering) {
+    console.log(`[generate-video] server-poll: job ${taskId} reached rendering — stopping self-chain, client polling takes over`);
+    return new Response(
+      JSON.stringify({
+        mode: "server-poll",
+        status: "PROCESSING",
+        progress: status.progress ?? "",
+        step: runwayStep,
+        taskId,
+        serverPollHalted: true,
+        message: "서버 폴링 종료 — 클라이언트 단독 폴링 전환",
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  // Pre-rendering phases (submitting, queued, throttled): continue the
+  // self-reinvocation chain to push the job through to rendering.
   const baseDelay = Math.min(SERVER_POLL_INITIAL_DELAY_MS * Math.pow(1.5, attempt), SERVER_POLL_MAX_DELAY_MS);
   const jitter = Math.random() * JITTER_MAX_MS;
   const nextDelay = Math.round(baseDelay + jitter);
   const nextAttempt = attempt + 1;
 
-  // Fire-and-forget self-reinvoke after delay with AbortController guard.
-  // Includes retry-on-failure: if the self-reinvocation fetch fails (cold
-  // start, network timeout, abort), retry up to 3 times with increasing
-  // delay. Without this, a single failed self-invoke permanently breaks
-  // the server-poll chain, leaving the DB stuck at PROCESSING forever —
-  // the #1 cause of the 97% stall.
   const selfInvokeWithRetry = (attemptNum: number, retryNum: number) => {
     if (retryNum >= 3) {
       console.error(`[generate-video] server-poll self-invoke exhausted retries for task ${taskId} — zombie guard will catch it`);
@@ -916,7 +939,6 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
       clearTimeout(timeoutId);
     }).catch(() => {
       clearTimeout(timeoutId);
-      // Retry with exponential backoff: 5s, 10s, 20s
       const retryDelay = 5000 * Math.pow(2, retryNum);
       console.log(`[generate-video] server-poll self-invoke retry ${retryNum + 1}/3 in ${retryDelay}ms for task ${taskId}`);
       setTimeout(() => selfInvokeWithRetry(attemptNum, retryNum + 1), retryDelay);

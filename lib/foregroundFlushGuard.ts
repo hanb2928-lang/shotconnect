@@ -36,12 +36,13 @@ export function armFlushWindow(): void {
     flushWindowActive = false;
     flushTimer = null;
     const cbs = completionCallbacks.splice(0);
-    // Stagger callbacks across sequential macrotasks with 80ms spacing so the
-    // JS thread yields to the OS between each consumer's DB queries. Firing
-    // all callbacks in rapid setTimeout(0) succession recreates the thundering
-    // herd the flush window was designed to prevent — 8+ concurrent DB queries
-    // + 2+ Realtime channel subscriptions hit the bridge simultaneously.
-    const STAGGER_MS = 80;
+    // Stagger callbacks across sequential macrotasks with 150ms spacing so the
+    // JS thread yields to the OS between each consumer's DB queries and
+    // Realtime subscriptions. 80ms was too tight — the native bridge was
+    // still saturated when the next callback fired, causing reconnect storms
+    // and ANR/watchdog kills. 150ms ensures each bridge operation fully
+    // completes before the next one starts.
+    const STAGGER_MS = 150;
     let i = 0;
     const runNext = () => {
       if (i >= cbs.length) return;
