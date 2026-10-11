@@ -84,7 +84,7 @@ const SERVER_POLL_INITIAL_DELAY_MS = 2000;
 const SERVER_POLL_MAX_DELAY_MS = 5000;
 const SERVER_POLL_SELF_INVOKE_TIMEOUT_MS = 15000; // AbortController timeout for self-reinvocation fetch
 const JITTER_MAX_MS = 2000; // Random jitter added to each backoff delay to desynchronize concurrent polls
-const FIRST_POLL_BUFFER_MS = 5000; // Grace period before first Runway poll — gives the async submit + DB write enough time to propagate the real runway_task_id
+const FIRST_POLL_BUFFER_MS = 2000; // Grace period before first Runway poll — runway_task_id propagates within ~2s
 const VIDEO_DAILY_LIMIT = 10; // Max AI video generations per IP per day
 
 const VIDEO_UNKNOWN_PATTERNS = [
@@ -391,10 +391,9 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   });
   console.log("[generate-video] Prompt length:", runwayPrompt.length, "| tokens:", modeTokens.length);
 
-  // Advance through intermediate steps so the client sees granular progress
-  // via Realtime instead of jumping from "analyzing" to "rendering".
+  // Write "planning" step directly — skips the redundant "hooking" write
+  // that was immediately overwritten, saving 1 DB round-trip per submission.
   if (body.scanId) {
-    await updateVideoJobStep(body.scanId, internalJobId, "hooking");
     await updateVideoJobStep(body.scanId, internalJobId, "planning");
   }
 
@@ -557,7 +556,10 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
   }
 
   if (body.scanId) {
-    const cached = await checkWebhookResult(body.scanId);
+    const [cached, jobStatus] = await Promise.all([
+      checkWebhookResult(body.scanId),
+      checkVideoJobStatus(body.scanId, taskId),
+    ]);
     if (cached) {
       return new Response(
         JSON.stringify({
@@ -572,7 +574,6 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
       );
     }
 
-    const jobStatus = await checkVideoJobStatus(body.scanId, taskId);
     if (jobStatus?.status === "FAILED") {
       return new Response(
         JSON.stringify({
@@ -1068,10 +1069,12 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
     const internalJobId = fallbackJob?.internalJobId ?? taskId;
 
     if (supabaseUrl && serviceRoleKey) {
-      await markVideoJobComplete(scanId, internalJobId, videoUrl);
+      await Promise.all([
+        markVideoJobComplete(scanId, internalJobId, videoUrl),
+        sendVideoCompletePush(scanId),
+      ]);
     }
     persistVideoInBackground(videoUrl, scanId, internalJobId);
-    await sendVideoCompletePush(scanId);
 
     console.log("[generate-video] Webhook: video persisted for scan", scanId);
     return new Response(

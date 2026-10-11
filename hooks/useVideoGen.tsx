@@ -144,37 +144,34 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         await ensureFreshSession();
         const isSoft = active.jobId.startsWith('soft-') || active.jobId.startsWith('hd-soft-');
 
-        // First: check scans.video_url / muxed_video_url — the webhook
-        // writes here directly and it's the most reliable completion signal.
-        // If the result is already there, clear local and show the result
-        // without entering a phantom generating state.
-        if (active.scanId) {
-          const { data: scanData } = await supabase
-            .from('scans')
-            .select('video_url, muxed_video_url')
-            .eq('id', active.scanId)
-            .maybeSingle();
-          if (cancelled) return;
-          const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
-          if (scanFinalUrl) {
-            clearActiveVideoJob();
-            if (active.jobId.startsWith('hd-')) {
-              outputModeRef.current = 'video';
-            }
-            setResultVideoUrl(scanFinalUrl);
-            serverProgRef.current = 1.0;
-            setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
-            notifyVideoCompleted();
-            return;
+        // Fire both queries in parallel — saves ~200-400ms of sequential DB round-trips.
+        const scanPromise = active.scanId
+          ? supabase.from('scans').select('video_url, muxed_video_url').eq('id', active.scanId).maybeSingle()
+          : Promise.resolve({ data: null } as any);
+        let vjQuery = supabase.from('video_jobs').select('status, video_url, error_message');
+        const vjPromise = isSoft && active.scanId
+          ? vjQuery.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+          : vjQuery.eq('task_id', active.jobId).maybeSingle();
+        const [scanResult, vjResult] = await Promise.all([scanPromise, vjPromise]);
+        if (cancelled) return;
+
+        // Check scans first — the webhook writes here directly and it's the
+        // most reliable completion signal.
+        const scanFinalUrl = scanResult.data?.muxed_video_url || scanResult.data?.video_url;
+        if (scanFinalUrl) {
+          clearActiveVideoJob();
+          if (active.jobId.startsWith('hd-')) {
+            outputModeRef.current = 'video';
           }
+          setResultVideoUrl(scanFinalUrl);
+          serverProgRef.current = 1.0;
+          setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
+          notifyVideoCompleted();
+          return;
         }
 
-        // Second: check video_jobs for the authoritative status.
-        let query = supabase.from('video_jobs').select('status, video_url, error_message');
-        const { data, error: dbError } = isSoft && active.scanId
-          ? await query.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
-          : await query.eq('task_id', active.jobId).maybeSingle();
-        if (cancelled) return;
+        // Then check video_jobs for the authoritative status.
+        const { data, error: dbError } = vjResult;
         if (dbError) return;
         if (!data) {
           clearActiveVideoJob();
@@ -990,12 +987,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       simTimerRef.current = null;
       jobIdRef.current = submitResult.taskId;
       setJobId(submitResult.taskId);
-      try {
-        await saveActiveVideoJob(submitResult.taskId, 'submitting', scanIdRef.current);
-      } catch {
+      saveActiveVideoJob(submitResult.taskId, 'submitting', scanIdRef.current).catch(() => {
         // Persistence failed — job is still submitted and polling works
         // via in-memory jobIdRef. Don't throw; the job isn't lost.
-      }
+      });
       setVideoProgress({ phase: 'generating', progress: 0.15, message: 'AI가 영상을 렌더링하고 있어요...', elapsedSec: 0 });
     } catch (err) {
       if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; }

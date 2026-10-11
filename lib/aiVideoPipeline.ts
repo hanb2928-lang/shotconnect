@@ -2023,7 +2023,7 @@ export function subscribeHdUpgrade(
     }, interval);
   };
 
-  // Overall timeout — 5 minutes. Force a final check, then FAILED if still
+  // Overall timeout — 4 minutes (240000ms). Force a final check, then FAILED if still
   // not complete, instead of polling forever.
   let hdOverallTimeoutTimer = setTimeout(() => {
     if (settled) return;
