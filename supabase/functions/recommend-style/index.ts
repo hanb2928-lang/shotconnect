@@ -105,31 +105,6 @@ Deno.serve(async (req: Request) => {
 async function resolveOpenAIKey(): Promise<string | null> {
   const serverKey = Deno.env.get("OPENAI_API_KEY");
   if (serverKey) return serverKey;
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-
-  if (supabaseUrl && serviceRoleKey) {
-    try {
-      // Row id=1 is the shared/global OpenAI key for this project. All users
-      // share this key when no per-user key is configured via environment.
-      const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
-  const resp = await fetch(`${supabaseUrl}/rest/v1/user_settings?select=openai_api_key&order=updated_at.desc&limit=1`, {
-        headers: {
-          apikey: serviceRoleKey,
-          Authorization: `Bearer ${serviceRoleKey}`,
-        },
-      });
-      if (resp.ok) {
-        const rows = await resp.json() as Array<{ openai_api_key: string | null }>;
-        const dbKey = rows[0]?.openai_api_key;
-        if (dbKey) return dbKey;
-      }
-    } catch {
-      // no fallback beyond env
-    }
-  }
   return null;
 }
 

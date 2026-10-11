@@ -96,29 +96,45 @@ export async function updateTierStats(
     const tier = await getOrCreateTier();
     if (!tier) return null;
 
-    const newScans = tier.total_scans + scansDelta;
-    const newClicks = tier.total_clicks + clicksDelta;
-    const newRevenue = tier.total_revenue + revenueDelta;
-    const newPoints = calculateTierPoints(newScans, newClicks, newRevenue);
-    const newLevel = determineTier(newPoints);
-
+    // Use atomic increment via RPC to avoid lost updates from concurrent calls.
+    // The read-modify-write pattern (read tier, compute in JS, write absolute
+    // values) loses increments when two events fire simultaneously.
     const { data, error } = await supabase
-      .from('creator_tier')
-      .update({
-        total_scans: newScans,
-        total_clicks: newClicks,
-        total_revenue: newRevenue,
-        tier_points: newPoints,
-        tier_level: newLevel,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1)
-      .select()
-      .single();
+      .rpc('bump_tier_stats', {
+        p_scans_delta: scansDelta,
+        p_clicks_delta: clicksDelta,
+        p_revenue_delta: revenueDelta,
+      });
 
-    if (error || !data) return null;
+    if (error || !data) {
+      // Fallback: compute from current tier values (may lose concurrent updates)
+      const newScans = tier.total_scans + scansDelta;
+      const newClicks = tier.total_clicks + clicksDelta;
+      const newRevenue = tier.total_revenue + revenueDelta;
+      const newPoints = calculateTierPoints(newScans, newClicks, newRevenue);
+      const newLevel = determineTier(newPoints);
+
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('creator_tier')
+        .update({
+          total_scans: newScans,
+          total_clicks: newClicks,
+          total_revenue: newRevenue,
+          tier_points: newPoints,
+          tier_level: newLevel,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 1)
+        .select()
+        .single();
+
+      if (fallbackError || !fallbackData) return null;
+      return fallbackData as CreatorTier;
+    }
+
     return data as CreatorTier;
-  } catch {
+  } catch (err) {
+    console.error('[creatorTier] updateTierStats error:', err);
     return null;
   }
 }

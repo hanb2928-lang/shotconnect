@@ -116,18 +116,13 @@ function buildProgressMap(states: FileUploadState[]): BatchUploadProgress {
   };
 }
 
-async function uploadSingleChunk(
+async function uploadWholeFile(
   data: Uint8Array,
-  offset: number,
-  chunkSize: number,
   bucket: string,
   path: string,
   mimeType: string,
-  totalSize: number,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const chunk = data.subarray(offset, Math.min(offset + chunkSize, totalSize));
-  const isLastChunk = offset + chunkSize >= totalSize;
   const safePath = path.split('/').map(encodeURIComponent).join('/');
   const url = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
 
@@ -135,30 +130,26 @@ async function uploadSingleChunk(
   const headers: Record<string, string> = {
     ...authHeaders,
     'Content-Type': mimeType,
-    'Content-Range': `bytes ${offset}-${offset + chunk.byteLength - 1}/${totalSize}`,
     'x-upsert': 'true',
   };
 
-  if (isLastChunk) {
-    headers['x-upsert'] = 'true';
-  }
-
   const controller = new AbortController();
+  const onAbort = () => controller.abort();
   if (signal) {
     if (signal.aborted) { controller.abort(); return false; }
-    signal.addEventListener('abort', () => controller.abort(), { once: true });
+    signal.addEventListener('abort', onAbort, { once: true });
   }
 
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
   try {
     let fetchBody: BodyInit;
     if (Platform.OS === 'web') {
-      fetchBody = new Blob([chunk as BlobPart], { type: mimeType });
+      fetchBody = new Blob([data as BlobPart], { type: mimeType });
     } else {
-      fetchBody = (chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength
-        ? chunk
-        : chunk.slice()) as BodyInit;
+      fetchBody = (data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+        ? data
+        : data.slice()) as BodyInit;
     }
 
     const resp = await fetch(url, {
@@ -170,8 +161,8 @@ async function uploadSingleChunk(
 
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
-      addBreadcrumb('upload', `Chunk upload failed (${resp.status})`, 'warning', {
-        bucket, path, offset, status: resp.status,
+      addBreadcrumb('upload', `Upload failed (${resp.status})`, 'warning', {
+        bucket, path, status: resp.status, respBody: text.slice(0, 200),
       });
       return false;
     }
@@ -181,70 +172,68 @@ async function uploadSingleChunk(
     return false;
   } finally {
     clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
-async function uploadFileResumable(
+async function uploadFileWithRetry(
   state: FileUploadState,
-  chunkSize: number,
   signal?: AbortSignal,
-  onChunkProgress?: () => void,
+  onProgress?: () => void,
 ): Promise<string> {
   const { item } = state;
   const totalSize = item.data.byteLength;
 
+  if (totalSize === 0) {
+    throw new Error('빈 파일은 업로드할 수 없습니다.');
+  }
+
   for (let attempt = 0; attempt < MAX_CHUNK_RETRIES; attempt++) {
     if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
 
-    // Find next unuploaded chunk
-    const nextChunk = state.chunks.find((c) => !c.uploaded);
-    if (!nextChunk) {
-      const safePath = item.path.split('/').map(encodeURIComponent).join('/');
-      return `${supabaseUrl}/storage/v1/object/public/${item.bucket}/${safePath}`;
-    }
-
     if (isUploadCircuitOpen()) {
       state.status = 'paused';
+      onProgress?.();
       await new Promise((r) => setTimeout(r, 1000));
       if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+      attempt = -1; // don't consume retry budget while waiting for circuit
       continue;
     }
 
     if (!isOnline()) {
       state.status = 'paused';
+      onProgress?.();
       const recovered = await waitForNetwork(signal);
       if (!recovered) throw new Error('네트워크 연결이 끊겨 업로드를 재개할 수 없습니다.');
       state.status = 'uploading';
-      attempt = -1; // reset retry counter after network recovery
+      attempt = -1;
       continue;
     }
 
     state.status = 'uploading';
-    const success = await uploadSingleChunk(
+    onProgress?.();
+
+    const success = await uploadWholeFile(
       item.data,
-      nextChunk.offset,
-      chunkSize,
       item.bucket,
       item.path,
       item.mimeType,
-      totalSize,
       signal,
     );
 
     if (success) {
-      nextChunk.uploaded = true;
-      state.uploadedBytes += nextChunk.size;
-      attempt = -1; // reset retry counter on success
-      onChunkProgress?.();
-    } else {
-      recordUploadFailure();
-      if (attempt < MAX_CHUNK_RETRIES - 1) {
-        await new Promise((r) => setTimeout(r, chunkBackoff(attempt)));
-      }
+      state.uploadedBytes = totalSize;
+      const safePath = item.path.split('/').map(encodeURIComponent).join('/');
+      return `${supabaseUrl}/storage/v1/object/public/${item.bucket}/${safePath}`;
+    }
+
+    recordUploadFailure();
+    if (attempt < MAX_CHUNK_RETRIES - 1) {
+      await new Promise((r) => setTimeout(r, chunkBackoff(attempt)));
     }
   }
 
-  throw new Error(`업로드 실패 — 청크 재시도 한계를 초과했습니다: ${item.path}`);
+  throw new Error(`업로드 실패 — 재시도 한계를 초과했습니다: ${item.path}`);
 }
 
 export interface ResumableUploadOptions {
@@ -288,7 +277,7 @@ export async function uploadFilesResumable(
     if (signal?.aborted) break;
 
     try {
-      const publicUrl = await uploadFileResumable(state, chunkSize, signal, emitProgress);
+      const publicUrl = await uploadFileWithRetry(state, signal, emitProgress);
       state.status = 'completed';
       state.publicUrl = publicUrl;
       results.push({ publicUrl, fileId: state.item.id });

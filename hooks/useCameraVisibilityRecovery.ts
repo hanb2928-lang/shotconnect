@@ -37,8 +37,8 @@ export function useCameraVisibilityRecovery({
 
       try {
         await restartStreamRef.current();
-      } catch {
-        // caller handles error display
+      } catch (err) {
+        console.error('[useCameraVisibilityRecovery] restartStream failed:', err);
       }
     };
 

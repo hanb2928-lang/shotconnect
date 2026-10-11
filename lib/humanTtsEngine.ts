@@ -232,6 +232,7 @@ export interface SilenceInterval {
 
 export function generateSilenceIntervals(text: string): SilenceInterval[] {
   const intervals: SilenceInterval[] = [];
+  const occupiedPositions = new Set<number>();
 
   for (const spec of PUNCTUATION_PAUSES) {
     let searchIdx = 0;
@@ -243,6 +244,7 @@ export function generateSilenceIntervals(text: string): SilenceInterval[] {
         durationMs: spec.durationMs,
         type: spec.type,
       });
+      occupiedPositions.add(found);
       searchIdx = found + spec.punctuation.length;
     }
   }
@@ -251,6 +253,9 @@ export function generateSilenceIntervals(text: string): SilenceInterval[] {
   let charPos = 0;
   for (let i = 0; i < sentences.length - 1; i++) {
     charPos += sentences[i].length + 1;
+    // Skip breath/hook pauses at positions already covered by punctuation
+    // pauses — otherwise we stack two silence markers at the same boundary.
+    if (occupiedPositions.has(charPos) || occupiedPositions.has(charPos - 1)) continue;
     intervals.push({
       position: charPos,
       durationMs: i === 0 ? HOOK_TRANSITION_PAUSE_MS : BREATH_PAUSE_MS,

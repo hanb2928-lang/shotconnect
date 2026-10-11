@@ -96,6 +96,7 @@ export function startVideoRecording(
       if (typeof document === 'undefined') return;
       if (document.hidden && !settled) {
         settled = true;
+        clearTimeout(stopTimer);
         (recorder as MediaRecorder & { _terminated?: boolean })._terminated = true;
         pressureUnsub();
         document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -171,6 +172,7 @@ export function startVideoRecording(
     recorder.onerror = () => {
       if (settled) return;
       settled = true;
+      clearTimeout(stopTimer);
       pressureUnsub();
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', onVisibilityChange);

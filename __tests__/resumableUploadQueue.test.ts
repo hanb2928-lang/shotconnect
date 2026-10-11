@@ -54,14 +54,14 @@ describe('resumableUploadQueue', () => {
     global.fetch = originalFetch;
   });
 
-  it('splits a file into chunks based on chunkSize', async () => {
+  it('uploads a file in a single request', async () => {
     const file = makeFile('f1', 1024);
     mockFetch.mockResolvedValue({ ok: true, text: () => Promise.resolve('ok') });
 
     const results = await uploadFilesResumable([file], { chunkSize: 256 });
 
     expect(results).toHaveLength(1);
-    expect(mockFetch).toHaveBeenCalledTimes(4);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('calls onProgress with correct byte counts', async () => {
@@ -74,7 +74,6 @@ describe('resumableUploadQueue', () => {
       onProgress: (p) => progressCalls.push(p),
     });
 
-    // Initial + per-chunk progress + final
     expect(progressCalls.length).toBeGreaterThanOrEqual(2);
     const lastProgress = progressCalls[progressCalls.length - 1];
     expect(lastProgress.completedFiles).toBe(1);
@@ -82,7 +81,7 @@ describe('resumableUploadQueue', () => {
     expect(lastProgress.files[0].percent).toBe(100);
   });
 
-  it('retries a failed chunk and succeeds on retry', async () => {
+  it('retries a failed upload and succeeds on retry', async () => {
     const file = makeFile('f1', 256);
     mockFetch
       .mockRejectedValueOnce(new Error('network error'))
@@ -129,9 +128,16 @@ describe('resumableUploadQueue', () => {
     const controller = new AbortController();
 
     mockFetch.mockImplementation(() => {
-      controller.abort();
-      return Promise.resolve({ ok: true, text: () => Promise.resolve('ok') });
+      return new Promise((_resolve, reject) => {
+        const timer = setTimeout(_resolve, 5000);
+        controller.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new Error('Aborted'));
+        });
+      });
     });
+
+    setTimeout(() => controller.abort(), 50);
 
     await expect(
       uploadFilesResumable([file], {
@@ -175,7 +181,7 @@ describe('resumableUploadQueue', () => {
     expect(results).toHaveLength(0);
   });
 
-  it('marks file as failed when all chunk retries exhausted', async () => {
+  it('marks file as failed when all retries exhausted', async () => {
     const file = makeFile('f1', 256);
     mockFetch.mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('server error') });
 
@@ -191,23 +197,21 @@ describe('resumableUploadQueue', () => {
     expect(failedProgress).toBeDefined();
   });
 
-  it('sends Content-Range header for chunk positioning', async () => {
-    const file = makeFile('f1', 512);
+  it('rejects empty files', async () => {
+    const file = makeFile('f1', 0);
     mockFetch.mockResolvedValue({ ok: true, text: () => Promise.resolve('ok') });
 
-    await uploadFilesResumable([file], { chunkSize: 256 });
-
-    const firstCall = mockFetch.mock.calls[0];
-    const headers = firstCall[1].headers;
-    expect(headers['Content-Range']).toBe('bytes 0-255/512');
+    await expect(
+      uploadFilesResumable([file], { chunkSize: 256 }),
+    ).rejects.toThrow(/빈 파일/);
   });
 
-  it('does not re-upload already completed chunks after a mid-file network drop', async () => {
+  it('retries upload after a network drop and succeeds', async () => {
     const file = makeFile('f1', 1024);
     let callCount = 0;
     mockFetch.mockImplementation(() => {
       callCount++;
-      if (callCount === 2) {
+      if (callCount === 1) {
         mockIsOnline.mockReturnValue(false);
         return Promise.reject(new Error('network error'));
       }
@@ -219,6 +223,6 @@ describe('resumableUploadQueue', () => {
     const results = await uploadFilesResumable([file], { chunkSize: 256 });
 
     expect(results).toHaveLength(1);
-    expect(mockFetch).toHaveBeenCalledTimes(5);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });

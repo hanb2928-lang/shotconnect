@@ -118,12 +118,24 @@ export async function updateUserSettings(
         updated_at: new Date().toISOString(),
       });
 
+    // Prevent unhandled rejection if the timeout wins the race but the
+    // upsert settles later.
+    void queryPromise.then(() => {}, () => {});
+
     const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) =>
       setTimeout(() => resolve({ error: { message: 'timeout' } }), 5000),
     );
 
-    const { error } = await Promise.race([queryPromise, timeoutPromise]);
-    if (error) throw new Error(`Failed to save settings: ${error.message}`);
+    const { error } = await Promise.race([
+      queryPromise as unknown as Promise<{ error: { message: string } | null }>,
+      timeoutPromise,
+    ]);
+    if (error) {
+      // Still invalidate the cache: the upsert may succeed moments later,
+      // and we don't want subsequent reads to return stale cached values.
+      invalidateSettingsCache();
+      throw new Error(`Failed to save settings: ${error.message}`);
+    }
   }
 
   try {

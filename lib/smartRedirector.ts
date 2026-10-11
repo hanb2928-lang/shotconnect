@@ -120,38 +120,23 @@ export async function smartRedirect(
     };
   }
 
-  // Step 2: Try the native URL scheme with a 100ms timeout
-  const appLaunchPromise = new Promise<boolean>((resolve) => {
-    const timeout = setTimeout(() => resolve(false), 100);
-    if (!link.appUrl) {
-      clearTimeout(timeout);
-      resolve(false);
-      return;
+  // Step 2: Try the native URL scheme — use canOpenURL as the gate.
+  // Do NOT race a hard timeout against openURL: on iOS, openURL may never
+  // resolve because the app switch pauses the JS context. If we time out
+  // and also fall back to web, the user sees both the app and browser open.
+  let appLaunched = false;
+  if (link.appUrl) {
+    try {
+      const canOpen = await Linking.canOpenURL(link.appUrl);
+      if (canOpen) {
+        appLaunched = true;
+        // Fire-and-forget: openURL may not resolve after app switch
+        Linking.openURL(link.appUrl).catch(() => { /* handled below */ });
+      }
+    } catch {
+      appLaunched = false;
     }
-    Linking.canOpenURL(link.appUrl)
-      .then((canOpen) => {
-        if (canOpen) {
-          Linking.openURL(link.appUrl)
-            .then(() => {
-              clearTimeout(timeout);
-              resolve(true);
-            })
-            .catch(() => {
-              clearTimeout(timeout);
-              resolve(false);
-            });
-        } else {
-          clearTimeout(timeout);
-          resolve(false);
-        }
-      })
-      .catch(() => {
-        clearTimeout(timeout);
-        resolve(false);
-      });
-  });
-
-  const appLaunched = await appLaunchPromise;
+  }
 
   if (appLaunched) {
     options?.onAppLaunch?.();

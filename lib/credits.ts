@@ -133,8 +133,8 @@ export async function refundCredits(
   const amount = customAmount ?? CREDIT_COSTS[feature];
   try {
     await addCredits(amount, 'refund', `${feature} 실패 환불`);
-  } catch {
-    // best-effort — don't mask the original error
+  } catch (err) {
+    console.error(`[credits] refundCredits failed for ${feature} (${amount} credits):`, err);
   }
 }
 

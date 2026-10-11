@@ -78,17 +78,12 @@ export async function purchaseCredits(packageId: string): Promise<PurchaseResult
   }
 
   if (Platform.OS === 'web' || !isRevenueCatAvailable()) {
-    try {
-      await addCredits(pkg.credits, 'purchase', `${pkg.name} 구매 (테스트)`, pkg.id);
-      return { success: true, credits: pkg.credits, packageId };
-    } catch (err) {
-      return {
-        success: false,
-        credits: 0,
-        packageId,
-        error: err instanceof Error ? err.message : '충전 중 오류가 발생했습니다',
-      };
-    }
+    return {
+      success: false,
+      credits: 0,
+      packageId,
+      error: '결제 환경이 준비되지 않았습니다. 모바일 앱에서 이용해주세요.',
+    };
   }
 
   if (pendingPurchase) {
@@ -97,17 +92,12 @@ export async function purchaseCredits(packageId: string): Promise<PurchaseResult
 
   const RC = loadRCModule();
   if (!RC) {
-    try {
-      await addCredits(pkg.credits, 'purchase', `${pkg.name} 구매 (테스트)`, pkg.id);
-      return { success: true, credits: pkg.credits, packageId };
-    } catch (err) {
-      return {
-        success: false,
-        credits: 0,
-        packageId,
-        error: err instanceof Error ? err.message : '충전 중 오류가 발생했습니다',
-      };
-    }
+    return {
+      success: false,
+      credits: 0,
+      packageId,
+      error: '결제 모듈을 로드할 수 없습니다.',
+    };
   }
 
   pendingPurchase = true;
@@ -118,8 +108,12 @@ export async function purchaseCredits(packageId: string): Promise<PurchaseResult
     );
 
     if (!rcPackage) {
-      await addCredits(pkg.credits, 'purchase', `${pkg.name} 구매 (테스트)`, pkg.id);
-      return { success: true, credits: pkg.credits, packageId };
+      return {
+        success: false,
+        credits: 0,
+        packageId,
+        error: '현재 구매할 수 있는 패키지가 없습니다. 잠시 후 다시 시도해주세요.',
+      };
     }
 
     const { customerInfo } = await RC.purchasePackage(rcPackage);
@@ -152,6 +146,8 @@ export async function restorePurchases(): Promise<PurchaseResult[]> {
   try {
     await RC.restorePurchases();
     return [];
-  } catch {}
-  return [];
+  } catch (err) {
+    console.error('[purchases] restorePurchases error:', err);
+    return [];
+  }
 }

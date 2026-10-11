@@ -93,31 +93,6 @@ function emptyResult(): OcrResult {
 async function resolveOpenAIKey(): Promise<string | null> {
   const serverKey = Deno.env.get("OPENAI_API_KEY");
   if (serverKey) return serverKey;
-
-  if (supabaseUrl && serviceRoleKey) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const resp = await fetch(
-        `${supabaseUrl}/rest/v1/user_settings?select=openai_api_key&order=updated_at.desc&limit=1`,
-        {
-          headers: {
-            apikey: serviceRoleKey,
-            Authorization: `Bearer ${serviceRoleKey}`,
-          },
-          signal: controller.signal,
-        },
-      );
-      clearTimeout(timeoutId);
-      if (resp.ok) {
-        const rows = await resp.json() as Array<{ openai_api_key: string | null }>;
-        const dbKey = rows[0]?.openai_api_key;
-        if (dbKey) return dbKey;
-      }
-    } catch {
-      // no fallback beyond env
-    }
-  }
   return null;
 }
 

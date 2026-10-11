@@ -1,6 +1,7 @@
 import { getItem, setItem } from '@/lib/storage';
 
 const SHARE_HISTORY_KEY = 'share_action_history';
+const SHARE_COOLDOWN_UNTIL_KEY = 'share_cooldown_until';
 const RATE_LIMIT_COUNT = 5;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 const COOLDOWN_DURATION_MS = 60 * 60 * 1000; // 1 hour
@@ -23,9 +24,14 @@ export async function recordShareAction(platform: string): Promise<CooldownResul
   const now = Date.now();
 
   history.push({ timestamp: now, platform });
-  await setItem(SHARE_HISTORY_KEY, JSON.stringify(history));
+  const pruned = history.filter((a) => now - a.timestamp < COOLDOWN_DURATION_MS);
+  await setItem(SHARE_HISTORY_KEY, JSON.stringify(pruned));
 
-  return checkCooldown(history, now);
+  const result = checkCooldown(pruned, now);
+  if (result.shouldBlock) {
+    await setItem(SHARE_COOLDOWN_UNTIL_KEY, String(now + result.remainingCooldown));
+  }
+  return result;
 }
 
 export async function getShareHistory(): Promise<ShareAction[]> {
@@ -47,7 +53,28 @@ export async function getShareHistory(): Promise<ShareAction[]> {
 
 export async function checkShareCooldown(): Promise<CooldownResult> {
   const history = await getShareHistory();
-  return checkCooldown(history, Date.now());
+  const now = Date.now();
+
+  try {
+    const cooldownUntilRaw = await getItem(SHARE_COOLDOWN_UNTIL_KEY);
+    if (cooldownUntilRaw) {
+      const cooldownUntil = Number(cooldownUntilRaw);
+      if (now < cooldownUntil) {
+        const recent = history.filter((a) => now - a.timestamp < RATE_LIMIT_WINDOW_MS);
+        return {
+          shouldBlock: true,
+          remainingCooldown: cooldownUntil - now,
+          recentActions: recent.length,
+          windowMs: RATE_LIMIT_WINDOW_MS,
+          cooldownMs: COOLDOWN_DURATION_MS,
+        };
+      }
+    }
+  } catch {
+    // ignore storage read errors
+  }
+
+  return checkCooldown(history, now);
 }
 
 export function checkCooldown(history: ShareAction[], now: number): CooldownResult {
