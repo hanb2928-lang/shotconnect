@@ -9,6 +9,59 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
+// Overall wall-clock budget for the entire mux operation: download +
+// FFmpeg exec + upload. The Edge Runtime kills the isolate around 300s,
+// so we abort at 270s to return a proper error before the hard kill.
+const MUX_WALL_CLOCK_BUDGET_MS = 270_000;
+
+// Cache FFmpeg core URLs + module imports at module scope so they are
+// resolved once per isolate instead of re-downloaded on every request.
+// toBlobURL fetches the WASM core from unpkg on each call — without
+// caching, this alone adds 3-8s of sequential network I/O per invocation.
+let cachedCoreUrl: string | null = null;
+let cachedWasmUrl: string | null = null;
+let ffmpegModule: typeof import("npm:@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js") | null = null;
+let ffmpegUtil: typeof import("npm:@ffmpeg/util@0.12.1/dist/esm/index.js") | null = null;
+
+async function getFfmpegCore() {
+  if (!ffmpegModule || !ffmpegUtil) {
+    [ffmpegModule, ffmpegUtil] = await Promise.all([
+      import("npm:@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js"),
+      import("npm:@ffmpeg/util@0.12.1/dist/esm/index.js"),
+    ]);
+  }
+  if (!cachedCoreUrl || !cachedWasmUrl) {
+    [cachedCoreUrl, cachedWasmUrl] = await Promise.all([
+      ffmpegUtil.toBlobURL(
+        "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
+        "text/javascript",
+      ),
+      ffmpegUtil.toBlobURL(
+        "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
+        "application/wasm",
+      ),
+    ]);
+  }
+  return { ffmpegModule, ffmpegUtil, coreURL: cachedCoreUrl, wasmURL: cachedWasmUrl };
+}
+
+// Fetch with timeout — prevents network I/O from hanging indefinitely
+// during the download or upload phase.
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+  const timeoutMs = init.timeoutMs ?? 60_000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const { timeoutMs: _, ...rest } = init;
+    return await fetch(url, { ...rest, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 interface MuxRequest {
   videoUrl: string;
   audioUrl: string;
@@ -118,6 +171,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const muxWork = async (): Promise<Response> => {
+    const muxStartTime = Date.now();
     // Acquire a concurrency slot before downloading/encoding to prevent
     // unbounded FFmpeg WASM instances from exhausting Edge Runtime memory.
     await acquireMuxSlot();
@@ -125,8 +179,8 @@ Deno.serve(async (req: Request) => {
     try {
     // Download both files
     const [videoResp, audioResp] = await Promise.all([
-      fetch(videoUrl),
-      fetch(audioUrl),
+      fetchWithTimeout(videoUrl, { timeoutMs: 60_000 }),
+      fetchWithTimeout(audioUrl, { timeoutMs: 60_000 }),
     ]);
 
     if (!videoResp.ok) {
@@ -142,8 +196,13 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const videoBlob = await videoResp.blob();
-    const audioBlob = await audioResp.blob();
+    // Materialize both blobs in parallel — sequential awaiting was a
+    // hidden bottleneck that added the full audio read time on top of
+    // the video read time instead of overlapping them.
+    const [videoBlob, audioBlob] = await Promise.all([
+      videoResp.blob(),
+      audioResp.blob(),
+    ]);
 
     // Size guard: reject inputs that would blow the memory budget.
     if (videoBlob.size > MAX_INPUT_BYTES || audioBlob.size > MAX_INPUT_BYTES) {
@@ -157,18 +216,11 @@ Deno.serve(async (req: Request) => {
     // All FFmpeg operations are wrapped in try-catch with guaranteed
     // virtual FS cleanup and process termination to prevent zombie
     // processes and memory leaks on OOM or font path errors.
-    const { FFmpeg } = await import("npm:@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
-    const { fetchFile, toBlobURL } = await import("npm:@ffmpeg/util@0.12.1/dist/esm/index.js");
+    const { ffmpegModule: ffMod, ffmpegUtil: ffUtil, coreURL, wasmURL } = await getFfmpegCore();
+    const { FFmpeg } = ffMod;
+    const { fetchFile } = ffUtil;
 
     const ffmpeg = new FFmpeg();
-    const coreURL = await toBlobURL(
-      "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
-      "text/javascript",
-    );
-    const wasmURL = await toBlobURL(
-      "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
-      "application/wasm",
-    );
     await ffmpeg.load({ coreURL, wasmURL });
 
     // Timeout guard: if FFmpeg exec hangs (OOM, missing font, corrupt
@@ -317,11 +369,26 @@ Deno.serve(async (req: Request) => {
       const output = await ffmpeg.readFile("output.mp4");
       const outputBlob = new Blob([output], { type: "video/mp4" });
 
-      // Clean up virtual FS
-      await cleanupFfmpeg();
+      // Wall-clock budget check: if download + FFmpeg already consumed
+      // most of the 270s budget, return an error now instead of starting
+      // the upload and getting killed mid-transfer by the Edge Runtime.
+      const elapsedMs = Date.now() - muxStartTime;
+      if (elapsedMs > MUX_WALL_CLOCK_BUDGET_MS - 30_000) {
+        await cleanupFfmpeg();
+        try { ffmpeg.terminate(); } catch { /* already terminated */ }
+        return new Response(
+          JSON.stringify({ error: `합성 시간이 초과되었습니다 (${Math.round(elapsedMs / 1000)}초). 다시 시도해주세요.` }),
+          { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Start virtual FS cleanup concurrently with upload — no need to
+      // await cleanup before starting the network transfer.
+      const cleanupPromise = cleanupFfmpeg();
 
       // Upload to Supabase Storage
       if (!supabaseUrl || !serviceRoleKey) {
+        await cleanupPromise;
         return new Response(
           JSON.stringify({ error: "스토리지 설정이 누락되었습니다." }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -332,7 +399,7 @@ Deno.serve(async (req: Request) => {
       const uploadPath = `videos/${fileName}`;
       const uploadUrl = `${supabaseUrl}/storage/v1/object/${uploadPath}`;
 
-      const uploadResp = await fetch(uploadUrl, {
+      const uploadResp = await fetchWithTimeout(uploadUrl, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${serviceRoleKey}`,
@@ -340,7 +407,10 @@ Deno.serve(async (req: Request) => {
           "x-upsert": "true",
         },
         body: outputBlob,
+        timeoutMs: 90_000,
       });
+
+      await cleanupPromise;
 
       if (!uploadResp.ok) {
         const uploadErr = await uploadResp.text();
@@ -352,22 +422,21 @@ Deno.serve(async (req: Request) => {
 
       const publicUrl = `${supabaseUrl}/storage/v1/object/public/${uploadPath}`;
 
-      // Update scans row with muxed_video_url if scanId is provided
+      // Fire-and-forget the DB update — it's non-fatal and was blocking
+      // the response by 200-500ms on every call. The client already has
+      // the muxedUrl in the response body and will set it locally.
       if (scanId) {
-        try {
-          await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
-            method: "PATCH",
-            headers: {
-              "Authorization": `Bearer ${serviceRoleKey}`,
-              "apikey": serviceRoleKey,
-              "Content-Type": "application/json",
-              "Prefer": "return=minimal",
-            },
-            body: JSON.stringify({ muxed_video_url: publicUrl }),
-          });
-        } catch {
-          // Non-fatal — the muxed video is still in storage
-        }
+        fetchWithTimeout(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
+          method: "PATCH",
+          headers: {
+            "Authorization": `Bearer ${serviceRoleKey}`,
+            "apikey": serviceRoleKey,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+          },
+          body: JSON.stringify({ muxed_video_url: publicUrl }),
+          timeoutMs: 10_000,
+        }).catch(() => { /* non-fatal */ });
       }
 
       return new Response(
