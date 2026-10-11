@@ -96,8 +96,11 @@ function processDeferredQueue(): void {
 
 export function dispatchAppStateChange(nextState: string): void {
   // Re-entrant dispatch during the drain window would re-trigger
-  // immediate handlers and flood the microtask queue again. Drop it.
-  if (suspending) return;
+  // immediate handlers and flood the microtask queue again. Drop it —
+  // UNLESS the new state is 'active', which is a foreground recovery
+  // event that must never be dropped. Dropping it leaves the poll loop
+  // dead and the Realtime channel unsubscribed, causing the 97% stall.
+  if (suspending && nextState !== 'active') return;
 
   lastDispatchedState = nextState;
 

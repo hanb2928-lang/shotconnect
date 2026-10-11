@@ -152,7 +152,14 @@ export function useResultPolling(
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
-            if (isInFlushWindow()) return;
+            // Only drop non-terminal progress updates during the flush window.
+            // Terminal events (SUCCESS/FAILED) must ALWAYS be processed —
+            // dropping them is the primary cause of the 97% stall on native.
+            const isTerminal = payload.new && (
+              (payload.new as { status?: string }).status === 'SUCCESS' ||
+              (payload.new as { status?: string }).status === 'FAILED'
+            );
+            if (isInFlushWindow() && !isTerminal) return;
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { status: string; video_url: string | null; error_message: string | null; step: string | null; progress: number | null };
@@ -184,7 +191,10 @@ export function useResultPolling(
           },
           (payload) => {
             if (cancelled || settledRef.current) return;
-            if (isInFlushWindow()) return;
+            // Do NOT drop scans table events during the flush window.
+            // The scans table carries the terminal muxed_video_url which is
+            // the most reliable completion signal. Dropping it during the
+            // flush window is a primary cause of the 97% stall on native.
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
@@ -324,6 +334,18 @@ export function useResultPolling(
       // source of truth. This eliminates the client↔server ping-pong that
       // saturated the bridge and caused the 97% stall.
       if (highestProgressSeen >= 0.85) {
+        // Re-subscribe Realtime if the channel was dropped (e.g. after a
+        // background transition). The 85%+ path previously relied solely on
+        // the 6s DB poll, but on native the Realtime channel is the fastest
+        // path to detect completion — especially the scans table callback
+        // which carries muxed_video_url.
+        if (!realtimeChannel) {
+          try {
+            realtimeChannel = createRealtimeChannel();
+          } catch {
+            // Realtime unavailable — DB poll still works as fallback
+          }
+        }
         // DB force-sync only: check video_jobs then scans table
         const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
         if (cancelled || settledRef.current) return;
@@ -346,9 +368,11 @@ export function useResultPolling(
             if (settledRef.current) return;
           }
         }
-        // Fast fixed interval — 6s DB-only scan, no edge function call
+        // Tightened interval: 3s instead of 6s when we're in the final
+        // stretch. When the DB shows SUCCESS-without-URL, every second
+        // counts — the URL may land in the next query.
         if (!cancelled && !settledRef.current) {
-          pollTimer = setTimeout(pollOnce, 6000);
+          pollTimer = setTimeout(pollOnce, 3000);
         }
         return;
       }
@@ -602,11 +626,13 @@ export function useResultPolling(
             }
           });
         }
-      } else if (nextState === 'background' || nextState === 'inactive') {
-        // Graceful pause: abort all in-flight network requests, clear ALL
-        // timers (including soft warn and hard timeout), and release the
-        // Realtime websocket so the OS can reclaim memory without
-        // triggering orphaned-callback crashes or premature timeouts.
+      } else if (nextState === 'background') {
+        // Full background: tear down everything. But do NOT treat iOS
+        // 'inactive' (notification banner, Control Center) as background —
+        // doing so destroys the Realtime channel and clears the poll timer
+        // for a momentary UI interruption, and the 'active' dispatch that
+        // follows can be dropped by the suspending gate in
+        // appStateCoordinator, leaving the poll loop dead permanently.
         bgEnterTime = Date.now();
         resumeBurstAborted = true;
         pollAbort?.abort();

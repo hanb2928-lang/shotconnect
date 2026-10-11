@@ -310,8 +310,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                     // scans lookup failed — polling will catch the URL on next tick
                   }
                 }
-                // No URL anywhere yet — keep polling, don't freeze at 97%
-                serverProgRef.current = Math.max(serverProgRef.current ?? 0, 0.97);
+                // No URL anywhere yet — nudge progress forward but don't
+                // freeze at 97%. Use 0.90 so the creep timer can still
+                // advance visually, and the bar doesn't look stuck.
+                serverProgRef.current = Math.max(serverProgRef.current ?? 0, 0.90);
               }
             } else if (row.status === 'FAILED') {
               clearActiveVideoJob();
@@ -478,6 +480,14 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               }
               setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
               notifyVideoCompleted();
+            } else if (row.status === 'SUCCESS' && !row.video_url) {
+              // SUCCESS but video_url is null — the server wrote the status
+              // before the URL. Don't classify as "in progress" (which would
+              // burn retry budget). Instead, keep retrying at the same
+              // interval without incrementing the attempt counter, so we
+              // don't hit the 10-retry limit while waiting for the URL.
+              completionFallbackRef.current = setTimeout(checkCompletionFallback, 3_000);
+              return;
             } else if (row.status === 'FAILED') {
               clearActiveVideoJob();
               jobIdRef.current = null;
@@ -578,7 +588,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     // the submit AbortController so no orphaned fetch callbacks fire on a
     // backgrounded native view (OS memory reclaim crash defense).
     const unsubAppState = registerAppStateHandler('immediate', (state) => {
-      if (state === 'background' || state === 'inactive') {
+      if (state === 'background') {
+        // Full background only — do NOT treat iOS 'inactive' (notification
+        // banner, Control Center) as background. Treating 'inactive' as
+        // background destroys the Realtime channel and clears timers for a
+        // momentary UI interruption, and the 'active' dispatch that follows
+        // can be dropped by the suspending gate, leaving everything dead.
         stopTimers();
         // Pause hard timeout — record entry time so we can re-arm with
         // remaining duration on foreground return.

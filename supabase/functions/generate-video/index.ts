@@ -181,6 +181,12 @@ Deno.serve(async (req: Request) => {
           body.output = jsonBody.output;
           body.failure = jsonBody.failure;
           body.error = jsonBody.error;
+          // Runway sends its own task ID in the callback body. Extract it
+          // so handleWebhook can look up the job by runway_task_id even when
+          // the URL query params don't include taskId.
+          if (!body.taskId) {
+            body.taskId = jsonBody.taskId ?? jsonBody.id ?? jsonBody.task_id ?? undefined;
+          }
         } catch {
           // Runway may send form-encoded or empty body
         }
@@ -470,9 +476,15 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
 
   try {
     const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
-    const webhookUrl = webhookSecret
-      ? `${supabaseUrl}/functions/v1/generate-video?mode=webhook&secret=${encodeURIComponent(webhookSecret)}`
-      : `${supabaseUrl}/functions/v1/generate-video?mode=webhook`;
+    const webhookBase = `${supabaseUrl}/functions/v1/generate-video?mode=webhook`;
+    const webhookParams = webhookSecret
+      ? `&secret=${encodeURIComponent(webhookSecret)}`
+      : ``;
+    // Include scanId so the webhook handler can identify which scan this
+    // callback belongs to. The runwayTaskId is not known yet (Runway assigns
+    // it), but Runway sends its own task ID in the webhook body — the handler
+    // extracts it and looks up the job by runway_task_id.
+    const webhookUrl = `${webhookBase}&scanId=${encodeURIComponent(scanId)}${webhookParams}`;
 
     let promptImage: string | null = body.mainImageUrl ?? null;
     if (!promptImage) {
@@ -892,7 +904,36 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
   const isRendering = runwayStep === "rendering";
 
   if (isRendering) {
-    console.log(`[generate-video] server-poll: job ${taskId} reached rendering — stopping self-chain, client polling takes over`);
+    // Continue server-poll at reduced frequency (every 15s) instead of
+    // halting completely. The client's DB poll is the primary completion
+    // detector, but the server-poll acts as a critical backup — especially
+    // on native where Realtime events can be dropped during the foreground
+    // flush window. Without this backup, a broken webhook + dropped Realtime
+    // event leaves the job stuck at 97% indefinitely.
+    const RENDER_POLL_DELAY_MS = 15_000;
+    console.log(`[generate-video] server-poll: job ${taskId} reached rendering — continuing at reduced frequency (${RENDER_POLL_DELAY_MS}ms)`);
+
+    const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+    setTimeout(() => {
+      fetch(selfUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+          apikey: serviceRoleKey,
+        },
+        body: JSON.stringify({
+          mode: "server-poll",
+          taskId,
+          scanId,
+          variationSeed: attempt,
+        }),
+        signal: controller.signal,
+      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
+    }, RENDER_POLL_DELAY_MS);
+
     return new Response(
       JSON.stringify({
         mode: "server-poll",
@@ -900,8 +941,8 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
         progress: status.progress ?? "",
         step: runwayStep,
         taskId,
-        serverPollHalted: true,
-        message: "서버 폴링 종료 — 클라이언트 단독 폴링 전환",
+        serverPollHalted: false,
+        message: "서버 폴링 지속 (저주기) — 렌더링 단계",
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
@@ -970,11 +1011,23 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
     status: body.status,
   }));
 
-  if (!taskId || !scanId) {
+  if (!scanId) {
     return new Response(
-      JSON.stringify({ error: "webhook 처리에 taskId와 scanId가 필요합니다." }),
+      JSON.stringify({ error: "webhook 처리에 scanId가 필요합니다." }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
+  }
+
+  // If taskId is missing, try to find the job by scanId. The webhook URL
+  // includes scanId, and Runway sends its task ID in the body. We look up
+  // the latest non-terminal job for this scan and use its runway_task_id.
+  if (!taskId) {
+    const fallbackJob = await findLatestJobByScanId(scanId);
+    if (fallbackJob?.runwayTaskId) {
+      body.taskId = fallbackJob.runwayTaskId;
+    } else if (fallbackJob?.internalJobId) {
+      body.taskId = fallbackJob.internalJobId;
+    }
   }
 
   const status = body.status ?? "";
