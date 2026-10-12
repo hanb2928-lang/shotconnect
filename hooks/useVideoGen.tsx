@@ -368,53 +368,62 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     if (!isGenerating) return;
     const GEN_TIMEOUT_MS = 600_000;
     let timer: ReturnType<typeof setInterval> | null = null;
-    let creepTimer: ReturnType<typeof setInterval> | null = null;
-    let hardGuardTimer: ReturnType<typeof setInterval> | null = null;
-    let completionWatchTimer: ReturnType<typeof setInterval> | null = null;
     const completionRetry = { attempts: 0, max: 10 };
 
     const startTimers = () => {
-      if (timer || creepTimer) return;
+      if (timer) return;
+      const TICK_MS = 1500;
+      let tickCount = 0;
       timer = setInterval(() => {
+        tickCount++;
         const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
+        const isCreepTick = tickCount % 2 === 0;
+        const isHardGuardTick = tickCount % 8 === 0;
+        const isCompletionTick = tickCount % 4 === 0;
         setVideoProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           const clampMax = 0.99;
-          const timeBasedProgress = Math.min(0.90, 0.15 + elapsed * 0.006);
           const serverProg = serverProgRef.current;
           const safeServer = (serverProg !== null && !isNaN(serverProg) && isFinite(serverProg)) ? serverProg : null;
-          const baseProgress = Math.max(prev.progress, timeBasedProgress);
-          const nextProgress = safeServer !== null
-            ? Math.max(baseProgress, Math.min(safeServer, clampMax))
-            : baseProgress;
-          return { ...prev, elapsedSec: elapsed, progress: Math.max(0, Math.min(clampMax, nextProgress)) };
+          // Time-based interpolation
+          const timeBasedProgress = Math.min(0.90, 0.15 + elapsed * 0.006);
+          let next = Math.max(prev.progress, timeBasedProgress);
+          if (safeServer !== null) next = Math.max(next, Math.min(safeServer, clampMax));
+          // Soft creep (every 3s)
+          if (isCreepTick) {
+            const creepCeiling = 0.92;
+            if (next < creepCeiling) {
+              const ceiling = safeServer !== null ? Math.max(safeServer + 0.02, creepCeiling) : creepCeiling;
+              next = Math.min(next + 0.02, ceiling);
+            }
+          }
+          // Hard guard (every 12s)
+          if (isHardGuardTick) {
+            const guardCeiling = 0.90;
+            if (next < guardCeiling) {
+              const forced = Math.min(next + 0.10, guardCeiling);
+              if (safeServer === null || safeServer <= forced) next = forced;
+            }
+          }
+          next = Math.max(0, Math.min(clampMax, next));
+          // Completion watch (every 6s) — read-only check, no progress change
+          if (isCompletionTick) {
+            if (next >= 0.85) {
+              if (renderStallSinceRef.current === null) {
+                renderStallSinceRef.current = Date.now();
+              } else if (Date.now() - renderStallSinceRef.current >= 5_000) {
+                if (!completionFallbackRef.current && jobIdRef.current) {
+                  completionFallbackRef.current = setTimeout(checkCompletionFallback, 0);
+                }
+                renderStallSinceRef.current = null;
+              }
+            } else {
+              renderStallSinceRef.current = null;
+            }
+          }
+          return { ...prev, elapsedSec: elapsed, progress: next };
         });
-      }, 1500);
-      creepTimer = setInterval(() => {
-        setVideoProgress((prev) => {
-          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const creepCeiling = 0.92;
-          if (prev.progress >= creepCeiling) return prev;
-          const serverProg = serverProgRef.current;
-          const ceiling = serverProg !== null ? Math.max(serverProg + 0.02, creepCeiling) : creepCeiling;
-          const nudge = prev.progress + 0.02;
-          return { ...prev, progress: Math.min(nudge, ceiling) };
-        });
-      }, 3000);
-      // Hard progression guard: every 10 seconds, force progress forward by
-      // 10% (up to 90%) so the bar can never freeze at a fixed value even
-      // when the server is completely silent.
-      hardGuardTimer = setInterval(() => {
-        setVideoProgress((prev) => {
-          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          const guardCeiling = 0.90;
-          if (prev.progress >= guardCeiling) return prev;
-          const forced = Math.min(prev.progress + 0.10, guardCeiling);
-          const serverProg = serverProgRef.current;
-          if (serverProg !== null && serverProg > forced) return prev;
-          return { ...prev, progress: forced };
-        });
-      }, 12_000);
+      }, TICK_MS);
       // Completion guard: if progress stays at or above 85% (rendering)
       // for 15 seconds without the server delivering a terminal status, do
       // a DB force-sync. The server goes rendering→completed directly, so
@@ -494,34 +503,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         })();
       };
 
-      completionWatchTimer = setInterval(() => {
-        setVideoProgress((prev) => {
-          if (!prev || prev.phase === 'completed' || prev.phase === 'error') {
-            renderStallSinceRef.current = null;
-            return prev;
-          }
-          if (prev.progress >= 0.85) {
-            if (renderStallSinceRef.current === null) {
-              renderStallSinceRef.current = Date.now();
-            } else if (Date.now() - renderStallSinceRef.current >= 5_000) {
-              if (!completionFallbackRef.current && jobIdRef.current) {
-                completionFallbackRef.current = setTimeout(checkCompletionFallback, 0);
-              }
-              renderStallSinceRef.current = null;
-            }
-          } else {
-            renderStallSinceRef.current = null;
-          }
-          return prev;
-        });
-      }, 5000);
     };
 
     const stopTimers = () => {
       if (timer) { clearInterval(timer); timer = null; }
-      if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
-      if (hardGuardTimer) { clearInterval(hardGuardTimer); hardGuardTimer = null; }
-      if (completionWatchTimer) { clearInterval(completionWatchTimer); completionWatchTimer = null; }
       if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
       // Do NOT reset renderStallSinceRef here — backgrounding should
       // pause the countdown, not reset it. Otherwise a brief background
