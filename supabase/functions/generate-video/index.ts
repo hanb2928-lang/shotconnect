@@ -1162,7 +1162,7 @@ async function checkWebhookResult(scanId: string): Promise<string | null> {
     clearTimeout(timeoutId);
     if (resp.ok) {
       const rows = await resp.json() as Array<{ video_url: string | null; muxed_video_url: string | null }>;
-      const finalUrl = rows[0]?.muxed_video_url ?? rows[0]?.video_url;
+      const finalUrl = rows[0]?.video_url ?? rows[0]?.muxed_video_url;
       if (finalUrl) {
         return finalUrl;
       }
