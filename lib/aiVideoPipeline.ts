@@ -1379,18 +1379,22 @@ export function subscribeVideoJob(
       } else {
         query = query.eq('task_id', taskId);
       }
-      const { data, error } = await query.maybeSingle();
+      const { data, error } = await withQueryTimeout(query.maybeSingle(), 5000, 'subscribeVideoJob.checkAndNotify');
       if (error) throw new Error(error.message);
       if (!data) {
         _dbg('checkAndNotify:no-job-row');
         // No job row found — try scans.video_url as a fallback (webhook may
         // have completed without the video_jobs row being visible yet).
         try {
-          const { data: scanData } = await supabase
-            .from('scans')
-            .select('video_url, muxed_video_url')
-            .eq('id', scanId)
-            .maybeSingle();
+          const { data: scanData } = await withQueryTimeout(
+            supabase
+              .from('scans')
+              .select('video_url, muxed_video_url')
+              .eq('id', scanId)
+              .maybeSingle(),
+            5000,
+            'subscribeVideoJob.checkAndNotify.scans',
+          );
           const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
           if (scanFinalUrl) {
             _dbg('checkAndNotify:scan-fallback-SUCCESS');
@@ -1422,11 +1426,15 @@ export function subscribeVideoJob(
       // written the result to scans but the video_jobs PATCH hasn't
       // landed yet (race between webhook and server-poll).
       try {
-        const { data: scanData } = await supabase
-          .from('scans')
-          .select('video_url, muxed_video_url')
-          .eq('id', scanId)
-          .maybeSingle();
+        const { data: scanData } = await withQueryTimeout(
+          supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle(),
+          5000,
+          'subscribeVideoJob.checkAndNotify.scans2',
+        );
         const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
         if (scanFinalUrl) {
           _dbg('checkAndNotify:scan-video-url-SUCCESS');
@@ -1923,12 +1931,16 @@ export function subscribeHdUpgrade(
   const checkAndNotify = async () => {
     if (settled) return;
     try {
-      const { data, error } = await supabase
-        .from('video_jobs')
-        .select('hd_status, hd_video_url, error_message')
-        .eq('scan_id', scanId)
-        .eq('task_id', draftJobId)
-        .maybeSingle();
+      const { data, error } = await withQueryTimeout(
+        supabase
+          .from('video_jobs')
+          .select('hd_status, hd_video_url, error_message')
+          .eq('scan_id', scanId)
+          .eq('task_id', draftJobId)
+          .maybeSingle(),
+        5000,
+        'subscribeHdUpgrade.checkAndNotify',
+      );
       if (error) throw new Error(error.message);
       if (!data) return;
       consecutivePollFailures = 0;
@@ -1949,11 +1961,15 @@ export function subscribeHdUpgrade(
       // or HD result was written to scans but the video_jobs row hasn't
       // updated yet.
       try {
-        const { data: scanData } = await supabase
-          .from('scans')
-          .select('video_url, muxed_video_url')
-          .eq('id', scanId)
-          .maybeSingle();
+        const { data: scanData } = await withQueryTimeout(
+          supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle(),
+          5000,
+          'subscribeHdUpgrade.checkAndNotify.scans',
+        );
         const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
         if (scanFinalUrl) {
           settled = true;
@@ -2174,21 +2190,29 @@ export async function recoverVideoJob(
   scanId: string,
 ): Promise<{ videoUrl: string; isHd: boolean; status: string } | null> {
   try {
-    const { data, error } = await supabase
-      .from('video_jobs')
-      .select('status, step, video_url, error_message, is_hd, hd_status, hd_video_url')
-      .eq('scan_id', scanId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data, error } = await withQueryTimeout(
+      supabase
+        .from('video_jobs')
+        .select('status, step, video_url, error_message, is_hd, hd_status, hd_video_url')
+        .eq('scan_id', scanId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      5000,
+      'recoverVideoJob.jobs',
+    );
 
     if (error || !data) {
       // Fallback: check scans.video_url / muxed_video_url directly
-      const { data: scanData } = await supabase
-        .from('scans')
-        .select('video_url, muxed_video_url')
-        .eq('id', scanId)
-        .maybeSingle();
+      const { data: scanData } = await withQueryTimeout(
+        supabase
+          .from('scans')
+          .select('video_url, muxed_video_url')
+          .eq('id', scanId)
+          .maybeSingle(),
+        5000,
+        'recoverVideoJob.scans',
+      );
       const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
       if (scanFinalUrl) {
         return { videoUrl: scanFinalUrl, isHd: false, status: 'SUCCESS' };

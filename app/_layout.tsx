@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity, Linking, Platform, TextInput, AppState } from 'react-native';
-import { Stack , SplashScreen } from 'expo-router';
+import { Stack , SplashScreen, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as WebBrowser from 'expo-web-browser';
@@ -180,6 +180,20 @@ function AppShell() {
 
 export default function RootLayout() {
   useFrameworkReady();
+  const pathname = usePathname();
+  const prevPathRef = useRef<string | null>(null);
+
+  // Sweep zombie Realtime sockets on route changes. When the user navigates
+  // between tabs or pages, any Realtime channels from the previous screen
+  // become orphaned — the Supabase client keeps their WebSocket alive in its
+  // internal map, sending ping packets and consuming server slots. This
+  // force-disconnects them so the connection pool stays clean.
+  useEffect(() => {
+    if (prevPathRef.current !== null && prevPathRef.current !== pathname) {
+      sweepZombieSockets();
+    }
+    prevPathRef.current = pathname;
+  }, [pathname]);
 
   // Single global AppState dispatcher — all other files register handlers
   // via registerAppStateHandler instead of calling AppState.addEventListener
