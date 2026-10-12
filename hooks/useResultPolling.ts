@@ -103,6 +103,7 @@ export function useResultPolling(
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
     let pollInFlight = false;
+    let isPaused = false;
     // Monotonic guard: track the highest progress and latest step seen
     // across both realtime and polling. Stale realtime payloads that arrive
     // after a newer poll result (common on background→foreground transition)
@@ -398,7 +399,7 @@ export function useResultPolling(
         // Tightened interval: 3s instead of 6s when we're in the final
         // stretch. When the DB shows SUCCESS-without-URL, every second
         // counts — the URL may land in the next query.
-        if (!cancelled && !settledRef.current) {
+        if (!cancelled && !settledRef.current && !isPaused) {
           pollTimer = setTimeout(pollOnce, 2000);
         }
         return;
@@ -434,7 +435,7 @@ export function useResultPolling(
           handleResult(scanResult.status, scanResult.videoUrl);
           if (settledRef.current) return;
         }
-        if (!cancelled && !settledRef.current) {
+        if (!cancelled && !settledRef.current && !isPaused) {
           const delayMs = hybridPoller.nextPollDelayMs();
           pollTimer = setTimeout(pollOnce, delayMs);
         }
@@ -487,7 +488,7 @@ export function useResultPolling(
               setProgressMessage(notFoundRetries === 1
                 ? '서버에 작업이 등록되는 중입니다. 잠시만 기다려주세요...'
                 : '작업 상태를 다시 확인하는 중...');
-              if (!cancelled && !settledRef.current) {
+              if (!cancelled && !settledRef.current && !isPaused) {
                 pollTimer = setTimeout(pollOnce, notFoundDelay);
               }
               return;
@@ -548,7 +549,7 @@ export function useResultPolling(
         }
       }
 
-      if (!cancelled && !settledRef.current) {
+      if (!cancelled && !settledRef.current && !isPaused) {
         const delayMs = hybridPoller.nextPollDelayMs();
         pollTimer = setTimeout(pollOnce, delayMs);
       }
@@ -637,6 +638,7 @@ export function useResultPolling(
     // the native network module.
     const handlePauseImmediate = (nextState: string) => {
       if (nextState !== 'background') return;
+      isPaused = true;
       bgEnterTime = Date.now();
       resumeBurstAborted = true;
       pollAbort?.abort();
@@ -673,6 +675,7 @@ export function useResultPolling(
     const handleResumeDeferred = (nextState: string) => {
       if (nextState !== 'active') return;
       if (!cancelled && !settledRef.current) {
+        isPaused = false;
         resumeBurstAborted = false;
         if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
         onFlushComplete(() => {

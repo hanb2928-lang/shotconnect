@@ -879,7 +879,7 @@ function waitForVideoCompletion(
     };
 
     const scheduleReconnect = () => {
-      if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) {
+      if (settled || isBackgrounded || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) {
         _dbg('scheduleReconnect:exhausted', { reconnectAttempts });
         return;
       }
@@ -906,13 +906,13 @@ function waitForVideoCompletion(
     // When the realtime channel is healthy, back off to reduce unnecessary
     // DB queries. When the channel degrades, reset to fast polling.
     const scheduleNextPoll = () => {
-      if (settled) return;
+      if (settled || isBackgrounded) return;
       const elapsed = monotonicElapsedMs(startTime);
       const interval = channelHealth === ChannelHealth.HEALTHY
         ? computeBackoffDelay(pollBackoffAttempt, elapsed)
         : POLL_MIN_INTERVAL_MS;
       pollTimer = setTimeout(async () => {
-        if (settled) return;
+        if (settled || isBackgrounded) return;
         elapsedTick++;
         await Promise.all([checkDb(), checkScanVideoUrl()]);
         if (!settled) {
@@ -925,7 +925,7 @@ function waitForVideoCompletion(
           if (channelHealth === ChannelHealth.HEALTHY) {
             pollBackoffAttempt++;
           }
-          scheduleNextPoll();
+          if (!isBackgrounded) scheduleNextPoll();
         }
       }, interval);
     };
@@ -942,7 +942,7 @@ function waitForVideoCompletion(
     // This catches cases where the webhook fails but Runway has the video ready.
     // (runwayPollTimer declared early above for TDZ safety)
     const startRunwayPollFallback = () => {
-      if (settled || runwayPollTimer) return;
+      if (settled || isBackgrounded || runwayPollTimer) return;
       _dbg('startRunwayPollFallback');
       // Skip Runway API direct poll when the task ID is a soft-fallback
       // placeholder — the real Runway task ID is unknown, so this poll
@@ -1012,7 +1012,7 @@ function waitForVideoCompletion(
         scheduleNext();
       };
       const scheduleNext = () => {
-        if (settled) return;
+        if (settled || isBackgrounded) return;
         runwayPollTimer = setTimeout(runwayPoll, RUNWAY_POLL_FALLBACK_INTERVAL_MS);
       };
       runwayPoll();
@@ -1322,6 +1322,7 @@ export function subscribeVideoJob(
   callback: VideoJobCallback,
 ): () => void {
   let settled = false;
+  let isPaused = false;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let channelHealth: ChannelHealth = ChannelHealth.DISCONNECTED;
@@ -1470,7 +1471,7 @@ export function subscribeVideoJob(
   };
 
   const scheduleReconnect = () => {
-    if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
+    if (settled || isPaused || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts) * JITTER();
     reconnectAttempts++;
@@ -1574,7 +1575,7 @@ export function subscribeVideoJob(
   let runwayFallbackStarted = false;
 
   const startRunwayPollFallback = () => {
-    if (settled || runwayFallbackStarted || isSoftTaskId) return;
+    if (settled || isPaused || runwayFallbackStarted || isSoftTaskId) return;
     runwayFallbackStarted = true;
     _dbg('startRunwayPollFallback');
     const runwayPoll = async () => {
@@ -1628,7 +1629,7 @@ export function subscribeVideoJob(
           return;
         }
       }
-      if (!settled) {
+      if (!settled && !isPaused) {
         runwayPollTimer = setTimeout(runwayPoll, RUNWAY_POLL_FALLBACK_INTERVAL_MS);
       }
     };
@@ -1636,15 +1637,15 @@ export function subscribeVideoJob(
   };
 
   const scheduleNextPoll = () => {
-    if (settled) return;
+    if (settled || isPaused) return;
     const elapsed = Date.now() - pollStartTime;
     const interval = channelHealth === ChannelHealth.HEALTHY
       ? computeBackoffDelay(pollBackoffAttempt, elapsed)
       : POLL_MIN_INTERVAL_MS;
     pollTimer = setTimeout(async () => {
-      if (settled) return;
+      if (settled || isPaused) return;
       await checkAndNotify();
-      if (!settled) {
+      if (!settled && !isPaused) {
         if (channelHealth === ChannelHealth.HEALTHY) {
           pollBackoffAttempt++;
         }
@@ -1682,6 +1683,7 @@ export function subscribeVideoJob(
   const removeBgPause = installBackgroundPause({
     isSettled: () => settled,
     pause: () => {
+      isPaused = true;
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
@@ -1697,6 +1699,7 @@ export function subscribeVideoJob(
       runwayFallbackStarted = false;
     },
     resume: () => {
+      isPaused = false;
       pollBackoffAttempt = 0;
       reconnectAttempts = 0;
       // Re-arm the overall timeout — it was cleared on pause, and without
@@ -1884,6 +1887,7 @@ export function subscribeHdUpgrade(
   callback: HdUpgradeCallback,
 ): () => void {
   let settled = false;
+  let isPaused = false;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let channelHealth: ChannelHealth = ChannelHealth.DISCONNECTED;
@@ -1974,7 +1978,7 @@ export function subscribeHdUpgrade(
   };
 
   const scheduleReconnect = () => {
-    if (settled || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
+    if (settled || isPaused || reconnectAttempts >= CHANNEL_MAX_RECONNECT_ATTEMPTS) return;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     const delayMs = CHANNEL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts) * JITTER();
     reconnectAttempts++;
@@ -2042,15 +2046,15 @@ export function subscribeHdUpgrade(
   // Adaptive DB poll with exponential backoff — same strategy as waitForVideoCompletion
   const hdPollStartTime = Date.now();
   const scheduleNextPoll = () => {
-    if (settled) return;
+    if (settled || isPaused) return;
     const elapsed = Date.now() - hdPollStartTime;
     const interval = channelHealth === ChannelHealth.HEALTHY
       ? computeBackoffDelay(pollBackoffAttempt, elapsed)
       : POLL_MIN_INTERVAL_MS;
     pollTimer = setTimeout(async () => {
-      if (settled) return;
+      if (settled || isPaused) return;
       await checkAndNotify();
-      if (!settled) {
+      if (!settled && !isPaused) {
         if (channelHealth === ChannelHealth.HEALTHY) {
           pollBackoffAttempt++;
         }
@@ -2079,6 +2083,7 @@ export function subscribeHdUpgrade(
   const removeBgPause = installBackgroundPause({
     isSettled: () => settled,
     pause: () => {
+      isPaused = true;
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (hdOverallTimeoutTimer) clearTimeout(hdOverallTimeoutTimer);
@@ -2089,6 +2094,7 @@ export function subscribeHdUpgrade(
       }
     },
     resume: () => {
+      isPaused = false;
       pollBackoffAttempt = 0;
       reconnectAttempts = 0;
       // Re-arm the overall timeout — it was cleared on pause, and without
