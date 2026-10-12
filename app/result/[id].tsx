@@ -145,6 +145,7 @@ import { probeUrlAccessible } from '@/lib/urlProbe';
 import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { onFlushComplete } from '@/lib/foregroundFlushGuard';
+import { safeRemoveChannel } from '@/lib/channelManager';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { safeInvoke } from '@/lib/apiClient';
@@ -659,16 +660,18 @@ function ResultScreenInner() {
     localPollTimerRef.current = setInterval(async () => {
       if (!mountedRef.current || !scan || videoJobSettledRef.current) return;
       try {
-        // Check scans.video_url / muxed_video_url first — the webhook writes
-        // here directly and it's the most reliable completion signal.
+        // Check scans.video_url FIRST — the server writes the render result
+        // here when generation completes. muxed_video_url is a separate
+        // post-processing step (narration mux) that happens on the result
+        // page and may never arrive during generation, causing the 97% stall.
         const { data: scanData } = await supabase
           .from('scans')
           .select('video_url, muxed_video_url')
           .eq('id', scan.id)
           .maybeSingle();
         if (scanData) {
-          const scanFinalUrl = (scanData as { muxed_video_url?: string | null; video_url?: string | null }).muxed_video_url
-            ?? (scanData as { video_url?: string | null }).video_url;
+          const scanFinalUrl = (scanData as { video_url?: string | null; muxed_video_url?: string | null }).video_url
+            ?? (scanData as { muxed_video_url?: string | null }).muxed_video_url;
           if (scanFinalUrl) {
             videoJobSettledRef.current = true;
             setGeneratedVideoUrl(scanFinalUrl);
@@ -1947,8 +1950,10 @@ function ResultScreenInner() {
           if (!mountedRef.current) return;
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             if (channel) {
-              try { supabase.removeChannel(channel); } catch { /* ignore */ }
+              const ch = channel;
               channel = null;
+              bgVideoChannelRef.current = null;
+              setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
             }
             retryCount++;
             if (retryCount <= MAX_RETRIES) {
@@ -1965,8 +1970,10 @@ function ResultScreenInner() {
       if (!mountedRef.current) return;
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        const ch = channel;
         channel = null;
+        bgVideoChannelRef.current = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       retryCount = 0;
       connectChannel();
@@ -1982,11 +1989,17 @@ function ResultScreenInner() {
         }
       } else if (nextState === 'background') {
         // Don't treat iOS 'inactive' as background — only full background.
+        // Virtual disconnect: null the reference synchronously (no bridge I/O)
+        // and defer the actual socket removal to setTimeout(0) so the JS
+        // thread is free before the OS freezes the network bridge. Calling
+        // removeChannel synchronously here deadlocks the JS thread and
+        // triggers an OS watchdog SIGKILL.
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         if (channel) {
-          try { supabase.removeChannel(channel); } catch { /* ignore */ }
+          const ch = channel;
           channel = null;
           bgVideoChannelRef.current = null;
+          setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
         }
       }
     };
@@ -1995,10 +2008,11 @@ function ResultScreenInner() {
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        const ch = channel;
         channel = null;
+        bgVideoChannelRef.current = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
-      bgVideoChannelRef.current = null;
       unsubHandler();
       unsubRecovery();
     };
@@ -2279,8 +2293,9 @@ function ResultScreenInner() {
           if (!mountedRef.current) return;
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             if (channel) {
-              try { supabase.removeChannel(channel); } catch { /* ignore */ }
+              const ch = channel;
               channel = null;
+              setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
             }
             retryCount++;
             if (retryCount <= MAX_RETRIES) {
@@ -2296,8 +2311,9 @@ function ResultScreenInner() {
       if (!mountedRef.current) return;
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       retryCount = 0;
       connectChannel();
@@ -2315,10 +2331,14 @@ function ResultScreenInner() {
         // iOS uses inactive for transient interruptions such as Control Center
         // and notification banners. Only full background should tear down this
         // completion channel.
+        // Virtual disconnect: null the reference synchronously (no bridge I/O)
+        // and defer the actual socket removal to setTimeout(0) so the JS
+        // thread is free before the OS freezes the network bridge.
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         if (channel) {
-          try { supabase.removeChannel(channel); } catch { /* ignore */ }
+          const ch = channel;
           channel = null;
+          setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
         }
       }
     };
@@ -2327,8 +2347,9 @@ function ResultScreenInner() {
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       unsubHandler();
       unsubRecovery();
