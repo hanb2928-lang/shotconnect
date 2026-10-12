@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, AppState } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Coins, Plus } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { getCreditBalance, type CreditBalance } from '@/lib/credits';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { onFlushComplete } from '@/lib/foregroundFlushGuard';
 
 interface CreditBalanceBadgeProps {
   onPress?: () => void;
@@ -27,20 +29,32 @@ export function CreditBalanceBadge({ onPress, compact = false, layout = 'horizon
     mountedRef.current = true;
     loadBalance();
     let interval: ReturnType<typeof setInterval> | null = setInterval(loadBalance, 15000);
-    const sub = AppState.addEventListener('change', (state) => {
+
+    // Use the central coordinator instead of raw AppState so this badge
+    // participates in the flush-window staggering on foreground return.
+    // Without this, loadBalance fires immediately on 'active' — racing
+    // with all the deferred bridge work the coordinator was designed to
+    // serialize, contributing to the foreground bridge burst.
+    const unsubPause = registerAppStateHandler('immediate', (state) => {
       if (state === 'background' || state === 'inactive') {
         if (interval) { clearInterval(interval); interval = null; }
-      } else if (state === 'active') {
-        if (!interval) {
-          loadBalance();
-          interval = setInterval(loadBalance, 15000);
-        }
       }
     });
+    const unsubResume = registerAppStateHandler('deferred', (state) => {
+      if (state === 'active') {
+        onFlushComplete(() => {
+          if (!mountedRef.current) return;
+          loadBalance();
+          if (!interval) interval = setInterval(loadBalance, 15000);
+        });
+      }
+    });
+
     return () => {
       mountedRef.current = false;
       if (interval) clearInterval(interval);
-      sub.remove();
+      unsubPause();
+      unsubResume();
     };
   }, [loadBalance]);
 

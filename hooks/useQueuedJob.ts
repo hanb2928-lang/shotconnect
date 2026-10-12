@@ -201,54 +201,71 @@ export function useQueuedJob() {
     // Pause polling AND Realtime when app is backgrounded to avoid
     // queued websocket payloads flooding the frozen JS bridge on
     // foreground return (thundering herd backpressure deadlock).
+    //
+    // The pause MUST be registered as 'immediate' — if it's 'deferred',
+    // the coordinator schedules it via setTimeout(0), but on iOS the JS
+    // thread suspends before that macrotask fires. The pause never runs,
+    // timers stay alive, and on foreground return the stale timers stack
+    // on top of new ones → bridge flood → watchdog SIGKILL.
     let bgPaused = false;
-    const handleAppState = (nextState: string) => {
+    const handlePauseImmediate = (nextState: string) => {
       if (mySubmitId !== submitIdRef.current) return;
-      if (nextState === 'background' || nextState === 'inactive') {
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-        if (subRef.current) {
-          subRef.current.unsubscribe();
-          subRef.current = null;
-        }
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-        bgPaused = true;
-      } else if (nextState === 'active' && bgPaused) {
-        bgPaused = false;
-        if (!pollingPaused && !userPausedRef.current) {
-          armTimeout();
-          subRef.current = subscribeToJob(jobId, handleUpdate, () => {
-            if (mySubmitId !== submitIdRef.current) return;
-            if (subRef.current) {
-              subRef.current.unsubscribe();
-              subRef.current = null;
-            }
-            setState((prev) => ({
-              ...prev,
-              status: prev.status === 'done' ? prev.status : 'queued',
-              error: '실시간 연결이 끊겼습니다. 백그라운드에서 계속 확인합니다.',
-            }));
-          });
-          startPolling();
-        }
+      if (nextState !== 'background' && nextState !== 'inactive') return;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      if (subRef.current) {
+        subRef.current.unsubscribe();
+        subRef.current = null;
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+      pollInFlight = false;
+      bgPaused = true;
+    };
+    const handleResumeDeferred = (nextState: string) => {
+      if (nextState !== 'active') return;
+      if (mySubmitId !== submitIdRef.current) return;
+      if (!bgPaused) return;
+      bgPaused = false;
+      if (!pollingPaused && !userPausedRef.current) {
+        armTimeout();
+        subRef.current = subscribeToJob(jobId, handleUpdate, () => {
+          if (mySubmitId !== submitIdRef.current) return;
+          if (subRef.current) {
+            subRef.current.unsubscribe();
+            subRef.current = null;
+          }
+          setState((prev) => ({
+            ...prev,
+            status: prev.status === 'done' ? prev.status : 'queued',
+            error: '실시간 연결이 끊겼습니다. 백그라운드에서 계속 확인합니다.',
+          }));
+        });
+        startPolling();
       }
     };
-    const unsubAppState = registerAppStateHandler('deferred', handleAppState);
+    const unsubPause = registerAppStateHandler('immediate', handlePauseImmediate);
+    const unsubResume = registerAppStateHandler('deferred', handleResumeDeferred);
 
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.addEventListener('online', handleOnline);
       onlineCleanupRef.current = () => {
         window.removeEventListener('online', handleOnline);
-        unsubAppState();
+        unsubPause();
+        unsubResume();
       };
     } else {
       onlineCleanupRef.current = () => {
-        unsubAppState();
+        unsubPause();
+        unsubResume();
       };
     }
 

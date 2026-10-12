@@ -44,12 +44,16 @@ async function getStoredScanAt(): Promise<number | null> {
 async function queryOrphanedScans(): Promise<OrphanedScan[]> {
   const cutoff = new Date(Date.now() - STALE_SCAN_THRESHOLD_MIN * 60_000).toISOString();
   try {
-    const { data, error } = await supabase
-      .from('scans')
-      .select('id, created_at, image_url, video_url, muxed_video_url, edited_image_url')
-      .gte('created_at', cutoff)
-      .order('created_at', { ascending: false })
-      .limit(10);
+    const { data, error } = await withQueryTimeout(
+      supabase
+        .from('scans')
+        .select('id, created_at, image_url, video_url, muxed_video_url, edited_image_url')
+        .gte('created_at', cutoff)
+        .order('created_at', { ascending: false })
+        .limit(10),
+      5000,
+      'orphanJobRecovery.queryOrphanedScans',
+    );
     if (error || !data) return [];
     return data as OrphanedScan[];
   } catch {

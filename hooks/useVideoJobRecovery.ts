@@ -181,12 +181,27 @@ export function useVideoJobRecovery() {
     };
 
     // Pause recovery checks while backgrounded; resume on foreground.
-    const unsubAppState = registerAppStateHandler('deferred', (nextState) => {
+    // The pause must be 'immediate' so the recursive 5s poll timer is
+    // cleared BEFORE the OS suspends the JS thread on iOS. Without this,
+    // the setTimeout suspends, then fires immediately on foreground
+    // return — before the flush window opens — issuing DB queries
+    // against a cold bridge and contributing to the foreground burst.
+    const unsubPause = registerAppStateHandler('immediate', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        if (pollTimerRef.current) {
+          clearTimeout(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+        checkingRef.current = false;
+      }
+    });
+    const unsubResume = registerAppStateHandler('deferred', (nextState) => {
       if (nextState === 'active') onFlushComplete(() => { runRecovery().catch(() => {}).finally(() => { /* release ref */ }); });
     });
 
     let cleanupFns: (() => void)[] = [];
-    cleanupFns.push(unsubAppState);
+    cleanupFns.push(unsubPause);
+    cleanupFns.push(unsubResume);
 
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibility);

@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { onFlushComplete } from '@/lib/foregroundFlushGuard';
-import { supabase, ensureFreshSession } from '@/lib/supabase';
+import { supabase, ensureFreshSession, withQueryTimeout } from '@/lib/supabase';
 import { submitVideoJobAsync, type VideoGenProgress } from '@/lib/aiVideoPipeline';
 import { useResultPolling } from '@/hooks/useResultPolling';
 import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob, updateActiveVideoJobStep } from '@/lib/videoJobPersistence';
@@ -255,12 +255,12 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
 
         // Fire both queries in parallel — saves ~200-400ms of sequential DB round-trips.
         const scanPromise = active.scanId
-          ? supabase.from('scans').select('video_url, muxed_video_url').eq('id', active.scanId).maybeSingle()
+          ? withQueryTimeout(supabase.from('scans').select('video_url, muxed_video_url').eq('id', active.scanId).maybeSingle(), 5000, 'videoGen.restore.scans')
           : Promise.resolve({ data: null } as any);
         let vjQuery = supabase.from('video_jobs').select('status, video_url, error_message');
         const vjPromise = isSoft && active.scanId
-          ? vjQuery.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
-          : vjQuery.eq('task_id', active.jobId).maybeSingle();
+          ? withQueryTimeout(vjQuery.eq('scan_id', active.scanId).order('created_at', { ascending: false }).limit(1).maybeSingle(), 5000, 'videoGen.restore.jobs')
+          : withQueryTimeout(vjQuery.eq('task_id', active.jobId).maybeSingle(), 5000, 'videoGen.restore.jobs');
         const [scanResult, vjResult] = await Promise.all([scanPromise, vjPromise]);
         if (cancelled) return;
 
@@ -563,6 +563,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const stopTimers = () => {
       if (timer) { clearInterval(timer); timer = null; }
       if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
+      if (stepStallTimerRef.current) { clearInterval(stepStallTimerRef.current); stepStallTimerRef.current = null; }
       // Do NOT reset renderStallSinceRef here — backgrounding should
       // pause the countdown, not reset it. Otherwise a brief background
       // transition on native (e.g. notification banner) resets the
