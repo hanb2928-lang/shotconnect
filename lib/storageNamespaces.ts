@@ -138,7 +138,10 @@ async function scanAndSweepPrefix(
           continue;
         }
         const ts = extractTimestamp(raw);
-        if (ts === 0 || now - ts > ttlMs) {
+        // Only sweep entries with a recognizable timestamp that has expired.
+        // Entries with ts === 0 (no timestamp field or unparseable JSON)
+        // are left alone — deleting them would wipe legitimate data.
+        if (ts > 0 && now - ts > ttlMs) {
           keysToRemove.push(k);
         }
       } catch {

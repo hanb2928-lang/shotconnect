@@ -557,7 +557,13 @@ export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName,
               <TouchableOpacity
                 style={styles.modalOpenBtn}
                 onPress={() => {
-                  if (shareModal) window.open(shareModal.url, '_blank');
+                  if (shareModal) {
+                    if (Platform.OS === 'web') {
+                      window.open(shareModal.url, '_blank');
+                    } else {
+                      Linking.openURL(shareModal.url).catch(() => {});
+                    }
+                  }
                   setShareModal(null);
                 }}
                 activeOpacity={0.8}

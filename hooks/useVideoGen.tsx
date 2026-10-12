@@ -5,6 +5,7 @@ import {
   useRef,
   useCallback,
   useEffect,
+  useMemo,
   type ReactNode,
 } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
@@ -298,6 +299,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         if (active.scanId) scanIdRef.current = active.scanId;
         jobIdRef.current = active.jobId;
         terminalLockRef.current = false;
+        renderStallSinceRef.current = null;
         setJobId(active.jobId);
         setIsGenerating(true);
         genStartRef.current = Date.now();
@@ -1087,6 +1089,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       scanIdRef.current = active.scanId;
       jobIdRef.current = active.jobId;
       terminalLockRef.current = false;
+      renderStallSinceRef.current = null;
       setJobId(active.jobId);
       setIsGenerating(true);
       genStartRef.current = Date.now();
@@ -1102,7 +1105,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value: VideoGenContextValue = {
+  const value: VideoGenContextValue = useMemo(() => ({
     isGenerating,
     jobId,
     videoProgress,
@@ -1117,7 +1120,21 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     retryFromDB,
     progressMessage: polling.progressMessage,
     clearBackgroundTransition,
-  };
+  }), [
+    isGenerating,
+    jobId,
+    videoProgress,
+    resultVideoUrl,
+    resultImageUrl,
+    error,
+    backgroundTransition,
+    startGeneration,
+    clearGeneration,
+    clearResult,
+    retryFromDB,
+    polling.progressMessage,
+    clearBackgroundTransition,
+  ]);
 
   return (
     <VideoGenContext.Provider value={value}>

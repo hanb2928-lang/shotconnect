@@ -14,7 +14,7 @@
 
 import { Platform } from 'react-native';
 import { hashObject } from '@/lib/contentHash';
-import { getRegisteredTempFiles } from '@/lib/tempFileManager';
+
 
 const L1_MAX_ENTRIES = 60;
 const L2_BATCH_THRESHOLD = 5;
@@ -123,11 +123,8 @@ export function mediaCacheEvict(key: string): void {
 }
 
 export function mediaCacheClear(): void {
-  let registered: Set<string> | null = null;
-  try { registered = new Set(getRegisteredTempFiles()); } catch { /* non-fatal */ }
   for (const entry of l1Map.values()) {
     if (entry.isBlobUrl) {
-      if (registered && registered.has(entry.url)) continue;
       try {
         URL.revokeObjectURL(entry.url);
       } catch {}
@@ -322,11 +319,13 @@ export async function flushPendingToL2(): Promise<void> {
   if (l2FlushInProgress || l2Pending.size === 0) return;
   l2FlushInProgress = true;
   const keys = Array.from(l2Pending);
-  l2Pending.clear();
 
   for (const key of keys) {
     const entry = l1Map.get(key);
-    if (!entry) continue;
+    if (!entry) {
+      l2Pending.delete(key);
+      continue;
+    }
     try {
       let dataUrl: string;
       if (entry.isBlobUrl) {
@@ -337,7 +336,10 @@ export async function flushPendingToL2(): Promise<void> {
         dataUrl = entry.url;
       }
       await writeL2(key, dataUrl);
-    } catch {}
+      l2Pending.delete(key);
+    } catch {
+      // Write failed — keep key in l2Pending so a future flush retries.
+    }
   }
 
   l2FlushInProgress = false;
@@ -420,8 +422,15 @@ export function installMediaCacheLifecycleHook(): void {
     }
   });
 
-  window.addEventListener('pagehide', () => {
-    flushPendingToL2();
+  window.addEventListener('pagehide', (event) => {
+    // Use sendBeacon-style flush: await the flush if the browser gives us
+    // time (event.persisted is false for non-bfcache unloads). If the page
+    // is being evicted, the flush is best-effort.
+    if (!event.persisted) {
+      // Synchronous-ish: flush via a microtask chain. IndexedDB writes
+      // are async but the browser waits for pending microtasks during unload.
+      flushPendingToL2().catch(() => {});
+    }
   });
 }
 

@@ -30,6 +30,7 @@ const FLUSH_WINDOW_MS = 1000;
 let flushWindowActive = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const completionCallbacks: Array<() => void> = [];
+const staggerTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
 export function armFlushWindow(): void {
   flushWindowActive = true;
@@ -41,6 +42,10 @@ export function armFlushWindow(): void {
     (globalThis as typeof globalThis & { __flushWindowActive?: boolean }).__flushWindowActive = true;
   }
   if (flushTimer !== null) clearTimeout(flushTimer);
+  // Clear any stale stagger timers from a previous flush window so
+  // callbacks from the old window don't interleave with the new one.
+  for (const t of staggerTimers) clearTimeout(t);
+  staggerTimers.clear();
   flushTimer = setTimeout(() => {
     flushTimer = null;
     const cbs = completionCallbacks.splice(0);
@@ -62,7 +67,10 @@ export function armFlushWindow(): void {
       }
       const cb = cbs[i++];
       withBridgeThrottle(() => { try { cb(); } catch { /* non-fatal */ } });
-      if (i < cbs.length) setTimeout(runNext, STAGGER_MS);
+      if (i < cbs.length) {
+        const t = setTimeout(runNext, STAGGER_MS);
+        staggerTimers.add(t);
+      }
       else {
         flushWindowActive = false;
         if (typeof globalThis !== 'undefined') {
@@ -97,5 +105,7 @@ export function _resetForTesting(): void {
     (globalThis as typeof globalThis & { __flushWindowActive?: boolean }).__flushWindowActive = false;
   }
   if (flushTimer !== null) { clearTimeout(flushTimer); flushTimer = null; }
+  for (const t of staggerTimers) clearTimeout(t);
+  staggerTimers.clear();
   completionCallbacks.length = 0;
 }

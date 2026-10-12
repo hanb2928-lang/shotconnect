@@ -95,15 +95,22 @@ export function useQueuedJob() {
     };
 
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    timeoutRef.current = setTimeout(() => {
-      if (mySubmitId !== submitIdRef.current) return;
-      clearAll();
-      setState((prev) => ({
-        ...prev,
-        status: 'error',
-        error: '작업 시간이 초과되었어요. 다시 시도해주세요.',
-      }));
-    }, timeoutMs);
+    let timeoutDeadline = Date.now() + timeoutMs;
+    const armTimeout = () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      const remaining = timeoutDeadline - Date.now();
+      if (remaining <= 0) return;
+      timeoutRef.current = setTimeout(() => {
+        if (mySubmitId !== submitIdRef.current) return;
+        clearAll();
+        setState((prev) => ({
+          ...prev,
+          status: 'error',
+          error: '작업 시간이 초과되었어요. 다시 시도해주세요.',
+        }));
+      }, remaining);
+    };
+    armTimeout();
 
     subRef.current = subscribeToJob(jobId, handleUpdate, () => {
       if (mySubmitId !== submitIdRef.current) return;
@@ -206,10 +213,15 @@ export function useQueuedJob() {
           subRef.current.unsubscribe();
           subRef.current = null;
         }
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
         bgPaused = true;
       } else if (nextState === 'active' && bgPaused) {
         bgPaused = false;
         if (!pollingPaused && !userPausedRef.current) {
+          armTimeout();
           subRef.current = subscribeToJob(jobId, handleUpdate, () => {
             if (mySubmitId !== submitIdRef.current) return;
             if (subRef.current) {

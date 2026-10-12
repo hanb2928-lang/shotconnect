@@ -29,6 +29,23 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // SSRF guard: only allow fetching from Supabase Storage URLs to prevent
+    // the server from being used as a proxy to arbitrary internal endpoints.
+    try {
+      const parsed = new URL(videoUrl);
+      if (!parsed.hostname.endsWith('.supabase.co') && !parsed.hostname.endsWith('.supabase.in')) {
+        return new Response(JSON.stringify({ error: "Only Supabase Storage URLs are allowed" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid video URL" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
 
@@ -82,7 +99,16 @@ Deno.serve(async (req: Request) => {
     const frameBytes = await Deno.readFile(tempFramePath);
     await Deno.remove(tempFramePath).catch(() => {});
 
-    const frameBase64 = btoa(String.fromCharCode(...frameBytes));
+    let frameBase64 = '';
+    const B64_CHUNK = 8192;
+    for (let i = 0; i < frameBytes.length; i += B64_CHUNK) {
+      const chunk = frameBytes.subarray(i, Math.min(i + B64_CHUNK, frameBytes.length));
+      let bin = '';
+      for (let j = 0; j < chunk.length; j++) {
+        bin += String.fromCharCode(chunk[j]);
+      }
+      frameBase64 += btoa(bin);
+    }
 
     let frameUrl = "";
     if (supabaseUrl && serviceRoleKey) {

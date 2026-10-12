@@ -190,6 +190,7 @@ export async function getMultiAngleCache(
         .select('product_context, hook_options, rendered_video_url, expires_at')
         .eq('image_hash', imageHash)
         .eq('motion_template_hash', motionTemplateHash)
+        .eq('tone_manner', toneManner)
         .maybeSingle(),
       5000,
       'aiCache.getMultiAngleCache',
@@ -240,7 +241,7 @@ export async function setMultiAngleCache(
         hook_options: hookOptions,
         rendered_video_url: renderedVideoUrl,
         expires_at: new Date(Date.now() + L2_TTL_MS).toISOString(),
-      }, { onConflict: 'image_hash,motion_template_hash' });
+      }, { onConflict: 'image_hash,motion_template_hash,tone_manner' });
   } catch {
     // best-effort
   }

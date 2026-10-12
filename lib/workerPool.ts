@@ -47,7 +47,11 @@ self.onmessage = async (e) => {
       let result = '';
       for (let i = 0; i < bytes.length; i += CHUNK) {
         const chunk = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
-        result += self.btoa(String.fromCharCode(...chunk));
+        let bin = '';
+        for (let j = 0; j < chunk.length; j++) {
+          bin += String.fromCharCode(chunk[j]);
+        }
+        result += self.btoa(bin);
       }
       self.postMessage({ id, result });
     } else if (type === 'cropSubject') {
@@ -144,6 +148,11 @@ function createPoolWorker(blobUrl: string): PoolWorker | null {
       pool = pool.filter((p) => p !== pw);
       if (rrIndex >= pool.length) rrIndex = 0;
       try { worker.terminate(); } catch { /* already dead */ }
+      // Respawn a replacement worker if the blob URL is still valid
+      if (blobUrlCache && pool.length < POOL_SIZE) {
+        const replacement = createPoolWorker(blobUrlCache);
+        if (replacement) pool.push(replacement);
+      }
     };
     return pw;
   } catch {
@@ -186,6 +195,17 @@ function dispatchToWorker<T>(payload: Record<string, unknown>, transfer?: Transf
   return new Promise<T>((resolve, reject) => {
     pw.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
     pw.worker.postMessage({ id, ...payload }, transfer ?? []);
+    // Timeout: reject if the worker never responds (frozen worker, tab throttle)
+    const timeout = setTimeout(() => {
+      if (pw.pending.has(id)) {
+        pw.pending.delete(id);
+        reject(new Error('Worker task timed out'));
+      }
+    }, 30_000);
+    pw.pending.set(id, {
+      resolve: (v: unknown) => { clearTimeout(timeout); resolve(v as T); },
+      reject: (e: Error) => { clearTimeout(timeout); reject(e); },
+    });
   });
 }
 

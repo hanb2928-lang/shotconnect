@@ -190,6 +190,10 @@ function registerContext(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement):
 }
 
 function evictOldestContext(): void {
+  if (contextsPurgedForBackground) {
+    contextPool.length = 0;
+    return;
+  }
   for (let i = 0; i < contextPool.length; i++) {
     const entry = contextPool[i];
     if (entry.retained) continue;
@@ -225,6 +229,11 @@ function evictOldestContext(): void {
 }
 
 function releaseContext(gl: WebGL2RenderingContext): void {
+  if (contextsPurgedForBackground) {
+    const idx = contextPool.findIndex((e) => e.gl === gl);
+    if (idx !== -1) contextPool.splice(idx, 1);
+    return;
+  }
   const idx = contextPool.findIndex((e) => e.gl === gl);
   if (idx === -1) return;
   const entry = contextPool[idx];
@@ -332,11 +341,11 @@ function ensureQuad(gl: WebGL2RenderingContext): WebGLBuffer {
   return buf;
 }
 
-function createTexture(gl: WebGL2RenderingContext, source: TexImageSource, w: number, h: number): WebGLTexture {
+function createTexture(gl: WebGL2RenderingContext, source: TexImageSource, w: number, h: number, unit = 0): WebGLTexture {
   if (isGLContextLost(gl)) throw new Error('WebGL context lost before texture creation');
   const tex = gl.createTexture();
   if (!tex) throw new Error('WebGL context lost: createTexture returned null');
-  gl.activeTexture(gl.TEXTURE0);
+  gl.activeTexture(gl.TEXTURE0 + unit);
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -437,6 +446,7 @@ function safeGLRender(
 }
 
 function invalidateContext(gl: WebGL2RenderingContext): void {
+  if (contextsPurgedForBackground) return;
   const state = contextState.get(gl);
   if (state) {
     for (const program of state.programs.values()) {
@@ -489,9 +499,8 @@ export function glOverlayComposite(
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     const program = getProgram(gl, 'overlay', OVERLAY_FRAG);
-    const imgTex = createTexture(gl, imageCanvas, width, height);
-    gl.activeTexture(gl.TEXTURE1);
-    const maskTex = createTexture(gl, maskCanvas, width, height);
+    const imgTex = createTexture(gl, imageCanvas, width, height, 0);
+    const maskTex = createTexture(gl, maskCanvas, width, height, 1);
     gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
     gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 1);
     gl.uniform3f(gl.getUniformLocation(program, 'u_overlayColor'), ...overlayColor);
@@ -515,9 +524,8 @@ export function glApplyAlphaMask(
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     const program = getProgram(gl, 'alpha', ALPHA_APPLY_FRAG);
-    const imgTex = createTexture(gl, imageCanvas, width, height);
-    gl.activeTexture(gl.TEXTURE1);
-    const maskTex = createTexture(gl, maskCanvas, width, height);
+    const imgTex = createTexture(gl, imageCanvas, width, height, 0);
+    const maskTex = createTexture(gl, maskCanvas, width, height, 1);
     gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
     gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 1);
     drawQuad(gl, program);

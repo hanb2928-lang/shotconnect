@@ -167,7 +167,18 @@ Deno.serve(async (req: Request) => {
     if (queryMode === "webhook") {
       const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
       const providedSecret = url.searchParams.get("secret") ?? "";
-      if (!webhookSecret || providedSecret !== webhookSecret) {
+      if (!webhookSecret || providedSecret.length !== webhookSecret.length) {
+        return new Response(
+          JSON.stringify({ error: "웹훅 서명 검증에 실패했습니다." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      // Constant-time comparison to prevent timing attacks on the webhook secret.
+      let secretMatch = 0;
+      for (let i = 0; i < webhookSecret.length; i++) {
+        secretMatch |= providedSecret.charCodeAt(i) ^ webhookSecret.charCodeAt(i);
+      }
+      if (secretMatch !== 0) {
         return new Response(
           JSON.stringify({ error: "웹훅 서명 검증에 실패했습니다." }),
           { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -2647,7 +2658,11 @@ function delay(ms: number): Promise<void> {
 }
 
 async function resolveRunwayKey(): Promise<string | null> {
+  // Prefer the server-level key from environment variables. Only fall back
+  // to user_settings if no server key is configured, and even then only
+  // fetch the most recently updated key (single-tenant app).
   const serverKey = Deno.env.get("RUNWAY_API_KEY") ?? null;
+  if (serverKey) return serverKey;
 
   if (supabaseUrl && serviceRoleKey) {
     try {
@@ -2675,7 +2690,7 @@ async function resolveRunwayKey(): Promise<string | null> {
     }
   }
 
-  return serverKey || null;
+  return null;
 }
 
 async function checkRateLimit(identifier: string): Promise<boolean> {

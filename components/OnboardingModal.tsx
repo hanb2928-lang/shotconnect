@@ -189,7 +189,7 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
   const handlePasteLink = () => {
     setDemoLinkPasted(true);
     timerRef.current = setTimeout(() => {
-      runOnJS(goToGenerateStep)();
+      goToGenerateStep();
     }, 600);
   };
 
@@ -199,7 +199,7 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
     setDemoGenerating(true);
     animateDemoStep(1);
     timerRef.current = setTimeout(() => {
-      runOnJS(finishGenerate)();
+      finishGenerate();
     }, 1800);
   };
 
@@ -219,7 +219,7 @@ export function OnboardingModal({ visible, onComplete }: OnboardingModalProps) {
   const handleDemoShare = () => {
     setDemoShared(true);
     timerRef.current = setTimeout(() => {
-      runOnJS(handleComplete)();
+      handleComplete();
     }, 500);
   };
 

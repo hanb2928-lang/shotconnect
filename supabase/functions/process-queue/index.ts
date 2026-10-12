@@ -519,21 +519,38 @@ async function recoverStaleJobs(): Promise<void> {
     // Requeue stale jobs that still have retries left. Increment attempts
     // so a perpetually-crashing worker eventually hits MAX_ATTEMPTS and gets
     // marked as error instead of being requeued forever.
-    const resp = await fetch(
-      `${supabaseUrl}/rest/v1/render_jobs?status=eq.processing&started_at=lt.${staleThreshold}&attempts=lt.${MAX_ATTEMPTS}`,
+    // Fetch stale jobs with remaining retries, then increment attempts individually.
+    // PostgREST does not evaluate expressions in PATCH bodies — sending
+    // "attempts+1" as a string literal sets attempts to the string "attempts+1",
+    // which breaks retry counting and leaves stale jobs stuck forever.
+    const staleJobsResp = await fetch(
+      `${supabaseUrl}/rest/v1/render_jobs?select=id,attempts&status=eq.processing&started_at=lt.${staleThreshold}&attempts=lt.${MAX_ATTEMPTS}`,
       {
-        method: "PATCH",
         headers: {
           apikey: serviceRoleKey,
           Authorization: `Bearer ${serviceRoleKey}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
         },
-        body: JSON.stringify({ status: "queued", attempts: "attempts+1" }),
       },
     );
-    if (!resp.ok) {
-      console.warn(`recoverStaleJobs requeue PATCH failed: ${resp.status}`);
+    if (staleJobsResp.ok) {
+      const staleJobs = await staleJobsResp.json() as Array<{ id: string; attempts: number }>;
+      for (const job of staleJobs) {
+        await fetch(
+          `${supabaseUrl}/rest/v1/render_jobs?id=eq.${job.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              apikey: serviceRoleKey,
+              Authorization: `Bearer ${serviceRoleKey}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({ status: "queued", attempts: job.attempts + 1 }),
+          },
+        );
+      }
+    } else {
+      console.warn(`recoverStaleJobs fetch failed: ${staleJobsResp.status}`);
     }
 
     // Mark stale jobs that have exhausted retries as error so

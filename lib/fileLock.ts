@@ -6,7 +6,8 @@
  * `isFileLocked` / `filterLockedPaths` to skip those files during cleanup.
  */
 
-const activeFileLocks = new Map<string, number>();
+const activeFileLocks = new Map<string, { acquiredAt: number; generation: number }>();
+let lockGeneration = 0;
 const ACQUIRE_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 50;
 
@@ -24,10 +25,16 @@ export async function acquireFileLock(filePath: string): Promise<() => void> {
     }
     await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-  activeFileLocks.set(filePath, Date.now());
+  const gen = ++lockGeneration;
+  activeFileLocks.set(filePath, { acquiredAt: Date.now(), generation: gen });
 
   return () => {
-    activeFileLocks.delete(filePath);
+    const entry = activeFileLocks.get(filePath);
+    // Only delete if this is still our lock — a timeout-steolen lock
+    // may have been re-acquired by a new holder.
+    if (entry && entry.generation === gen) {
+      activeFileLocks.delete(filePath);
+    }
   };
 }
 

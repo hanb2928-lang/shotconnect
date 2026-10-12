@@ -38,8 +38,13 @@ let runningFlush: Promise<FlushResult> | null = null;
  * all registered handlers are invoked in order. Each handler should be
  * fast and idempotent — it may be called multiple times.
  */
-export function registerFlushHandler(name: string, fn: FlushFn): void {
-  flushHandlers.push({ name, fn });
+export function registerFlushHandler(name: string, fn: FlushFn): () => void {
+  const entry = { name, fn };
+  flushHandlers.push(entry);
+  return () => {
+    const idx = flushHandlers.indexOf(entry);
+    if (idx >= 0) flushHandlers.splice(idx, 1);
+  };
 }
 
 /**

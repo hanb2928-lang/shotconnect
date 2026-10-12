@@ -34,7 +34,6 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
     if (!fontsReady) return false;
     return isStorageReady();
   });
-  const initStartedRef = useRef(false);
   const fontsReadyRef = useRef(fontsReady);
   fontsReadyRef.current = fontsReady;
   const bootPhaseRef = useRef(bootPhase);
@@ -57,9 +56,6 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
         return;
       }
     }
-
-    if (initStartedRef.current) return;
-    initStartedRef.current = true;
 
     let cancelled = false;
     let storageTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -89,6 +85,7 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
       // fires (whichever comes first — the hard timeout already
       // elapsed if we're here from the race loser).
       if (checkReady()) {
+        if (pollId) { clearInterval(pollId); pollId = null; }
         setIsBootReady(true);
       } else {
         // Poll for font readiness up to 1 more second.

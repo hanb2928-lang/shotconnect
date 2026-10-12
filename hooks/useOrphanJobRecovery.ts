@@ -101,6 +101,7 @@ export function useOrphanJobRecovery(
   callbackRef.current = onRecover;
   const lastCheckRef = useRef(0);
   const mountedRef = useRef(true);
+  const recoveredScanIds = useRef<Set<string>>(new Set());
 
   const runRecovery = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -137,9 +138,10 @@ export function useOrphanJobRecovery(
       if (!mountedRef.current) return;
 
       const orphan = recentScans.find(
-        (s) => s.video_url || s.muxed_video_url || s.edited_image_url,
+        (s) => !recoveredScanIds.current.has(s.id) && (s.video_url || s.muxed_video_url || s.edited_image_url),
       );
       if (orphan) {
+        recoveredScanIds.current.add(orphan.id);
         setLastRecoveryScan(orphan);
         try { callbackRef.current(orphan); } catch { /* non-fatal */ }
       }

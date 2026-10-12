@@ -159,6 +159,7 @@ export function startVideoRecording(
     recorder.onstop = () => {
       if (settled) return;
       settled = true;
+      clearTimeout(stopTimer);
       pressureUnsub();
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -186,23 +187,34 @@ export function startVideoRecording(
       }
     }, maxDurationMs);
 
-    const originalOnStop = recorder.onstop;
-    recorder.onstop = (e: Event) => {
+    try {
+      recorder.start(1000);
+    } catch (err) {
+      settled = true;
       clearTimeout(stopTimer);
-      if (typeof originalOnStop === 'function') {
-        (originalOnStop as (ev: Event) => void)(e);
+      pressureUnsub();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
       }
-    };
+      reject(new Error('녹화를 시작할 수 없습니다: ' + (err instanceof Error ? err.message : 'unknown')));
+    }
   });
 
-  recorder.start(1000);
   return { recorder, promise };
 }
 
 export function stopVideoRecording(recorder: MediaRecorder): void {
   // If the recorder was terminated by a background transition, the C++
   // encoder is already dead. Calling .stop() would trigger a SIGABRT.
-  if ((recorder as MediaRecorder & { _terminated?: boolean })._terminated) return;
+  if ((recorder as MediaRecorder & { _terminated?: boolean })._terminated) {
+    // Still stop stream tracks even if recorder was terminated by background
+    try {
+      recorder.stream.getTracks().forEach((track) => {
+        track.stop();
+      });
+    } catch { /* tracks may already be stopped */ }
+    return;
+  }
   if (recorder.state !== 'inactive') {
     recorder.stop();
   }

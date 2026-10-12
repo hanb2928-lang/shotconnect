@@ -123,13 +123,15 @@ describe('storageNamespaces', () => {
       expect(window.localStorage.getItem('display_density')).toBe('compact');
     });
 
-    it('removes entries with no timestamp (corrupted)', async () => {
+    it('preserves entries with no recognizable timestamp (GC safety)', async () => {
       window.localStorage.setItem('cache:no-ts', 'not-json');
 
       const result = await runStorageGC();
 
-      expect(result.removed).toBeGreaterThanOrEqual(1);
-      expect(window.localStorage.getItem('cache:no-ts')).toBeNull();
+      // Entries with no recognizable timestamp must be preserved — deleting
+      // them could wipe unrelated user data (settings, drafts, etc.).
+      expect(result.removed).toBe(0);
+      expect(window.localStorage.getItem('cache:no-ts')).toBe('not-json');
     });
 
     it('removes expired draft entries', async () => {

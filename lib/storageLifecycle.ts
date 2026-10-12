@@ -173,8 +173,10 @@ export async function triggerLifecycleSweep(): Promise<{
       method: 'POST',
       headers: {
         Authorization: `Bearer ${supabaseAnonKey}`,
+        apikey: supabaseAnonKey,
         'Content-Type': 'application/json',
       },
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) return null;
     const data = await res.json();

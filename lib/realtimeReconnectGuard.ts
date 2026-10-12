@@ -26,6 +26,7 @@ import { onFlushComplete, isInFlushWindow } from '@/lib/foregroundFlushGuard';
 import { withBridgeThrottle } from '@/lib/bridgeRateLimiter';
 
 let installed = false;
+let socketDisconnected = false;
 
 /**
  * Access the underlying RealtimeClient. The Supabase JS client exposes
@@ -85,13 +86,15 @@ export function installRealtimeReconnectGuard(): () => void {
       // the socket stays alive but the foreground reconnect handler
       // re-establishes it cleanly via rt.connect().
       setTimeout(() => {
-        try { rt.disconnect(); } catch { /* non-fatal */ }
+        try { rt.disconnect(); socketDisconnected = true; } catch { /* non-fatal */ }
       }, 0);
     }
   });
 
   const unsubFg = registerAppStateHandler('deferred', (nextState: string) => {
     if (nextState !== 'active') return;
+    if (!socketDisconnected) return;
+    socketDisconnected = false;
     const doReconnect = () => {
       try { rt.connect(); } catch { /* non-fatal */ }
     };

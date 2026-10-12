@@ -665,6 +665,14 @@ function waitForVideoCompletion(
     let appSubImmediate: (() => void) | null = null;
     const pendingRemovals: SafeTimerSet = createSafeTimerSet();
 
+    // TDZ-safe: declare all timers/flags referenced by cleanup/fullCleanup
+    // BEFORE those functions. If an early abort fires finish() before these
+    // would have been declared, accessing them in the TDZ throws.
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let dbCheckInFlight = false;
+    let dbCheckWatchdog: ReturnType<typeof setTimeout> | null = null;
+    let scanCheckInFlight = false;
+    let scanCheckWatchdog: ReturnType<typeof setTimeout> | null = null;
 
     const cleanup = () => {
       if (channel) {
@@ -759,8 +767,6 @@ function waitForVideoCompletion(
 
     // Check video_jobs table directly (used for initial check + fallback polling)
     let consecutivePollFailures = 0;
-    let dbCheckInFlight = false;
-    let dbCheckWatchdog: ReturnType<typeof setTimeout> | null = null;
     const LOCK_TIMEOUT_MS = 5000;
     const checkDb = async () => {
       if (settled || !scanId || dbCheckInFlight) return;
@@ -803,8 +809,6 @@ function waitForVideoCompletion(
       }
     };
 
-    let scanCheckInFlight = false;
-    let scanCheckWatchdog: ReturnType<typeof setTimeout> | null = null;
     // Check scans for the persisted URL (webhook writes here too).
     // Prefers video_url (server writes this on generation completion) and
     // falls back to muxed_video_url (post-processing audio mux). Checking
@@ -852,7 +856,6 @@ function waitForVideoCompletion(
     };
 
     // Primary path: Realtime subscription on video_jobs with health monitoring
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const setupChannel = async () => {
       if (settled || !scanId) return;
@@ -1057,10 +1060,10 @@ function waitForVideoCompletion(
       _dbg('HARD_TIMEOUT', { elapsedSec: monotonicElapsedSec(startTime) });
       const msg = `비디오 생성이 4분(240초)을 초과했습니다. 서버 오류일 수 있습니다. 다시 시도해주세요.`;
       report('error', 0, msg);
-      if (scanId) {
-        void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
-        void supabase.from('scans').update({ error_message: msg }).eq('id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker scans update failed:', e));
-      }
+      // Do NOT write FAILED to the DB here — the server may still complete the
+      // job successfully. Writing FAILED would overwrite the eventual SUCCESS
+      // and prevent retryFromDB from picking up the real result. Only reject
+      // locally so the caller can retry; the server's final status wins.
       finish(() => reject(new Error(msg)));
     }, REALTIME_TIMEOUT_MS);
 

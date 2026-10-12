@@ -108,7 +108,12 @@ export function dispatchAppStateChange(nextState: string): void {
   // UNLESS the new state is 'active', which is a foreground recovery
   // event that must never be dropped. Dropping it leaves the poll loop
   // dead and the Realtime channel unsubscribed, causing the 97% stall.
-  if (suspending && nextState !== 'active') return;
+  // Allow 'active' (foreground recovery) and 'background' (full suspend)
+  // through the suspension gate. On iOS, 'inactive' fires first, then
+  // 'background' follows seconds later. Dropping 'background' here would
+  // leave the app in a half-paused state where immediate handlers ran for
+  // 'inactive' but deferred handlers never fire for 'background'.
+  if (suspending && nextState !== 'active' && nextState !== 'background') return;
 
   lastDispatchedState = nextState;
 

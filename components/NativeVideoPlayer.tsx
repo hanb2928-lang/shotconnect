@@ -46,16 +46,20 @@ export function NativeVideoPlayer({ videoUri, isPlaying, ttsUrl, onLoad, onError
   }, [player]);
 
   useEffect(() => {
-    if (isPlaying) {
-      player.play();
-      if (ttsUrl) {
-        ttsPlayer.play();
+    try {
+      if (isPlaying) {
+        player.play();
+        if (ttsUrl) {
+          ttsPlayer.play();
+        }
+      } else {
+        player.pause();
+        if (ttsUrl) {
+          ttsPlayer.pause();
+        }
       }
-    } else {
-      player.pause();
-      if (ttsUrl) {
-        ttsPlayer.pause();
-      }
+    } catch {
+      // Stale player after background return — reactivation will retry
     }
   }, [isPlaying, player, ttsPlayer, ttsUrl, reactivationKey]);
 

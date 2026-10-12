@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Modal, ActivityIndicator } from 'react-native';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import Animated, {
   useSharedValue,
+  useAnimatedStyle,
   withRepeat,
   withSequence,
   withTiming,
@@ -63,9 +64,9 @@ export function ProcessingBarrier({
     };
   }, [visible, rotateSV]);
 
-  const iconStyle = {
+  const iconStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotateSV.value}deg` }],
-  } as const;
+  }));
 
   if (!visible) return null;
 

@@ -126,6 +126,7 @@ export function useVoiceRecording(): MediaRecorderLike {
       timerRef.current = setInterval(() => {
         if (durationRef.current >= MAX_DURATION_SEC) {
           if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+          stoppingRef.current = true;
           try { recorder.stop(); } catch {}
           return;
         }

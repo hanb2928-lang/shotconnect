@@ -151,7 +151,12 @@ export function useVoiceCommand(onCommand: (cmd: ParsedVoiceCommand) => void) {
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    recognition.onresult = handleResult;
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      // Reset restart attempts on successful recognition — without this,
+      // the counter never resets and voice command dies after ~10 cycles.
+      restartAttemptsRef.current = 0;
+      handleResult(event);
+    };
     recognition.onerror = handleError;
 
     recognition.onend = () => {

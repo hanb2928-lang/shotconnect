@@ -264,7 +264,10 @@ export function useResultPolling(
       });
     };
 
-    createRealtimeChannel().then((ch) => { realtimeChannel = ch; }).catch(() => {
+    createRealtimeChannel().then((ch) => {
+      if (cancelled || settledRef.current) { safeRemoveChannel(ch); return; }
+      realtimeChannel = ch;
+    }).catch(() => {
       // Realtime unavailable — polling still works as fallback
     });
 
@@ -392,6 +395,7 @@ export function useResultPolling(
         if (!realtimeChannel && !realtimeReconnectAttempted) {
           realtimeReconnectAttempted = true;
           createRealtimeChannel().then((ch) => {
+            if (cancelled || settledRef.current) { safeRemoveChannel(ch); realtimeReconnectAttempted = false; return; }
             realtimeChannel = ch;
             realtimeReconnectAttempted = false;
           }).catch(() => {
@@ -677,7 +681,10 @@ export function useResultPolling(
         onFlushComplete(() => {
           if (cancelled || settledRef.current) return;
           if (!realtimeChannel) {
-            createRealtimeChannel().then((ch) => { realtimeChannel = ch; }).catch(() => {
+            createRealtimeChannel().then((ch) => {
+              if (cancelled || settledRef.current) { safeRemoveChannel(ch); return; }
+              realtimeChannel = ch;
+            }).catch(() => {
               // Realtime unavailable — polling still works as fallback
             });
           }

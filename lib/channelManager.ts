@@ -109,6 +109,7 @@ export async function createChannel(name: string, opts?: Parameters<typeof supab
       // Channel may already be removed — non-fatal.
     }
     detachFromClient(channel);
+    markTearingDown(name);
   }
 
   const channel = supabase.channel(name, opts);
@@ -162,29 +163,31 @@ export function teardownAllChannels(): void {
  */
 export function sweepZombieSockets(): void {
   teardownAllChannels();
-  try {
-    const client = supabase as unknown as {
-      channels?: Map<string, { close?: () => void; send?: (msg: unknown) => void }>;
-      realtime?: { channels?: Map<string, unknown>; socket?: { disconnect?: () => void } };
-    };
-    // Clear any channels the Supabase client tracks internally that
-    // our registry doesn't know about (orphaned from untracked consumers).
-    const internalChannels = client.channels ?? client.realtime?.channels;
-    if (internalChannels && typeof internalChannels.forEach === 'function') {
-      internalChannels.forEach((ch: unknown) => {
-        try {
-          if (ch && typeof (ch as { close?: () => void }).close === 'function') {
-            (ch as { close: () => void }).close();
-          }
-        } catch { /* non-fatal */ }
-      });
-    }
-    // Force-disconnect the underlying WebSocket if exposed.
-    const socket = client.realtime?.socket;
-    if (socket && typeof socket.disconnect === 'function') {
-      socket.disconnect();
-    }
-  } catch { /* non-fatal — internal API may vary across versions */ }
+  // Defer socket disconnect to a macrotask. Calling socket.disconnect()
+  // synchronously can block the JS thread if the bridge is already locking
+  // during a background transition, causing an ANR → SIGKILL.
+  setTimeout(() => {
+    try {
+      const client = supabase as unknown as {
+        channels?: Map<string, { close?: () => void; send?: (msg: unknown) => void }>;
+        realtime?: { channels?: Map<string, unknown>; socket?: { disconnect?: () => void } };
+      };
+      const internalChannels = client.channels ?? client.realtime?.channels;
+      if (internalChannels && typeof internalChannels.forEach === 'function') {
+        internalChannels.forEach((ch: unknown) => {
+          try {
+            if (ch && typeof (ch as { close?: () => void }).close === 'function') {
+              (ch as { close: () => void }).close();
+            }
+          } catch { /* non-fatal */ }
+        });
+      }
+      const socket = client.realtime?.socket;
+      if (socket && typeof socket.disconnect === 'function') {
+        socket.disconnect();
+      }
+    } catch { /* non-fatal — internal API may vary across versions */ }
+  }, 0);
 }
 
 /**

@@ -17,6 +17,24 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Auth check: require the project's anon key as the apikey header.
+  // This prevents random internet callers from triggering storage sweeps,
+  // while remaining callable from the client (single-tenant, no auth).
+  const apiKey = req.headers.get("apikey") ?? "";
+  const expectedKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  if (!expectedKey || apiKey !== expectedKey) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -62,19 +80,17 @@ Deno.serve(async (req: Request) => {
       result.errors.push(`get_expired_objects: ${fetchError.message}`);
     } else if (expiredObjects && expiredObjects.length > 0) {
       // Group expired objects by bucket for batch deletion
-      const byBucket: Record<string, string[]> = {};
-      const objectIds: string[] = [];
+      const byBucket: Record<string, Array<{ id: string; path: string }>> = {};
 
       for (const obj of expiredObjects) {
         const bucket = obj.bucket;
         const path = obj.object_path;
         if (!byBucket[bucket]) byBucket[bucket] = [];
-        byBucket[bucket].push(path);
-        objectIds.push(obj.id);
+        byBucket[bucket].push({ id: obj.id, path });
       }
 
       // Delete from storage and mark as deleted in DB
-      for (const [bucket, paths] of Object.entries(byBucket)) {
+      for (const [bucket, objs] of Object.entries(byBucket)) {
         // Check which objects have delete_on_expire = true
         const { data: policyData } = await adminClient
           .from("storage_lifecycle_policy")
@@ -85,6 +101,7 @@ Deno.serve(async (req: Request) => {
         const shouldDelete = policyData?.delete_on_expire ?? true;
 
         if (shouldDelete) {
+          const paths = objs.map((o) => o.path);
           const { error: storageError } = await adminClient.storage
             .from(bucket)
             .remove(paths);
@@ -93,19 +110,18 @@ Deno.serve(async (req: Request) => {
             result.errors.push(`storage.remove(${bucket}): ${storageError.message}`);
           } else {
             result.deleted += paths.length;
+            // Only mark as deleted in DB when storage deletion succeeded.
+            // Marking objects deleted when the storage object still exists
+            // creates orphaned files that never get cleaned up.
+            for (const obj of objs) {
+              const { error: markError } = await adminClient.rpc("mark_object_deleted", {
+                p_id: obj.id,
+              });
+              if (markError) {
+                result.errors.push(`mark_object_deleted(${obj.id}): ${markError.message}`);
+              }
+            }
           }
-        }
-      }
-
-      // Mark all processed objects as deleted in DB (regardless of whether
-      // storage deletion succeeded — if storage deletion failed, the object
-      // may already be gone, and we don't want to retry indefinitely)
-      for (const id of objectIds) {
-        const { error: markError } = await adminClient.rpc("mark_object_deleted", {
-          p_id: id,
-        });
-        if (markError) {
-          result.errors.push(`mark_object_deleted(${id}): ${markError.message}`);
         }
       }
     }

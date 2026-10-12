@@ -184,6 +184,15 @@ function handleAppStateChange(nextState: string) {
   }
 }
 
+function visibilityHandler() {
+  if (typeof document === 'undefined') return;
+  if (document.visibilityState === 'hidden') {
+    stopProbing();
+  } else if (document.visibilityState === 'visible') {
+    startProbing();
+  }
+}
+
 function init() {
   if (initialized) return;
   initialized = true;
@@ -195,6 +204,7 @@ function init() {
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('online', onlineHandler);
       window.addEventListener('offline', offlineHandler);
+      window.addEventListener('visibilitychange', visibilityHandler);
     }
   } else {
     registerAppStateHandler('deferred', handleAppStateChange);
