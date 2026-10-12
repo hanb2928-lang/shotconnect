@@ -103,6 +103,8 @@ export function useResultPolling(
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
     let pollInFlight = false;
+    let pollInFlightWatchdog: ReturnType<typeof setTimeout> | null = null;
+    const POLL_LOCK_TIMEOUT_MS = 5000;
     let isPaused = false;
     // Monotonic guard: track the highest progress and latest step seen
     // across both realtime and polling. Stale realtime payloads that arrive
@@ -234,6 +236,8 @@ export function useResultPolling(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
+      if (pollInFlightWatchdog) { clearTimeout(pollInFlightWatchdog); pollInFlightWatchdog = null; }
+      pollInFlight = false;
       if (realtimeChannel) {
         safeRemoveChannel(realtimeChannel);
         realtimeChannel = null;
@@ -343,9 +347,14 @@ export function useResultPolling(
       if (cancelled || settledRef.current) return;
       if (pollInFlight) return;
       pollInFlight = true;
+      if (pollInFlightWatchdog) clearTimeout(pollInFlightWatchdog);
+      pollInFlightWatchdog = setTimeout(() => {
+        pollInFlight = false;
+      }, POLL_LOCK_TIMEOUT_MS);
       try {
         await pollOnceInner();
       } finally {
+        if (pollInFlightWatchdog) { clearTimeout(pollInFlightWatchdog); pollInFlightWatchdog = null; }
         pollInFlight = false;
       }
     };

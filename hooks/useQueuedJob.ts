@@ -50,6 +50,8 @@ export function useQueuedJob() {
     }
   }, []);
 
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const submit = useCallback(async (
     jobType: JobType,
     payload: Record<string, unknown>,
@@ -127,6 +129,7 @@ export function useQueuedJob() {
     const POLL_ERROR_WINDOW_MS = 30000;
     let pollingPaused = false;
     let pollInFlight = false;
+    const POLL_LOCK_TIMEOUT_MS = 5000;
 
     const startPolling = () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -134,12 +137,18 @@ export function useQueuedJob() {
         if (mySubmitId !== submitIdRef.current) return;
         if (pollInFlight) return;
         pollInFlight = true;
+        if (watchdogRef.current) clearTimeout(watchdogRef.current);
+        watchdogRef.current = setTimeout(() => {
+          pollInFlight = false;
+        }, POLL_LOCK_TIMEOUT_MS);
         getJob(jobId).then((job) => {
+          if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
           pollInFlight = false;
           if (mySubmitId !== submitIdRef.current) return;
           pollingPaused = false;
           if (job) handleUpdate(job);
         }).catch(() => {
+          if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
           pollInFlight = false;
           if (mySubmitId !== submitIdRef.current) return;
           const now = Date.now();
@@ -259,6 +268,7 @@ export function useQueuedJob() {
     return () => {
       mountedRef.current = false;
       submitIdRef.current++;
+      if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
       clearAll();
     };
   }, [clearAll]);

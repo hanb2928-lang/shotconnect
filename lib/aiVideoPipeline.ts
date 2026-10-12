@@ -684,6 +684,10 @@ function waitForVideoCompletion(
       if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
       if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
       if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
+      if (dbCheckWatchdog) { clearTimeout(dbCheckWatchdog); dbCheckWatchdog = null; }
+      if (scanCheckWatchdog) { clearTimeout(scanCheckWatchdog); scanCheckWatchdog = null; }
+      dbCheckInFlight = false;
+      scanCheckInFlight = false;
       clearAllSafeTimers(pendingRemovals);
       appSub?.();
       appSubImmediate?.();
@@ -756,9 +760,13 @@ function waitForVideoCompletion(
     // Check video_jobs table directly (used for initial check + fallback polling)
     let consecutivePollFailures = 0;
     let dbCheckInFlight = false;
+    let dbCheckWatchdog: ReturnType<typeof setTimeout> | null = null;
+    const LOCK_TIMEOUT_MS = 5000;
     const checkDb = async () => {
       if (settled || !scanId || dbCheckInFlight) return;
       dbCheckInFlight = true;
+      if (dbCheckWatchdog) clearTimeout(dbCheckWatchdog);
+      dbCheckWatchdog = setTimeout(() => { dbCheckInFlight = false; }, LOCK_TIMEOUT_MS);
       try {
         _dbg('checkDb:start');
         let query = supabase
@@ -786,11 +794,13 @@ function waitForVideoCompletion(
           finish(() => reject(new Error(msg)));
         }
       } finally {
+        if (dbCheckWatchdog) { clearTimeout(dbCheckWatchdog); dbCheckWatchdog = null; }
         dbCheckInFlight = false;
       }
     };
 
     let scanCheckInFlight = false;
+    let scanCheckWatchdog: ReturnType<typeof setTimeout> | null = null;
     // Check scans for the persisted URL (webhook writes here too).
     // Prefers video_url (server writes this on generation completion) and
     // falls back to muxed_video_url (post-processing audio mux). Checking
@@ -799,6 +809,8 @@ function waitForVideoCompletion(
     const checkScanVideoUrl = async () => {
       if (settled || !scanId || scanCheckInFlight) return;
       scanCheckInFlight = true;
+      if (scanCheckWatchdog) clearTimeout(scanCheckWatchdog);
+      scanCheckWatchdog = setTimeout(() => { scanCheckInFlight = false; }, LOCK_TIMEOUT_MS);
       try {
         _dbg('checkScanVideoUrl:start');
         const { data, error } = await supabase
@@ -826,6 +838,7 @@ function waitForVideoCompletion(
         _dbg('checkScanVideoUrl:error', { err: err instanceof Error ? err.message : String(err) });
         logError(err, { component: 'aiVideoPipeline', action: 'checkScanVideoUrl' });
       } finally {
+        if (scanCheckWatchdog) { clearTimeout(scanCheckWatchdog); scanCheckWatchdog = null; }
         scanCheckInFlight = false;
       }
     };
