@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
+import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 
 export type JobType =
   | 'analyze-photo'
@@ -142,6 +143,7 @@ export async function waitForJob<T = Record<string, unknown>>(
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     let channel: ReturnType<typeof supabase.channel> | undefined;
     let pollAttempt = 0;
+    const pendingRemovals: SafeTimerSet = createSafeTimerSet();
 
     const cleanup = () => {
       if (pollTimer) clearTimeout(pollTimer);
@@ -149,8 +151,9 @@ export async function waitForJob<T = Record<string, unknown>>(
       if (channel) {
         const ch = channel;
         channel = undefined;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
+      clearAllSafeTimers(pendingRemovals);
     };
 
     const finish = (result: JobResult<T>) => {
@@ -182,7 +185,7 @@ export async function waitForJob<T = Record<string, unknown>>(
             if (channel) {
               const ch = channel;
               channel = undefined;
-              setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+              safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
             }
             channelRetryCount++;
             if (channelRetryCount > MAX_WAIT_CHANNEL_RETRIES) {
@@ -254,6 +257,7 @@ export function subscribeToJob(
   let retryCount = 0;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let currentChannel: ReturnType<typeof supabase.channel> | null = null;
+  const pendingRemovals: SafeTimerSet = createSafeTimerSet();
 
   // Stale-job guard: if no update is received within 5 minutes, fire
   // onError so the caller can surface a timeout instead of staying
@@ -295,7 +299,7 @@ export function subscribeToJob(
           if (currentChannel) {
             const ch = currentChannel;
             currentChannel = null;
-            setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+            safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
           }
           retryCount++;
           if (retryCount > MAX_CHANNEL_RETRIES) {
@@ -317,8 +321,9 @@ export function subscribeToJob(
       if (currentChannel) {
         const ch = currentChannel;
         currentChannel = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
+      clearAllSafeTimers(pendingRemovals);
     },
   };
 }

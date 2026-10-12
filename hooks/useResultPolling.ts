@@ -3,6 +3,7 @@ import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from '@/lib/supabase';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
+import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 import { stepToProgress } from '@/lib/videoGenSteps';
 import { HybridRealtimePoller, type ChannelHealth } from '@/lib/hybridRealtimePoller';
 
@@ -93,6 +94,7 @@ export function useResultPolling(
     let pollAbort: AbortController | null = null;
     let forceSyncAbort: AbortController | null = null;
     let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    const pendingRemovals: SafeTimerSet = createSafeTimerSet();
     // Hoisted early so cleanup() can reference it without TDZ issues.
     let resumeBurstTimer: ReturnType<typeof setTimeout> | null = null;
     let softWarnFired = false;
@@ -235,6 +237,7 @@ export function useResultPolling(
         safeRemoveChannel(realtimeChannel);
         realtimeChannel = null;
       }
+      clearAllSafeTimers(pendingRemovals);
       pollAbort?.abort();
       forceSyncAbort?.abort();
     };
@@ -656,7 +659,7 @@ export function useResultPolling(
       const channelToRemove = realtimeChannel;
       realtimeChannel = null;
       if (channelToRemove) {
-        setTimeout(() => {
+        safeSetTimeout(pendingRemovals, () => {
           if (!cancelled) {
             safeRemoveChannel(channelToRemove);
           } else {

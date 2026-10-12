@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
+import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 
 export type ProjectStep = 'idle' | 'uploading' | 'rendering' | 'completed' | 'failed';
 
@@ -24,6 +25,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
   const [step, setStep] = useState<ProjectStep>('idle');
   const [data, setData] = useState<VideoJobRow | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const pendingRemovalsRef = useRef<SafeTimerSet>(createSafeTimerSet());
 
   useEffect(() => {
     if (!jobId) return;
@@ -60,7 +62,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
       if (channelRef.current) {
         const ch = channelRef.current;
         channelRef.current = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovalsRef.current, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
     };
 
@@ -111,6 +113,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
       unsubAppState();
       if (timeoutId) clearTimeout(timeoutId);
       teardownChannel();
+      clearAllSafeTimers(pendingRemovalsRef.current);
     };
   }, [jobId, scanId]);
 
