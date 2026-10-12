@@ -44,6 +44,19 @@ const GLOBAL_TICK_MS = 500;
 
 function processTick(): void {
   if (tickInFlight) return;
+  // Skip tick processing during the foreground flush window. On foreground
+  // return, the flush guard staggers bridge work across 150ms intervals.
+  // If ticks fire during this window, their DB queries compete with the
+  // staggered onFlushComplete callbacks, re-saturating the native bridge
+  // and causing the reconnection stampede the flush guard was designed to
+  // prevent. resumeAllTicks() is itself deferred to onFlushComplete, so
+  // ticks won't be active during the window in normal operation — but this
+  // guard is a safety net against races where the global timer fires before
+  // resumeAllTicks pauses.
+  if (typeof globalThis !== 'undefined') {
+    const flushMod = globalThis as typeof globalThis & { __flushWindowActive?: boolean };
+    if (flushMod.__flushWindowActive) return;
+  }
   const now = Date.now();
   const ready = registrations.filter(
     (r) => r.active && now - r.lastFired >= r.intervalMs,

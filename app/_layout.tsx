@@ -37,7 +37,7 @@ import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
 import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler, setDeferredThrottle } from '@/lib/appStateCoordinator';
 import { supabase, resetSessionCache } from '@/lib/supabase';
-import { armFlushWindow } from '@/lib/foregroundFlushGuard';
+import { armFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { armBridgeThrottle, withBridgeThrottle } from '@/lib/bridgeRateLimiter';
 import { installRealtimeReconnectGuard } from '@/lib/realtimeReconnectGuard';
 import { sweepZombieSockets } from '@/lib/channelManager';
@@ -227,7 +227,12 @@ export default function RootLayout() {
     });
     const unsubTickResume = registerAppStateHandler('deferred', (nextState: string) => {
       if (nextState === 'active') {
-        resumeAllTicks();
+        // Defer tick resumption until after the flush window completes.
+        // Without this, ticks fire 32ms after foreground return — inside
+        // the 1-second flush window — and their DB queries compete with
+        // the staggered onFlushComplete callbacks, re-saturating the native
+        // bridge and causing the reconnection stampede.
+        onFlushComplete(() => resumeAllTicks());
       }
     });
     const sub = AppState.addEventListener('change', (nextState: string) => {

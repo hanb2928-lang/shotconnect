@@ -854,7 +854,7 @@ function waitForVideoCompletion(
     // Primary path: Realtime subscription on video_jobs with health monitoring
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const setupChannel = () => {
+    const setupChannel = async () => {
       if (settled || !scanId) return;
       _dbg('setupChannel');
       if (channel) {
@@ -862,7 +862,9 @@ function waitForVideoCompletion(
         channel = null;
         safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
-      channel = createChannel(`video-job:${scanId}:${submitData.taskId}`)
+      channel = await createChannel(`video-job:${scanId}:${submitData.taskId}`);
+      if (settled) { safeRemoveChannel(channel); channel = null; return; }
+      channel
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
@@ -917,12 +919,12 @@ function waitForVideoCompletion(
           channel = null;
           safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
         }
-        setupChannel();
+        setupChannel().catch(() => { /* non-fatal */ });
       }, delayMs);
     };
 
     _dbg('setupChannel:initial');
-    setupChannel();
+    setupChannel().catch(() => { /* non-fatal */ });
 
     // Safety-net: adaptive DB poll with exponential backoff.
     // When the realtime channel is healthy, back off to reduce unnecessary
@@ -1125,7 +1127,7 @@ function waitForVideoCompletion(
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
       onFlushComplete(() => {
         if (settled) return;
-        setupChannel();
+        setupChannel().catch(() => { /* non-fatal */ });
         runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
         resumeBurstCount = 0;
         runResumeBurst();
@@ -1532,11 +1534,11 @@ export function subscribeVideoJob(
         channel = null;
         safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
-      setupChannel();
+      setupChannel().catch(() => { /* non-fatal */ });
     }, delayMs);
   };
 
-  const setupChannel = () => {
+  const setupChannel = async () => {
     if (settled) return;
     _dbg('setupChannel');
     if (channel) {
@@ -1544,7 +1546,9 @@ export function subscribeVideoJob(
       channel = null;
       safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
-    channel = createChannel(`video-job:${scanId}:${taskId}`)
+    channel = await createChannel(`video-job:${scanId}:${taskId}`);
+    if (settled) { safeRemoveChannel(channel); channel = null; return; }
+    channel
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
@@ -1725,7 +1729,7 @@ export function subscribeVideoJob(
   }, 240_000);
 
   _dbg('initial-setup');
-  setupChannel();
+  setupChannel().catch(() => { /* non-fatal */ });
   scheduleNextPoll();
   checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
   startRunwayPollFallback();
@@ -1782,7 +1786,7 @@ export function subscribeVideoJob(
       // waitForVideoCompletion's resumeBackground pattern.
       onFlushComplete(() => {
         if (settled) return;
-        setupChannel();
+        setupChannel().catch(() => { /* non-fatal */ });
         scheduleNextPoll();
         checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
         startRunwayPollFallback();
@@ -2047,18 +2051,20 @@ export function subscribeHdUpgrade(
         channel = null;
         safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
-      setupChannel();
+      setupChannel().catch(() => { /* non-fatal */ });
     }, delayMs);
   };
 
-  const setupChannel = () => {
+  const setupChannel = async () => {
     if (settled) return;
     if (channel) {
       const ch = channel;
       channel = null;
       safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
-    channel = createChannel(`hd-upgrade:${scanId}:${draftJobId}`)
+    channel = await createChannel(`hd-upgrade:${scanId}:${draftJobId}`);
+    if (settled) { safeRemoveChannel(channel); channel = null; return; }
+    channel
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scanId}` },
@@ -2134,7 +2140,7 @@ export function subscribeHdUpgrade(
     }).catch(() => {}).finally(() => { /* release promise ref */ });
   }, 240_000);
 
-  setupChannel();
+  setupChannel().catch(() => { /* non-fatal */ });
   scheduleNextPoll();
   checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
 
@@ -2176,7 +2182,7 @@ export function subscribeHdUpgrade(
       // reconnect-storm bridge flood on foreground return.
       onFlushComplete(() => {
         if (settled) return;
-        setupChannel();
+        setupChannel().catch(() => { /* non-fatal */ });
         scheduleNextPoll();
         checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
         resumeBurstCount = 0;

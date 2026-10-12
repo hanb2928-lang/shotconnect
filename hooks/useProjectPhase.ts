@@ -35,9 +35,11 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
     const isSoft = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
     const useScanId = isSoft && scanId;
 
-    const setupChannel = () => {
+    const setupChannel = async () => {
       if (cancelled || channelRef.current) return;
-      const channel = createChannel(`project-phase-${jobId}`)
+      const channel = await createChannel(`project-phase-${jobId}`);
+      if (cancelled || channelRef.current) { safeRemoveChannel(channel); return; }
+      channel
         .on(
           'postgres_changes',
           {
@@ -94,7 +96,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
 
       if (cancelled) return;
 
-      setupChannel();
+      setupChannel().catch(() => { /* non-fatal */ });
     })();
 
     // Remove the Realtime channel on background to prevent the socket
@@ -104,7 +106,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
       if (nextState === 'background' || nextState === 'inactive') {
         teardownChannel();
       } else if (nextState === 'active') {
-        onFlushComplete(() => setupChannel());
+        onFlushComplete(() => { setupChannel().catch(() => { /* non-fatal */ }); });
       }
     });
 

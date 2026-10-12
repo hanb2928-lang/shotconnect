@@ -179,9 +179,9 @@ export function useResultPolling(
       ? `scan_id=eq.${scanId}`
       : `task_id=eq.${jobId}`;
 
-    const createRealtimeChannel = () => {
-      const ch = createChannel(`job-poll-${jobId}`)
-        .on(
+    const createRealtimeChannel = async () => {
+      const ch = await createChannel(`job-poll-${jobId}`);
+      ch.on(
           'postgres_changes',
           {
             event: 'UPDATE',
@@ -257,11 +257,9 @@ export function useResultPolling(
       });
     };
 
-    try {
-      realtimeChannel = createRealtimeChannel();
-    } catch {
+    createRealtimeChannel().then((ch) => { realtimeChannel = ch; }).catch(() => {
       // Realtime unavailable — polling still works as fallback
-    }
+    });
 
     const cleanup = () => {
       cancelled = true;
@@ -431,11 +429,9 @@ export function useResultPolling(
         // path to detect completion — especially the scans table callback
         // which carries muxed_video_url.
         if (!realtimeChannel) {
-          try {
-            realtimeChannel = createRealtimeChannel();
-          } catch {
+          createRealtimeChannel().then((ch) => { realtimeChannel = ch; }).catch(() => {
             // Realtime unavailable — DB poll still works as fallback
-          }
+          });
         }
         // DB force-sync: for soft task IDs, forceSyncByScan checks scans
         // first (muxed_video_url) then video_jobs. For regular task IDs,
@@ -746,11 +742,9 @@ export function useResultPolling(
         onFlushComplete(() => {
           if (cancelled || settledRef.current) return;
           if (!realtimeChannel) {
-            try {
-              realtimeChannel = createRealtimeChannel();
-            } catch {
+            createRealtimeChannel().then((ch) => { realtimeChannel = ch; }).catch(() => {
               // Realtime unavailable — polling still works as fallback
-            }
+            });
           }
           runResumeBurst();
 

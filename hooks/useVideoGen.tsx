@@ -103,16 +103,27 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const terminalLockRef = useRef(false);
   const pendingProgressRef = useRef<VideoGenProgress | null>(null);
   const progressFrameRef = useRef<number | ReturnType<typeof setTimeout> | null>(null);
+  const pendingUpdaterRef = useRef<((prev: VideoGenProgress | null) => VideoGenProgress | null) | null>(null);
 
   const flushQueuedProgress = useCallback(() => {
     progressFrameRef.current = null;
-    const next = pendingProgressRef.current;
-    pendingProgressRef.current = null;
-    if (next && mountedRef.current) setVideoProgress(next);
+    if (!mountedRef.current) {
+      pendingProgressRef.current = null;
+      pendingUpdaterRef.current = null;
+      return;
+    }
+    const updater = pendingUpdaterRef.current;
+    if (updater) {
+      pendingUpdaterRef.current = null;
+      setVideoProgress(updater);
+    } else {
+      const next = pendingProgressRef.current;
+      pendingProgressRef.current = null;
+      if (next) setVideoProgress(next);
+    }
   }, []);
 
-  const queueProgressUpdate = useCallback((progress: VideoGenProgress) => {
-    pendingProgressRef.current = progress;
+  const scheduleProgressFrame = useCallback(() => {
     if (progressFrameRef.current !== null) return;
     if (typeof requestAnimationFrame === 'function') {
       progressFrameRef.current = requestAnimationFrame(flushQueuedProgress);
@@ -120,6 +131,24 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       progressFrameRef.current = setTimeout(flushQueuedProgress, 16);
     }
   }, [flushQueuedProgress]);
+
+  const queueProgressUpdate = useCallback((progress: VideoGenProgress) => {
+    pendingProgressRef.current = progress;
+    pendingUpdaterRef.current = null;
+    scheduleProgressFrame();
+  }, [scheduleProgressFrame]);
+
+  const queueProgressUpdater = useCallback(
+    (updater: (prev: VideoGenProgress | null) => VideoGenProgress | null) => {
+      const prevUpdater = pendingUpdaterRef.current;
+      pendingUpdaterRef.current = prevUpdater
+        ? (prev) => updater(prevUpdater(prev))
+        : updater;
+      pendingProgressRef.current = null;
+      scheduleProgressFrame();
+    },
+    [scheduleProgressFrame],
+  );
 
   // Single guarded entry point for completion transitions. Prevents
   // double-mutate when concurrent async paths (Realtime, polling, foreground
@@ -363,7 +392,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
                 serverProgRef.current = Math.max(serverProgRef.current ?? 0, stepProg);
               }
-              setVideoProgress((prev) => {
+              queueProgressUpdater((prev) => {
                 if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
                 const elapsed = Math.round((Date.now() - genStartRef.current) / 1000);
                 const timeProgress = Math.min(0.9, 0.15 + elapsed * 0.006);
@@ -408,16 +437,14 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const isCreepTick = tickCount % 2 === 0;
         const isHardGuardTick = tickCount % 8 === 0;
         const isCompletionTick = tickCount % 4 === 0;
-        setVideoProgress((prev) => {
+        queueProgressUpdater((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           const clampMax = 0.99;
           const serverProg = serverProgRef.current;
           const safeServer = (serverProg !== null && !isNaN(serverProg) && isFinite(serverProg)) ? serverProg : null;
-          // Time-based interpolation
           const timeBasedProgress = Math.min(0.90, 0.15 + elapsed * 0.006);
           let next = Math.max(prev.progress, timeBasedProgress);
           if (safeServer !== null) next = Math.max(next, Math.min(safeServer, clampMax));
-          // Soft creep (every 3s)
           if (isCreepTick) {
             const creepCeiling = 0.92;
             if (next < creepCeiling) {
@@ -425,7 +452,6 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               next = Math.min(next + 0.02, ceiling);
             }
           }
-          // Hard guard (every 12s)
           if (isHardGuardTick) {
             const guardCeiling = 0.90;
             if (next < guardCeiling) {
@@ -434,7 +460,6 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
             }
           }
           next = Math.max(0, Math.min(clampMax, next));
-          // Completion watch (every 6s) — read-only check, no progress change
           if (isCompletionTick) {
             if (next >= 0.85) {
               if (renderStallSinceRef.current === null) {
@@ -626,7 +651,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     serverProgRef.current = sp;
     if (sp !== null && !isNaN(sp) && isFinite(sp) && sp > 0 && isGenerating) {
       const clamped = Math.max(0, Math.min(0.99, sp));
-      setVideoProgress((prev) => {
+      queueProgressUpdater((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (isNaN(clamped) || clamped <= prev.progress) return prev;
         const pctLabel = ` (${Math.round(clamped * 100)}%)`;
@@ -644,7 +669,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     const ss = polling.serverStep;
     if (ss) {
       updateActiveVideoJobStep(ss, polling.serverProgress ?? undefined).catch(() => {}).finally(() => { /* release ref */ });
-      setVideoProgress((prev) => {
+      queueProgressUpdater((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (prev.serverStep === ss) return prev;
         return { ...prev, serverStep: ss };
@@ -666,7 +691,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           // Fallback hook generation failed — still advance to avoid hang
         }
         serverProgRef.current = 0.25;
-        setVideoProgress((prev) => {
+        queueProgressUpdater((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           return {
             ...prev,
@@ -721,7 +746,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     };
 
     stepStallTimerRef.current = setInterval(() => {
-      setVideoProgress((prev) => {
+      queueProgressUpdater((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error' || prev.phase === 'submitting') return prev;
         const currentStep = prev.serverStep ?? 'analyzing';
         const now = Date.now();
@@ -981,7 +1006,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
       generateLockRef.current = false;
     }
-  }, [isGenerating, queueProgressUpdate]);
+  }, [isGenerating, queueProgressUpdate, queueProgressUpdater]);
 
   const clearGeneration = useCallback(() => {
     generationTokenRef.current++;

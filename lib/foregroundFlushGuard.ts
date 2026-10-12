@@ -33,6 +33,13 @@ const completionCallbacks: Array<() => void> = [];
 
 export function armFlushWindow(): void {
   flushWindowActive = true;
+  // Expose the flag globally so tickGate can check it without a circular
+  // import. tickGate is imported by useResultPolling and aiVideoPipeline,
+  // which are loaded before _layout.tsx — a direct import of
+  // foregroundFlushGuard from tickGate would create a circular dependency.
+  if (typeof globalThis !== 'undefined') {
+    (globalThis as typeof globalThis & { __flushWindowActive?: boolean }).__flushWindowActive = true;
+  }
   if (flushTimer !== null) clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
     flushTimer = null;
@@ -48,12 +55,20 @@ export function armFlushWindow(): void {
     const runNext = () => {
       if (i >= cbs.length) {
         flushWindowActive = false;
+        if (typeof globalThis !== 'undefined') {
+          (globalThis as typeof globalThis & { __flushWindowActive?: boolean }).__flushWindowActive = false;
+        }
         return;
       }
       const cb = cbs[i++];
       withBridgeThrottle(() => { try { cb(); } catch { /* non-fatal */ } });
       if (i < cbs.length) setTimeout(runNext, STAGGER_MS);
-      else flushWindowActive = false;
+      else {
+        flushWindowActive = false;
+        if (typeof globalThis !== 'undefined') {
+          (globalThis as typeof globalThis & { __flushWindowActive?: boolean }).__flushWindowActive = false;
+        }
+      }
     };
     runNext();
   }, FLUSH_WINDOW_MS);
@@ -78,6 +93,9 @@ export function onFlushComplete(cb: () => void): void {
 
 export function _resetForTesting(): void {
   flushWindowActive = false;
+  if (typeof globalThis !== 'undefined') {
+    (globalThis as typeof globalThis & { __flushWindowActive?: boolean }).__flushWindowActive = false;
+  }
   if (flushTimer !== null) { clearTimeout(flushTimer); flushTimer = null; }
   completionCallbacks.length = 0;
 }

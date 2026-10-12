@@ -173,8 +173,9 @@ export async function waitForJob<T = Record<string, unknown>>(
 
     let channelRetryCount = 0;
     const MAX_WAIT_CHANNEL_RETRIES = 5;
-    const connectChannel = () => {
-      channel = createChannel(`job-wait:${jobId}${channelRetryCount > 0 ? `:r${channelRetryCount}` : ''}`)
+    const connectChannel = async () => {
+      channel = await createChannel(`job-wait:${jobId}${channelRetryCount > 0 ? `:r${channelRetryCount}` : ''}`);
+      channel
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'render_jobs', filter: `id=eq.${jobId}` },
@@ -199,12 +200,12 @@ export async function waitForJob<T = Record<string, unknown>>(
             if (channelRetryCount > MAX_WAIT_CHANNEL_RETRIES) {
               finish({ success: false, error: '실시간 연결이 끊겼습니다. 네트워크를 확인해주세요.' });
             } else {
-              setTimeout(connectChannel, 3000 * (0.8 + Math.random() * 0.4));
+              setTimeout(() => connectChannel().catch(() => { /* non-fatal */ }), 3000 * (0.8 + Math.random() * 0.4));
             }
           }
         });
     };
-    connectChannel();
+    connectChannel().catch(() => { /* non-fatal */ });
 
     timeoutTimer = setTimeout(() => {
       finish({ success: false, error: 'Job timed out' });
@@ -285,10 +286,12 @@ export function subscribeToJob(
   };
   resetStaleTimer();
 
-  const connect = () => {
+  const connect = async () => {
     if (disposed) return;
 
-    currentChannel = createChannel(`job:${jobId}${retryCount > 0 ? `:r${retryCount}` : ''}`)
+    currentChannel = await createChannel(`job:${jobId}${retryCount > 0 ? `:r${retryCount}` : ''}`);
+    if (disposed) { safeRemoveChannel(currentChannel); currentChannel = null; return; }
+    currentChannel
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'render_jobs', filter: `id=eq.${jobId}` },
@@ -313,13 +316,13 @@ export function subscribeToJob(
           if (retryCount > MAX_CHANNEL_RETRIES) {
             if (onError) onError();
           } else {
-            retryTimer = setTimeout(connect, CHANNEL_RETRY_DELAY_MS * JITTER());
+            retryTimer = setTimeout(() => connect().catch(() => { /* non-fatal */ }), CHANNEL_RETRY_DELAY_MS * JITTER());
           }
         }
       });
   };
 
-  connect();
+  connect().catch(() => { /* non-fatal */ });
 
   return {
     unsubscribe: () => {
