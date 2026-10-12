@@ -1903,6 +1903,7 @@ function ResultScreenInner() {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
+    let channelGeneration = 0;
     const MAX_RETRIES = 5;
 
     const onPayload = (payload: { new: Record<string, unknown> | null }) => {
@@ -1936,7 +1937,7 @@ function ResultScreenInner() {
     const connectChannel = () => {
       if (!mountedRef.current) return;
       channel = supabase
-        .channel(`bg-video-watch:${scan.id}${retryCount > 0 ? `:r${retryCount}` : ''}`)
+        .channel(`bg-video-watch:${scan.id}:c${++channelGeneration}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scan.id}` },
@@ -2266,6 +2267,7 @@ function ResultScreenInner() {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
+    let channelGeneration = 0;
     const MAX_RETRIES = 5;
 
     const onPayload = () => {
@@ -2296,7 +2298,7 @@ function ResultScreenInner() {
     const connectChannel = () => {
       if (!mountedRef.current) return;
       channel = supabase
-        .channel(`scan-row-watch:${scan.id}${retryCount > 0 ? `:r${retryCount}` : ''}`)
+        .channel(`scan-row-watch:${scan.id}:c${++channelGeneration}`)
         .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scan.id}` },
