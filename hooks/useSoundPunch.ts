@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { Platform } from 'react-native';
 import { isMobileWebView } from '@/lib/devicePerformance';
 
 export type PunchEffectType = 'cut' | 'zoom' | 'shake' | 'explosion';
@@ -108,7 +109,7 @@ export function useSoundPunch() {
 
   useEffect(() => {
     mountedRef.current = true;
-    if (typeof document === 'undefined') return;
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
 
     const handleVisibilityChange = () => {
       const r = refs.current;

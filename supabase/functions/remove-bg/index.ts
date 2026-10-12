@@ -26,6 +26,15 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Reject payloads exceeding 20MB (base64) to prevent memory exhaustion
+    const MAX_BASE64_LENGTH = 28_000_000;
+    if (imageDataUrl.length > MAX_BASE64_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: "이미지가 너무 큽니다. 더 작은 이미지로 다시 시도해주세요." }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const cleanMime = mimeType || "image/jpeg";
     const sanitizedDataUrl = ensureDataUrl(imageDataUrl, cleanMime);
 

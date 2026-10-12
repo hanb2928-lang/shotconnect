@@ -107,7 +107,7 @@ function noteFreq(note: string): number {
   let st = SEMITONE_MAP[letter] ?? 0;
   if (accidental === '#') st += 1;
   if (accidental === 'b') st -= 1;
-  const midi = (parseInt(octaveStr) + 1) * 12 + st;
+  const midi = (parseInt(octaveStr, 10) + 1) * 12 + st;
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 

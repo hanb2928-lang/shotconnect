@@ -286,8 +286,12 @@ function evictOldestCacheEntries(): void {
   }
 }
 
+let evictionInProgress = false;
+
 async function evictOldestCacheEntriesNative(): Promise<void> {
   if (!nativeGetAllKeys || !nativeRemoveItem) return;
+  if (evictionInProgress) return;
+  evictionInProgress = true;
   try {
     const allKeys = await nativeGetAllKeys();
     const cacheKeys = allKeys.filter((k) => k.startsWith('cache:'));
@@ -310,5 +314,7 @@ async function evictOldestCacheEntriesNative(): Promise<void> {
         readCache.delete(entries[i].key);
       } catch {}
     }
-  } catch {}
+  } catch {} finally {
+    evictionInProgress = false;
+  }
 }

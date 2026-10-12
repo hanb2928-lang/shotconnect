@@ -494,6 +494,9 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
     const webhookParams = webhookSecret
       ? `&secret=${encodeURIComponent(webhookSecret)}`
       : ``;
+    if (!webhookSecret) {
+      console.warn("RUNWAY_WEBHOOK_SECRET is not set — webhook callbacks will be rejected. Set this env var to enable secure video completion callbacks.");
+    }
     // Include scanId so the webhook handler can identify which scan this
     // callback belongs to. The runwayTaskId is not known yet (Runway assigns
     // it), but Runway sends its own task ID in the webhook body — the handler

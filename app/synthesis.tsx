@@ -187,8 +187,12 @@ async function performUpload(finalBase64: string): Promise<string> {
   let currentQuality = 0.3;
   const fileName = `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 
-  const makeBytes = (b64: string) =>
-    new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' });
+  const makeBytes = (b64: string) => {
+    if (Platform.OS !== 'web') {
+      return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    }
+    return new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' });
+  };
 
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {

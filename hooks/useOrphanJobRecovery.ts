@@ -145,6 +145,8 @@ export function useOrphanJobRecovery(
         setLastRecoveryScan(orphan);
         try { callbackRef.current(orphan); } catch { /* non-fatal */ }
       }
+    } catch (err) {
+      console.error('[useOrphanJobRecovery] runRecovery failed:', err);
     } finally {
       if (mountedRef.current) setIsChecking(false);
     }

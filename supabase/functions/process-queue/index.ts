@@ -170,6 +170,8 @@ Deno.serve(async (req: Request) => {
             // Fire-and-forget trigger after delay to retry the requeued job
             if (requeueDelay > 0) {
               setTimeout(() => {
+                const ctrl = new AbortController();
+                const tid = setTimeout(() => ctrl.abort(), 30000);
                 fetch(`${supabaseUrl}/functions/v1/process-queue`, {
                   method: "POST",
                   headers: {
@@ -178,7 +180,8 @@ Deno.serve(async (req: Request) => {
                     apikey: serviceRoleKey,
                   },
                   body: JSON.stringify({ trigger: true, retry: true }),
-                }).catch(() => {});
+                  signal: ctrl.signal,
+                }).catch(() => {}).finally(() => clearTimeout(tid));
               }, requeueDelay);
             }
           }

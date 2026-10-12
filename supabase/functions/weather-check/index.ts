@@ -40,7 +40,14 @@ Deno.serve(async (req: Request) => {
     // Current weather + precipitation in one call
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${parseFloat(lat)}&longitude=${parseFloat(lon)}&current=temperature_2m,precipitation,weather_code&timezone=auto`;
 
-    const weatherRes = await fetch(weatherUrl);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    let weatherRes: Response;
+    try {
+      weatherRes = await fetch(weatherUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (!weatherRes.ok) {
       return new Response(
         JSON.stringify({ error: "Weather API request failed" }),

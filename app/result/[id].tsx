@@ -4108,6 +4108,7 @@ function ResultScreenInner() {
             placeholderTextColor={theme.colors.dark.textFaint}
             multiline
             numberOfLines={2}
+            maxLength={500}
             textAlignVertical="top"
           />
         </View>
@@ -4873,7 +4874,7 @@ function ResultScreenInner() {
                 <Text style={styles.galleryModalTitle} numberOfLines={1}>
                   {['정면', '좌측', '우측', '후면', '상부'][galleryModalIndex] ?? `컷 ${galleryModalIndex + 1}`} 컷
                 </Text>
-                <TouchableOpacity style={styles.galleryModalCloseBtn} onPress={() => setGalleryModalVisible(false)} activeOpacity={0.7}>
+                <TouchableOpacity style={styles.galleryModalCloseBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={() => setGalleryModalVisible(false)} activeOpacity={0.7}>
                   <X size={20} color="#fff" strokeWidth={2} />
                 </TouchableOpacity>
               </View>
@@ -4943,7 +4944,7 @@ function ResultScreenInner() {
                 <Text style={styles.galleryModalTitle} numberOfLines={1}>
                   AI 이미지 {imageViewerIndex + 1} / {generatedImages.length}
                 </Text>
-                <TouchableOpacity style={styles.galleryModalCloseBtn} onPress={() => setImageViewerVisible(false)} activeOpacity={0.7}>
+                <TouchableOpacity style={styles.galleryModalCloseBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={() => setImageViewerVisible(false)} activeOpacity={0.7}>
                   <X size={20} color="#fff" strokeWidth={2} />
                 </TouchableOpacity>
               </View>
@@ -4980,7 +4981,20 @@ function ResultScreenInner() {
                     const uri = generatedImages[imageViewerIndex];
                     if (!uri) return;
                     try {
-                      await RNShare.share({ url: uri });
+                      if (Platform.OS !== 'web' && uri.startsWith('data:')) {
+                        const base64Match = uri.match(/^data:image\/([\w]+);base64,(.+)$/);
+                        if (base64Match) {
+                          const ext = base64Match[1].toLowerCase() === 'png' ? 'png' : 'jpg';
+                          const filePath = `${FileSystem.cacheDirectory}share-${Date.now()}.${ext}`;
+                          await FileSystem.writeAsStringAsync(filePath, base64Match[2], { encoding: FileSystem.EncodingType.Base64 });
+                          await RNShare.share({ url: filePath });
+                          await FileSystem.deleteAsync(filePath, { idempotent: true }).catch(() => {});
+                        } else {
+                          await RNShare.share({ message: uri });
+                        }
+                      } else {
+                        await RNShare.share({ url: uri });
+                      }
                     } catch { /* non-fatal */ }
                   }}
                   activeOpacity={0.7}
