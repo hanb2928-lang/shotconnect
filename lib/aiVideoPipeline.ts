@@ -646,6 +646,7 @@ function waitForVideoCompletion(
     let reconnectAttempts = 0;
     let pollBackoffAttempt = 0;
     const _dbg = (stage: string, extra?: unknown) => {
+      if (!__DEV__) return;
       const elapsed = monotonicElapsedSec(startTime);
       console.log(`[aiVideoPipeline:waitForVideoCompletion] t=${elapsed}s stage=${stage}`, extra ?? '');
       addBreadcrumb('video', `waitForVideoCompletion: ${stage}`, 'warning', { elapsedSec: elapsed, ...(extra && typeof extra === 'object' ? extra as Record<string, unknown> : {}) });
@@ -1335,6 +1336,7 @@ export function subscribeVideoJob(
   const isSoftTaskId = taskId.startsWith('soft-') || taskId.startsWith('hd-soft-');
   const pollStartTime = Date.now();
   const _dbg = (stage: string, extra?: unknown) => {
+    if (!__DEV__) return;
     const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
     console.log(`[aiVideoPipeline:subscribeVideoJob] t=${elapsedSec}s stage=${stage}`, extra ?? '');
     addBreadcrumb('video', `subscribeVideoJob: ${stage}`, 'warning', { elapsedSec, ...(extra && typeof extra === 'object' ? extra as Record<string, unknown> : {}) });

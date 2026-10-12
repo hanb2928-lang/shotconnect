@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getItem, getItemSync, setItem } from '@/lib/storage';
+import { getItem, getItemSync, setItem, removeItem } from '@/lib/storage';
 import { getUserSettings } from '@/lib/settings';
 
 export type MascotStyle = 'cute-crawler' | 'minimal-dot' | 'none';
@@ -11,19 +11,34 @@ export interface MascotConfig {
 }
 
 const STORAGE_KEY = 'mascot_config';
+const CACHE_VERSION_KEY = 'mascot_config_version';
+const CACHE_VERSION = '20261012-v1';
 const DEFAULT_CONFIG: MascotConfig = {
   enabled: true,
   style: 'cute-crawler',
   loading: true,
 };
 
+function isCacheVersionValid(): boolean {
+  const v = getItemSync(CACHE_VERSION_KEY);
+  return v === CACHE_VERSION;
+}
+
+function validateAndMigrateCache(): void {
+  if (!isCacheVersionValid()) {
+    removeItem(STORAGE_KEY).catch(() => {});
+    setItem(CACHE_VERSION_KEY, CACHE_VERSION).catch(() => {});
+  }
+}
+
 export function useMascotSettings(): MascotConfig & {
   updateEnabled: (enabled: boolean) => Promise<void>;
   updateStyle: (style: MascotStyle) => Promise<void>;
 } {
   const [config, setConfig] = useState<MascotConfig>(() => {
+    validateAndMigrateCache();
     const cached = getItemSync(STORAGE_KEY);
-    if (cached) {
+    if (cached && isCacheVersionValid()) {
       try {
         const parsed = JSON.parse(cached);
         return {
@@ -71,6 +86,7 @@ export function useMascotSettings(): MascotConfig & {
   const persist = useCallback(async (enabled: boolean, style: MascotStyle) => {
     setConfig({ enabled, style, loading: false });
     await setItem(STORAGE_KEY, JSON.stringify({ enabled, style }));
+    await setItem(CACHE_VERSION_KEY, CACHE_VERSION);
   }, []);
 
   const updateEnabled = useCallback(

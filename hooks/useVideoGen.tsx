@@ -174,6 +174,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       }
       if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
       if (nudgeTimerRef.current) { clearInterval(nudgeTimerRef.current); nudgeTimerRef.current = null; }
+      if (hookTimeoutRef.current) { clearTimeout(hookTimeoutRef.current); hookTimeoutRef.current = null; }
+      if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
+      if (stepStallTimerRef.current) { clearInterval(stepStallTimerRef.current); stepStallTimerRef.current = null; }
     };
   }, []);
 
