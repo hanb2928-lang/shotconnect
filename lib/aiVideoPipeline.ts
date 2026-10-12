@@ -1027,9 +1027,17 @@ function waitForVideoCompletion(
       if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
-      if (channel) {
-        safeRemoveChannel(channel);
-        channel = null;
+      // Detach channel without bridge call — see comment below.
+      // safeRemoveChannel calls supabase.removeChannel() (WebSocket close),
+      // a bridge call forbidden in the immediate phase. Deferring to
+      // setTimeout(0) prevents the JS-thread deadlock / watchdog SIGKILL
+      // that was killing the app on background.
+      const channelToRemove = channel;
+      channel = null;
+      if (channelToRemove) {
+        setTimeout(() => {
+          try { safeRemoveChannel(channelToRemove); } catch { /* non-fatal */ }
+        }, 0);
       }
       bgTimer = setTimeout(() => {
         if (settled) return;

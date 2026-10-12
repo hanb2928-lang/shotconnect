@@ -607,9 +607,28 @@ export function useResultPolling(
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (softWarnTimer) { clearTimeout(softWarnTimer); softWarnTimer = null; }
       if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-      if (realtimeChannel) {
-        safeRemoveChannel(realtimeChannel);
-        realtimeChannel = null;
+      // Detach the channel reference WITHOUT calling safeRemoveChannel here.
+      // safeRemoveChannel calls supabase.removeChannel(), which is a WebSocket
+      // bridge call. The immediate phase must be bridge-free — calling
+      // removeChannel while the OS is locking the native bridge deadlocks
+      // the JS thread and triggers a watchdog SIGKILL (the "app dies on
+      // background" bug). Defer the actual removal to a setTimeout(0)
+      // macrotask, which the coordinator's drain gate has already cleared
+      // by the time it fires. If the OS suspends before the macrotask runs,
+      // the channel stays alive with a dead WebSocket — but the resume
+      // handler re-creates it cleanly via createRealtimeChannel(), and
+      // createChannel's singleton guard handles the stale channel.
+      const channelToRemove = realtimeChannel;
+      realtimeChannel = null;
+      if (channelToRemove) {
+        setTimeout(() => {
+          if (!cancelled) {
+            safeRemoveChannel(channelToRemove);
+          } else {
+            // Already cleaned up — just remove silently
+            try { safeRemoveChannel(channelToRemove); } catch { /* non-fatal */ }
+          }
+        }, 0);
       }
     };
 
