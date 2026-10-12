@@ -38,6 +38,8 @@ import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
 import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { supabase, resetSessionCache } from '@/lib/supabase';
 import { armFlushWindow } from '@/lib/foregroundFlushGuard';
+import { installRealtimeReconnectGuard } from '@/lib/realtimeReconnectGuard';
+import { teardownAllChannels } from '@/lib/channelManager';
 const NetworkBanner = lazy(() =>
   import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
 );
@@ -198,11 +200,19 @@ export default function RootLayout() {
         armFlushWindow();
       }
     });
+    const unsubReconnect = installRealtimeReconnectGuard();
+    const unsubChannelTeardown = registerAppStateHandler('immediate', (nextState: string) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        teardownAllChannels();
+      }
+    });
     const sub = AppState.addEventListener('change', (nextState: string) => {
       dispatchAppStateChange(nextState);
     });
     return () => {
       unsubFlush();
+      unsubReconnect();
+      unsubChannelTeardown();
       sub.remove();
       cancelPendingDeferred();
     };

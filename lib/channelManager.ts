@@ -83,6 +83,29 @@ export function isChannelTearingDown(name: string): boolean {
 }
 
 /**
+ * Force-teardown all active channels. Called on native unmount /
+ * foreground→background transition to prevent ghost channel references
+ * from lingering in the Supabase client's internal map. Each removal
+ * is deferred via setTimeout(0) to avoid the bridge deadlock that
+ * synchronous removeChannel causes during the OS suspension window.
+ *
+ * After this call, no active channels remain tracked. Any consumer
+ * that tries to use a stale channel reference will find it nulled
+ * in the registry and must create a fresh one.
+ */
+export function teardownAllChannels(): void {
+  for (const [name, ch] of activeChannels) {
+    activeChannels.delete(name);
+    tearingDown.add(name);
+    const channelRef = ch;
+    setTimeout(() => {
+      try { supabase.removeChannel(channelRef); } catch { /* non-fatal */ }
+      tearingDown.delete(name);
+    }, 0);
+  }
+}
+
+/**
  * Clear all tracking. Test utility.
  */
 export function _resetChannelManager(): void {
