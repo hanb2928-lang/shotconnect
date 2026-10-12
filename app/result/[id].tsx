@@ -145,7 +145,7 @@ import { probeUrlAccessible } from '@/lib/urlProbe';
 import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipelineLock';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { onFlushComplete } from '@/lib/foregroundFlushGuard';
-import { safeRemoveChannel } from '@/lib/channelManager';
+import { safeRemoveChannel, createChannel } from '@/lib/channelManager';
 import { CachedImage } from '@/components/CachedImage';
 import { useBeforeUnloadGuard } from '@/hooks/useBeforeUnloadGuard';
 import { safeInvoke } from '@/lib/apiClient';
@@ -1903,7 +1903,6 @@ function ResultScreenInner() {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
-    let channelGeneration = 0;
     const MAX_RETRIES = 5;
 
     const onPayload = (payload: { new: Record<string, unknown> | null }) => {
@@ -1934,10 +1933,11 @@ function ResultScreenInner() {
       }
     };
 
-    const connectChannel = () => {
+    const connectChannel = async () => {
       if (!mountedRef.current) return;
-      channel = supabase
-        .channel(`bg-video-watch:${scan.id}:c${++channelGeneration}`)
+      const ch = await createChannel(`bg-video-watch:${scan.id}`);
+      if (!mountedRef.current) { safeRemoveChannel(ch); return; }
+      channel = ch
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scan.id}` },
@@ -1964,21 +1964,21 @@ function ResultScreenInner() {
           if (!mountedRef.current) return;
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             if (channel) {
-              const ch = channel;
+              const ch2 = channel;
               channel = null;
               bgVideoChannelRef.current = null;
-              setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+              setTimeout(() => { try { safeRemoveChannel(ch2); } catch { /* non-fatal */ } }, 0);
             }
             retryCount++;
             if (retryCount <= MAX_RETRIES) {
-              reconnectTimer = setTimeout(connectChannel, 3000 * Math.pow(2, Math.min(retryCount - 1, 4)) * (0.8 + Math.random() * 0.4));
+              reconnectTimer = setTimeout(() => { connectChannel().catch(() => { /* non-fatal */ }); }, 3000 * Math.pow(2, Math.min(retryCount - 1, 4)) * (0.8 + Math.random() * 0.4));
             }
           }
         });
       bgVideoChannelRef.current = channel;
     };
 
-    connectChannel();
+    connectChannel().catch(() => { /* non-fatal */ });
 
     const unsubRecovery = onNetworkRecovery(() => {
       if (!mountedRef.current) return;
@@ -1990,7 +1990,7 @@ function ResultScreenInner() {
         setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       retryCount = 0;
-      connectChannel();
+      connectChannel().catch(() => { /* non-fatal */ });
     });
 
     const handleAppState = (nextState: string) => {
@@ -1998,7 +1998,7 @@ function ResultScreenInner() {
         if (mountedRef.current && !channel) {
           retryCount = 0;
           onFlushComplete(() => {
-            if (mountedRef.current && !channel) connectChannel();
+            if (mountedRef.current && !channel) connectChannel().catch(() => { /* non-fatal */ });
           });
         }
       } else if (nextState === 'background') {
@@ -2267,7 +2267,6 @@ function ResultScreenInner() {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
-    let channelGeneration = 0;
     const MAX_RETRIES = 5;
 
     const onPayload = () => {
@@ -2295,10 +2294,11 @@ function ResultScreenInner() {
       }).catch(() => {}).finally(() => { /* release ref */ });
     };
 
-    const connectChannel = () => {
+    const connectChannel = async () => {
       if (!mountedRef.current) return;
-      channel = supabase
-        .channel(`scan-row-watch:${scan.id}:c${++channelGeneration}`)
+      const ch = await createChannel(`scan-row-watch:${scan.id}`);
+      if (!mountedRef.current) { safeRemoveChannel(ch); return; }
+      channel = ch
         .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'scans', filter: `id=eq.${scan.id}` },
@@ -2308,19 +2308,19 @@ function ResultScreenInner() {
           if (!mountedRef.current) return;
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             if (channel) {
-              const ch = channel;
+              const ch2 = channel;
               channel = null;
-              setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+              setTimeout(() => { try { safeRemoveChannel(ch2); } catch { /* non-fatal */ } }, 0);
             }
             retryCount++;
             if (retryCount <= MAX_RETRIES) {
-              reconnectTimer = setTimeout(connectChannel, 3000 * Math.pow(2, Math.min(retryCount - 1, 4)) * (0.8 + Math.random() * 0.4));
+              reconnectTimer = setTimeout(() => { connectChannel().catch(() => { /* non-fatal */ }); }, 3000 * Math.pow(2, Math.min(retryCount - 1, 4)) * (0.8 + Math.random() * 0.4));
             }
           }
         });
     };
 
-    connectChannel();
+    connectChannel().catch(() => { /* non-fatal */ });
 
     const unsubRecovery = onNetworkRecovery(() => {
       if (!mountedRef.current) return;
@@ -2331,7 +2331,7 @@ function ResultScreenInner() {
         setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       retryCount = 0;
-      connectChannel();
+      connectChannel().catch(() => { /* non-fatal */ });
     });
 
     const handleAppState = (nextState: string) => {
@@ -2339,7 +2339,7 @@ function ResultScreenInner() {
         if (mountedRef.current && !channel) {
           retryCount = 0;
           onFlushComplete(() => {
-            if (mountedRef.current && !channel) connectChannel();
+            if (mountedRef.current && !channel) connectChannel().catch(() => { /* non-fatal */ });
           });
         }
       } else if (nextState === 'background') {
