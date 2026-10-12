@@ -9,6 +9,11 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
+function safeWaitUntil(p: Promise<unknown>): void {
+  if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(p);
+}
+
 interface ProductVisionData {
   productName: string;
   productCategory: string;
@@ -506,29 +511,31 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
 
     // Kick off server-poll using the Runway task ID
     if (supabaseUrl && serviceRoleKey) {
-      setTimeout(() => {
-        const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
-        fetch(selfUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${serviceRoleKey}`,
-            apikey: serviceRoleKey,
-          },
-          body: JSON.stringify({
-            mode: "server-poll",
-            taskId: runwayTaskId,
-            scanId,
-            variationSeed: 0,
-          }),
-          signal: controller.signal,
-        }).then(() => clearTimeout(timeoutId)).catch(() => {
-          clearTimeout(timeoutId);
-          // Non-fatal — zombie-job guard will catch it if this fails.
-        });
-      }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS);
+      safeWaitUntil(new Promise<void>((resolve) => {
+        setTimeout(() => {
+          const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => { controller.abort(); resolve(); }, SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+          fetch(selfUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${serviceRoleKey}`,
+              apikey: serviceRoleKey,
+            },
+            body: JSON.stringify({
+              mode: "server-poll",
+              taskId: runwayTaskId,
+              scanId,
+              variationSeed: 0,
+            }),
+            signal: controller.signal,
+          }).then(() => { clearTimeout(timeoutId); resolve(); }).catch(() => {
+            clearTimeout(timeoutId);
+            resolve();
+          });
+        }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS);
+      }));
     }
 
     return new Response(
@@ -618,16 +625,16 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
         const pollStatus = await pollRunwayTask(fallbackJob.runwayTaskId, runwayKey);
         if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
           const originalUrl = pollStatus.videoUrl;
+          const finalUrl = await persistVideoInBackground(originalUrl, body.scanId, fallbackJob.internalJobId ?? taskId);
           if (supabaseUrl && serviceRoleKey) {
-            await markVideoJobComplete(body.scanId, fallbackJob.internalJobId ?? taskId, originalUrl);
+            await markVideoJobComplete(body.scanId, fallbackJob.internalJobId ?? taskId, finalUrl);
           }
-          await persistVideoInBackground(originalUrl, body.scanId, fallbackJob.internalJobId ?? taskId);
           return new Response(
             JSON.stringify({
               mode: "poll",
               status: "SUCCESS",
               step: "completed",
-              videoUrl: originalUrl,
+              videoUrl: finalUrl,
               taskId,
               provider: "runway",
               persisted: true,
@@ -697,16 +704,16 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
 
     if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
       const originalUrl = pollStatus.videoUrl;
+      const finalUrl = await persistVideoInBackground(originalUrl, body.scanId, taskId);
       if (supabaseUrl && serviceRoleKey) {
-        await markVideoJobComplete(body.scanId, taskId, originalUrl);
+        await markVideoJobComplete(body.scanId, taskId, finalUrl);
       }
-      await persistVideoInBackground(originalUrl, body.scanId, taskId);
       return new Response(
         JSON.stringify({
           mode: "poll",
           status: "SUCCESS",
           step: "completed",
-          videoUrl: originalUrl,
+          videoUrl: finalUrl,
           taskId,
           provider: "runway",
           persisted: true,
@@ -811,15 +818,16 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     // Reschedule with buffer delay to give runway-submit time to persist the ID.
     // Includes retry-on-failure so a cold-start abort doesn't permanently break the chain.
     const runwayIdWaitDelay = 7000;
-    const rescheduleSelfInvoke = (retryNum: number) => {
+    const rescheduleSelfInvoke = (retryNum: number, resolveOuter?: () => void) => {
       if (retryNum >= 3) {
         console.error(`[generate-video] server-poll runway-task-id wait exhausted retries for task ${taskId}`);
+        resolveOuter?.();
         return;
       }
       setTimeout(() => {
         const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+        const timeoutId = setTimeout(() => { controller.abort(); resolveOuter?.(); }, SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
         fetch(selfUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey },
@@ -827,15 +835,16 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
           signal: controller.signal,
         }).then(() => {
           clearTimeout(timeoutId);
+          resolveOuter?.();
         }).catch(() => {
           clearTimeout(timeoutId);
           const retryDelay = 5000 * Math.pow(2, retryNum);
           console.log(`[generate-video] server-poll runway-id-wait retry ${retryNum + 1}/3 in ${retryDelay}ms`);
-          rescheduleSelfInvoke(retryNum + 1);
+          rescheduleSelfInvoke(retryNum + 1, resolveOuter);
         });
       }, runwayIdWaitDelay);
     };
-    rescheduleSelfInvoke(0);
+    safeWaitUntil(new Promise<void>((resolve) => rescheduleSelfInvoke(0, resolve)));
     return new Response(
       JSON.stringify({ mode: "server-poll", status: "PROCESSING", progress: "Runway 작업 ID 대기 중...", taskId, nextPollInMs: runwayIdWaitDelay, attempt: attempt + 1 }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -864,16 +873,16 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     }
 
     const originalUrl = status.videoUrl;
+    const finalUrl = await persistVideoInBackground(originalUrl, scanId, internalJobId);
     if (supabaseUrl && serviceRoleKey) {
-      await markVideoJobComplete(scanId, internalJobId, originalUrl);
+      await markVideoJobComplete(scanId, internalJobId, finalUrl);
     }
-    await persistVideoInBackground(originalUrl, scanId, internalJobId);
     await sendVideoCompletePush(scanId);
     return new Response(
       JSON.stringify({
         mode: "server-poll",
         status: "SUCCESS",
-        videoUrl: originalUrl,
+        videoUrl: finalUrl,
         taskId,
         persisted: true,
       }),
@@ -920,25 +929,27 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     console.log(`[generate-video] server-poll: job ${taskId} reached rendering — continuing at reduced frequency (${RENDER_POLL_DELAY_MS}ms)`);
 
     const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
-    setTimeout(() => {
-      fetch(selfUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceRoleKey}`,
-          apikey: serviceRoleKey,
-        },
-        body: JSON.stringify({
-          mode: "server-poll",
-          taskId,
-          scanId,
-          variationSeed: attempt,
-        }),
-        signal: controller.signal,
-      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
-    }, RENDER_POLL_DELAY_MS);
+    safeWaitUntil(new Promise<void>((resolve) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => { controller.abort(); resolve(); }, SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+      setTimeout(() => {
+        fetch(selfUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+            apikey: serviceRoleKey,
+          },
+          body: JSON.stringify({
+            mode: "server-poll",
+            taskId,
+            scanId,
+            variationSeed: attempt,
+          }),
+          signal: controller.signal,
+        }).then(() => { clearTimeout(timeoutId); resolve(); }).catch(() => { clearTimeout(timeoutId); resolve(); });
+      }, RENDER_POLL_DELAY_MS);
+    }));
 
     return new Response(
       JSON.stringify({
@@ -961,14 +972,15 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
   const nextDelay = Math.round(baseDelay + jitter);
   const nextAttempt = attempt + 1;
 
-  const selfInvokeWithRetry = (attemptNum: number, retryNum: number) => {
+  const selfInvokeWithRetry = (attemptNum: number, retryNum: number, resolveOuter?: () => void) => {
     if (retryNum >= 3) {
       console.error(`[generate-video] server-poll self-invoke exhausted retries for task ${taskId} — zombie guard will catch it`);
+      resolveOuter?.();
       return;
     }
     const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => { controller.abort(); resolveOuter?.(); }, SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
     fetch(selfUrl, {
       method: "POST",
       headers: {
@@ -985,14 +997,15 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
       signal: controller.signal,
     }).then(() => {
       clearTimeout(timeoutId);
+      resolveOuter?.();
     }).catch(() => {
       clearTimeout(timeoutId);
       const retryDelay = 5000 * Math.pow(2, retryNum);
       console.log(`[generate-video] server-poll self-invoke retry ${retryNum + 1}/3 in ${retryDelay}ms for task ${taskId}`);
-      setTimeout(() => selfInvokeWithRetry(attemptNum, retryNum + 1), retryDelay);
+      setTimeout(() => selfInvokeWithRetry(attemptNum, retryNum + 1, resolveOuter), retryDelay);
     });
   };
-  setTimeout(() => selfInvokeWithRetry(nextAttempt, 0), nextDelay);
+  safeWaitUntil(new Promise<void>((resolve) => setTimeout(() => selfInvokeWithRetry(nextAttempt, 0, resolve), nextDelay)));
 
   return new Response(
     JSON.stringify({
@@ -1068,13 +1081,13 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
     }
     const internalJobId = fallbackJob?.internalJobId ?? taskId;
 
+    const finalUrl = await persistVideoInBackground(videoUrl, scanId, internalJobId);
     if (supabaseUrl && serviceRoleKey) {
       await Promise.all([
-        markVideoJobComplete(scanId, internalJobId, videoUrl),
+        markVideoJobComplete(scanId, internalJobId, finalUrl),
         sendVideoCompletePush(scanId),
       ]);
     }
-    await persistVideoInBackground(videoUrl, scanId, internalJobId);
 
     console.log("[generate-video] Webhook: video persisted for scan", scanId);
     return new Response(
@@ -1325,32 +1338,36 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
   return null;
 }
 
-async function persistVideoInBackground(originalUrl: string, scanId: string, taskId: string): Promise<void> {
-  if (!supabaseUrl || !serviceRoleKey) return;
+async function persistVideoInBackground(originalUrl: string, scanId: string, taskId: string): Promise<string> {
+  if (!supabaseUrl || !serviceRoleKey) return originalUrl;
   try {
     const persistedUrl = await uploadToStorage(originalUrl, scanId);
-    if (persistedUrl) {
-      await updateScanWithVideo(scanId, persistedUrl);
-      const persistController = new AbortController();
-      const persistTimeoutId = setTimeout(() => persistController.abort(), 10000);
-      try {
-        await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
-          method: "PATCH",
-          headers: {
-            apikey: serviceRoleKey,
-            Authorization: `Bearer ${serviceRoleKey}`,
-            "Content-Type": "application/json",
-            Prefer: "return=minimal",
-          },
-          body: JSON.stringify({ video_url: persistedUrl }),
-          signal: persistController.signal,
-        });
-      } finally {
-        clearTimeout(persistTimeoutId);
-      }
+    if (!persistedUrl) {
+      console.error('[generate-video] persistVideoInBackground: uploadToStorage returned null, using original URL');
+      return originalUrl;
     }
+    await updateScanWithVideo(scanId, persistedUrl);
+    const persistController = new AbortController();
+    const persistTimeoutId = setTimeout(() => persistController.abort(), 10000);
+    try {
+      await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+        method: "PATCH",
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ video_url: persistedUrl }),
+        signal: persistController.signal,
+      });
+    } finally {
+      clearTimeout(persistTimeoutId);
+    }
+    return persistedUrl;
   } catch (err) {
     console.error('[generate-video] persistVideoInBackground error:', err);
+    return originalUrl;
   }
 }
 
