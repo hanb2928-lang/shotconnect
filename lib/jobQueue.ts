@@ -313,8 +313,9 @@ export function subscribeToJob(
       if (retryTimer) clearTimeout(retryTimer);
       if (staleTimer) clearTimeout(staleTimer);
       if (currentChannel) {
-        try { supabase.removeChannel(currentChannel); } catch { /* channel already closed */ }
+        const ch = currentChannel;
         currentChannel = null;
+        setTimeout(() => { try { supabase.removeChannel(ch); } catch { /* channel already closed */ } }, 0);
       }
     },
   };

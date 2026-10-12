@@ -665,8 +665,9 @@ function waitForVideoCompletion(
 
     const cleanup = () => {
       if (channel) {
-        safeRemoveChannel(channel);
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -832,8 +833,9 @@ function waitForVideoCompletion(
       if (settled || !scanId) return;
       _dbg('setupChannel');
       if (channel) {
-        safeRemoveChannel(channel);
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       channel = createChannel(`video-job:${scanId}:${submitData.taskId}`)
         .on(
@@ -886,8 +888,9 @@ function waitForVideoCompletion(
       reconnectTimer = setTimeout(() => {
         if (settled) return;
         if (channel) {
-          safeRemoveChannel(channel);
+          const ch = channel;
           channel = null;
+          setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
         }
         setupChannel();
       }, delayMs);
@@ -1450,8 +1453,9 @@ export function subscribeVideoJob(
 
   const cleanup = () => {
     if (channel) {
-      safeRemoveChannel(channel);
+      const ch = channel;
       channel = null;
+      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -1468,8 +1472,9 @@ export function subscribeVideoJob(
     reconnectTimer = setTimeout(() => {
       if (settled) return;
       if (channel) {
-        safeRemoveChannel(channel);
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       setupChannel();
     }, delayMs);
@@ -1479,8 +1484,9 @@ export function subscribeVideoJob(
     if (settled) return;
     _dbg('setupChannel');
     if (channel) {
-      safeRemoveChannel(channel);
+      const ch = channel;
       channel = null;
+      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     channel = createChannel(`video-job:${scanId}:${taskId}`)
       .on(
@@ -1676,8 +1682,9 @@ export function subscribeVideoJob(
       if (runwayPollTimer) { clearTimeout(runwayPollTimer); runwayPollTimer = null; }
       if (overallTimeoutTimer) clearTimeout(overallTimeoutTimer);
       if (channel) {
-        safeRemoveChannel(channel);
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       // Reset the Runway fallback flag so it can re-fire on resume.
       // Without this, the Runway direct-poll backup is permanently
@@ -1949,8 +1956,9 @@ export function subscribeHdUpgrade(
 
   const cleanup = () => {
     if (channel) {
-      safeRemoveChannel(channel);
+      const ch = channel;
       channel = null;
+      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -1966,8 +1974,9 @@ export function subscribeHdUpgrade(
     reconnectTimer = setTimeout(() => {
       if (settled) return;
       if (channel) {
-        safeRemoveChannel(channel);
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       setupChannel();
     }, delayMs);
@@ -1976,8 +1985,9 @@ export function subscribeHdUpgrade(
   const setupChannel = () => {
     if (settled) return;
     if (channel) {
-      safeRemoveChannel(channel);
+      const ch = channel;
       channel = null;
+      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     channel = createChannel(`hd-upgrade:${scanId}:${draftJobId}`)
       .on(
@@ -2066,8 +2076,9 @@ export function subscribeHdUpgrade(
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (hdOverallTimeoutTimer) clearTimeout(hdOverallTimeoutTimer);
       if (channel) {
-        safeRemoveChannel(channel);
+        const ch = channel;
         channel = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
     },
     resume: () => {

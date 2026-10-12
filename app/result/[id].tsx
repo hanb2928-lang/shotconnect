@@ -1606,8 +1606,12 @@ function ResultScreenInner() {
     return () => {
       mountedRef.current = false;
       videoGenLockRef.current = false;
-      if (hdUnsubRef.current) hdUnsubRef.current();
-      if (videoUnsubRef.current) videoUnsubRef.current();
+      const hdUnsub = hdUnsubRef.current;
+      const videoUnsub = videoUnsubRef.current;
+      hdUnsubRef.current = null;
+      videoUnsubRef.current = null;
+      setTimeout(() => { try { hdUnsub?.(); } catch { /* non-fatal */ } }, 0);
+      setTimeout(() => { try { videoUnsub?.(); } catch { /* non-fatal */ } }, 0);
       if (draftProgressTimerRef.current) {
         clearInterval(draftProgressTimerRef.current);
         draftProgressTimerRef.current = null;
@@ -2456,7 +2460,8 @@ function ResultScreenInner() {
     }, 3000);
 
     return () => {
-      sub.unsubscribe();
+      const s = sub;
+      setTimeout(() => { try { s.unsubscribe(); } catch { /* non-fatal */ } }, 0);
       clearInterval(pollInterval);
       analysisPollAbort?.abort();
       handleJobUpdateRef.current = null;
