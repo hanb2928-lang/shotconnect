@@ -488,6 +488,7 @@ function ResultScreenInner() {
   const videoGenLockRef = useRef(false);
   const draftProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const videoJobSettledRef = useRef(false);
+  const isFetchingRef = useRef(false);
   const [showAdvancedCamera, setShowAdvancedCamera] = useState(false);
   const [showAdvancedCaption, setShowAdvancedCaption] = useState(false);
   const [showAdvancedAudio, setShowAdvancedAudio] = useState(false);
@@ -1527,6 +1528,8 @@ function ResultScreenInner() {
       setLoading(false);
       return;
     }
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
       const [scanResult, settingsResult] = await Promise.all([
         supabase.from('scans').select('*').eq('id', id).maybeSingle(),
@@ -1595,6 +1598,7 @@ function ResultScreenInner() {
       if (mountedRef.current) setError(friendlyError(err, '데이터를 불러올 수 없습니다. 잠시 후 다시 시도해주세요.'));
     } finally {
       if (mountedRef.current) setLoading(false);
+      isFetchingRef.current = false;
     }
   }, [id]);
 
@@ -1855,6 +1859,11 @@ function ResultScreenInner() {
   // detected and auto-saved to the Assets tab.
   useEffect(() => {
     if (!scan) return;
+    // Serialize: wait for the initial fetchScan to fully complete before
+    // subscribing to Realtime. Without this, the channel subscribes and
+    // fires onPayload while fetchScan is still writing state, causing a
+    // race condition that deadlocks the JS thread on native webviews.
+    if (isFetchingRef.current) return;
 
     const autoSaveVideoToAssets = async (videoUrl: string) => {
       if (autoSavedVideoRef.current === videoUrl) return;
@@ -2016,7 +2025,7 @@ function ResultScreenInner() {
       unsubHandler();
       unsubRecovery();
     };
-  }, [scan, activePlatform]);
+  }, [scan, activePlatform, loading]);
 
   // Mux TTS narration audio into the AI-generated video.
   // Triggers when both generatedVideoUrl and ttsUrl are available
