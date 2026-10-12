@@ -164,6 +164,9 @@ function initPool(): void {
   if (pool.length > 0 || !workerAvailable) return;
   try {
     const blob = new Blob([workerCode], { type: 'application/javascript' });
+    if (blobUrlCache) {
+      try { URL.revokeObjectURL(blobUrlCache); } catch { /* non-fatal */ }
+    }
     blobUrlCache = URL.createObjectURL(blob);
     for (let i = 0; i < POOL_SIZE; i++) {
       const pw = createPoolWorker(blobUrlCache);

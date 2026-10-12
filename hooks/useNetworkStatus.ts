@@ -205,6 +205,7 @@ function init() {
       window.addEventListener('online', onlineHandler);
       window.addEventListener('offline', offlineHandler);
       window.addEventListener('visibilitychange', visibilityHandler);
+      registeredListeners = true;
     }
   } else {
     registerAppStateHandler('deferred', handleAppStateChange);
@@ -260,10 +261,18 @@ export function onNetworkRecovery(listener: RecoveryListener): () => void {
   return () => { recoveryListeners.delete(listener); };
 }
 
+let registeredListeners = false;
+
 export function _resetFlipStateForTesting(): void {
   recentFlips = [];
   if (unstableTimer) {
     clearTimeout(unstableTimer);
     unstableTimer = null;
+  }
+  if (registeredListeners && typeof window !== 'undefined') {
+    window.removeEventListener('online', onlineHandler);
+    window.removeEventListener('offline', offlineHandler);
+    window.removeEventListener('visibilitychange', visibilityHandler);
+    registeredListeners = false;
   }
 }

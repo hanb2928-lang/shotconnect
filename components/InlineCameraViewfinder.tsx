@@ -52,6 +52,7 @@ export const InlineCameraViewfinder = forwardRef<
   const captureInProgressRef = useRef(false);
   const captureQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const safetyNetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trackEndHandlersRef = useRef<Array<{ track: MediaStreamTrack; handler: () => void }>>([]);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,11 @@ export const InlineCameraViewfinder = forwardRef<
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    // Remove track 'ended' listeners to prevent leaks on stream replacement
+    trackEndHandlersRef.current.forEach(({ track, handler }) => {
+      try { track.removeEventListener('ended', handler); } catch { /* track may be dead */ }
+    });
+    trackEndHandlersRef.current = [];
     if (videoRef.current) {
       try { videoRef.current.srcObject = null; } catch { /* element may be detached */ }
     }
@@ -99,14 +105,18 @@ export const InlineCameraViewfinder = forwardRef<
       streamRef.current = stream;
       // Detect hardware-level track termination (another app grabs camera,
       // USB disconnect, device sleep) so we don't keep a dead stream.
+      const trackEndHandlers: Array<{ track: MediaStreamTrack; handler: () => void }> = [];
       stream.getVideoTracks().forEach((track) => {
-        track.addEventListener('ended', () => {
+        const handler = () => {
           if (streamRef.current === stream) {
             streamRef.current = null;
             setCameraReady(false);
           }
-        });
+        };
+        track.addEventListener('ended', handler);
+        trackEndHandlers.push({ track, handler });
       });
+      trackEndHandlersRef.current = trackEndHandlers;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch((playErr: unknown) => {

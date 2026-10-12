@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import { logError } from '@/lib/errorLogger';
 
 interface UseCameraVisibilityRecoveryOptions {
   getStream: () => MediaStream | null;
@@ -38,7 +39,7 @@ export function useCameraVisibilityRecovery({
       try {
         await restartStreamRef.current();
       } catch (err) {
-        console.error('[useCameraVisibilityRecovery] restartStream failed:', err);
+        logError(err, { component: 'useCameraVisibilityRecovery', action: 'restartStream' });
       }
     };
 

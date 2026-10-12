@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { logError } from '@/lib/errorLogger';
 
 export interface CreditBalance {
   balance: number;
@@ -134,7 +135,7 @@ export async function refundCredits(
   try {
     await addCredits(amount, 'refund', `${feature} 실패 환불`);
   } catch (err) {
-    console.error(`[credits] refundCredits failed for ${feature} (${amount} credits):`, err);
+    logError(err, { component: 'credits', action: 'refundCredits', extra: { feature, amount } });
   }
 }
 
