@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
+import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
 
 export type ProjectStep = 'idle' | 'uploading' | 'rendering' | 'completed' | 'failed';
 
@@ -34,8 +35,7 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
 
     const setupChannel = () => {
       if (cancelled || channelRef.current) return;
-      const channel = supabase
-        .channel(`project-phase-${jobId}`)
+      const channel = createChannel(`project-phase-${jobId}`)
         .on(
           'postgres_changes',
           {
@@ -58,8 +58,9 @@ export function useProjectPhase(jobId: string | null, options: UseProjectPhaseOp
 
     const teardownChannel = () => {
       if (channelRef.current) {
-        try { supabase.removeChannel(channelRef.current); } catch { /* ignore */ }
+        const ch = channelRef.current;
         channelRef.current = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
     };
 

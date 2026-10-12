@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
+import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
 
 export type JobType =
   | 'analyze-photo'
@@ -146,8 +147,9 @@ export async function waitForJob<T = Record<string, unknown>>(
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (channel) {
-        try { supabase.removeChannel(channel); } catch { /* channel already closed */ }
+        const ch = channel;
         channel = undefined;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
     };
 
@@ -161,8 +163,7 @@ export async function waitForJob<T = Record<string, unknown>>(
     let channelRetryCount = 0;
     const MAX_WAIT_CHANNEL_RETRIES = 5;
     const connectChannel = () => {
-      channel = supabase
-        .channel(`job-wait:${jobId}${channelRetryCount > 0 ? `:r${channelRetryCount}` : ''}`)
+      channel = createChannel(`job-wait:${jobId}${channelRetryCount > 0 ? `:r${channelRetryCount}` : ''}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'render_jobs', filter: `id=eq.${jobId}` },
@@ -179,8 +180,9 @@ export async function waitForJob<T = Record<string, unknown>>(
         .subscribe((status) => {
           if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && !settled) {
             if (channel) {
-              try { supabase.removeChannel(channel); } catch { /* channel already closed */ }
+              const ch = channel;
               channel = undefined;
+              setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
             }
             channelRetryCount++;
             if (channelRetryCount > MAX_WAIT_CHANNEL_RETRIES) {
@@ -274,8 +276,7 @@ export function subscribeToJob(
   const connect = () => {
     if (disposed) return;
 
-    currentChannel = supabase
-      .channel(`job:${jobId}${retryCount > 0 ? `:r${retryCount}` : ''}`)
+    currentChannel = createChannel(`job:${jobId}${retryCount > 0 ? `:r${retryCount}` : ''}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'render_jobs', filter: `id=eq.${jobId}` },
@@ -292,8 +293,9 @@ export function subscribeToJob(
         if (disposed) return;
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           if (currentChannel) {
-            try { supabase.removeChannel(currentChannel); } catch { /* channel already closed */ }
+            const ch = currentChannel;
             currentChannel = null;
+            setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
           }
           retryCount++;
           if (retryCount > MAX_CHANNEL_RETRIES) {
@@ -315,7 +317,7 @@ export function subscribeToJob(
       if (currentChannel) {
         const ch = currentChannel;
         currentChannel = null;
-        setTimeout(() => { try { supabase.removeChannel(ch); } catch { /* channel already closed */ } }, 0);
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
     },
   };
