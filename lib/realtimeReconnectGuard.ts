@@ -77,7 +77,16 @@ export function installRealtimeReconnectGuard(): () => void {
     // triggers a full reconnect stampede when 'active' follows seconds
     // later, overloading the native bridge and crashing the app.
     if (nextState === 'background') {
-      try { rt.disconnect(); } catch { /* non-fatal */ }
+      // rt.disconnect() is a WebSocket bridge call. On Android, the JS
+      // thread suspends faster than iOS — calling it synchronously in
+      // the immediate phase blocks the JS thread waiting for a bridge
+      // response that will never arrive, causing an ANR → SIGKILL.
+      // Defer to setTimeout(0): if the OS suspends before it fires,
+      // the socket stays alive but the foreground reconnect handler
+      // re-establishes it cleanly via rt.connect().
+      setTimeout(() => {
+        try { rt.disconnect(); } catch { /* non-fatal */ }
+      }, 0);
     }
   });
 

@@ -167,7 +167,7 @@ Deno.serve(async (req: Request) => {
     if (queryMode === "webhook") {
       const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
       const providedSecret = url.searchParams.get("secret") ?? "";
-      if (webhookSecret && providedSecret !== webhookSecret) {
+      if (!webhookSecret || providedSecret !== webhookSecret) {
         return new Response(
           JSON.stringify({ error: "웹훅 서명 검증에 실패했습니다." }),
           { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -395,12 +395,6 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
     memeText: body.memeText,
   });
   console.log("[generate-video] Prompt length:", runwayPrompt.length, "| tokens:", modeTokens.length);
-
-  // Write "planning" step directly — skips the redundant "hooking" write
-  // that was immediately overwritten, saving 1 DB round-trip per submission.
-  if (body.scanId) {
-    await updateVideoJobStep(body.scanId, internalJobId, "planning");
-  }
 
   // Fire-and-forget: self-invoke runway-submit mode to call Runway API asynchronously
   if (supabaseUrl && serviceRoleKey) {
@@ -700,6 +694,28 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
     }
 
     const runwayTaskId = jobStatus.runwayTaskId;
+
+    // Fast path: if the DB step is already "rendering" (85%+), return the
+    // DB status directly without calling the Runway API. The client's DB
+    // poll is the primary completion detector at this stage — calling
+    // Runway on every client poll adds ~200-500ms of latency per cycle
+    // and consumes API quota for no benefit. The webhook or server-poll
+    // will catch the terminal transition and update the DB.
+    if (jobStatus.step === "rendering") {
+      return new Response(
+        JSON.stringify({
+          mode: "poll",
+          status: jobStatus.status ?? "PROCESSING",
+          step: "rendering",
+          progress: "0.85",
+          taskId,
+          provider: "runway",
+          fromCache: true,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const pollStatus = await pollRunwayTask(runwayTaskId, runwayKey);
 
     if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
@@ -926,12 +942,13 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     // flush window. Without this backup, a broken webhook + dropped Realtime
     // event leaves the job stuck at 97% indefinitely.
     const RENDER_POLL_DELAY_MS = 15_000;
+    const RENDER_POLL_ABORT_MS = RENDER_POLL_DELAY_MS + SERVER_POLL_SELF_INVOKE_TIMEOUT_MS;
     console.log(`[generate-video] server-poll: job ${taskId} reached rendering — continuing at reduced frequency (${RENDER_POLL_DELAY_MS}ms)`);
 
     const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
     safeWaitUntil(new Promise<void>((resolve) => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => { controller.abort(); resolve(); }, SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+      const timeoutId = setTimeout(() => { controller.abort(); resolve(); }, RENDER_POLL_ABORT_MS);
       setTimeout(() => {
         fetch(selfUrl, {
           method: "POST",
@@ -1195,7 +1212,8 @@ async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, is
       scan_id: scanId,
       task_id: taskId,
       status: "PENDING",
-      step: "analyzing",
+      step: "planning",
+      progress: 0.25,
       is_draft: isDraft,
       is_hd: isHd,
     };
@@ -1212,7 +1230,7 @@ async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, is
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-    if (!resp.ok && resp.status === 409) return false;
+    if (!resp.ok) return false;
     return true;
   } catch (err) {
     console.error('[generate-video] saveVideoJob error:', err);
@@ -1341,30 +1359,56 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
 async function persistVideoInBackground(originalUrl: string, scanId: string, taskId: string): Promise<string> {
   if (!supabaseUrl || !serviceRoleKey) return originalUrl;
   try {
-    const persistedUrl = await uploadToStorage(originalUrl, scanId);
-    if (!persistedUrl) {
-      console.error('[generate-video] persistVideoInBackground: uploadToStorage returned null, using original URL');
-      return originalUrl;
-    }
-    await updateScanWithVideo(scanId, persistedUrl);
-    const persistController = new AbortController();
-    const persistTimeoutId = setTimeout(() => persistController.abort(), 10000);
-    try {
-      await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
-        method: "PATCH",
-        headers: {
-          apikey: serviceRoleKey,
-          Authorization: `Bearer ${serviceRoleKey}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({ video_url: persistedUrl }),
-        signal: persistController.signal,
-      });
-    } finally {
-      clearTimeout(persistTimeoutId);
-    }
-    return persistedUrl;
+    // Emit "uploading" step (93%) so the client sees progress past 85%
+    // before the video URL is even available — this fills the 85→100 gap.
+    await updateVideoJobStep(scanId, taskId, "uploading");
+
+    // Write the original Runway URL to scans + video_jobs immediately so
+    // the client's DB poll detects completion without waiting for the
+    // storage upload. The storage upload + URL replacement happens in the
+    // background — the client already has a playable URL.
+    await Promise.all([
+      updateScanWithVideo(scanId, originalUrl),
+      (async () => {
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), 5000);
+        try {
+          await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+            method: "PATCH",
+            headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+            body: JSON.stringify({ video_url: originalUrl }),
+            signal: c.signal,
+          });
+        } finally { clearTimeout(t); }
+      })(),
+    ]);
+
+    // Background: upload to storage and replace the URL. If this fails,
+    // the original Runway URL remains playable — the user sees no delay.
+    // Emit "muxing" (97%) when the storage upload completes to give the
+    // client a final intermediate progress update before completion.
+    safeWaitUntil((async () => {
+      try {
+        const persistedUrl = await uploadToStorage(originalUrl, scanId);
+        if (!persistedUrl || persistedUrl === originalUrl) return;
+        await updateScanWithVideo(scanId, persistedUrl);
+        await updateVideoJobStep(scanId, taskId, "muxing");
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), 10000);
+        try {
+          await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+            method: "PATCH",
+            headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+            body: JSON.stringify({ video_url: persistedUrl }),
+            signal: c.signal,
+          });
+        } finally { clearTimeout(t); }
+      } catch {
+        // Storage upload failed — original URL is still playable
+      }
+    })());
+
+    return originalUrl;
   } catch (err) {
     console.error('[generate-video] persistVideoInBackground error:', err);
     return originalUrl;
@@ -1459,6 +1503,9 @@ const STEP_TO_PROGRESS_NUM: Record<string, number> = {
   planning: 0.25,
   submitting: 0.35,
   rendering: 0.85,
+  encoding: 0.90,
+  uploading: 0.93,
+  muxing: 0.97,
   completed: 1.0,
   failed: 0,
   pending: 0.35,

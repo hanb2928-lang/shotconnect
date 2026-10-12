@@ -93,7 +93,6 @@ export async function ensureFreshSession(): Promise<void> {
   const now = Date.now();
   if (sessionPromise) return sessionPromise;
   if (now - sessionCachedAt < SESSION_CACHE_TTL_MS) return;
-  sessionCachedAt = now;
   sessionAbort = new AbortController();
   const abortSignal = sessionAbort.signal;
   sessionPromise = (async () => {
@@ -113,9 +112,6 @@ export async function ensureFreshSession(): Promise<void> {
         new Promise<void>((resolve) =>
           setTimeout(resolve, SESSION_FETCH_TIMEOUT_MS),
         ),
-        // Abort guard: if resetSessionCache() fires (foreground return),
-        // this rejects immediately so the caller doesn't wait for a dead
-        // AsyncStorage Promise that will never resolve on a locked bridge.
         new Promise<void>((_, reject) => {
           if (abortSignal.aborted) { reject(new Error('aborted')); return; }
           abortSignal.addEventListener('abort', () => {
@@ -123,6 +119,7 @@ export async function ensureFreshSession(): Promise<void> {
           }, { once: true });
         }),
       ]);
+      sessionCachedAt = Date.now();
     } catch {
       // Token refresh failure is non-fatal — the resume fetch will simply
       // use whatever token is available and retry via the normal poll loop.
@@ -155,12 +152,14 @@ export const EXTRACT_VIDEO_FRAME_URL = `${supabaseUrl}/functions/v1/extract-vide
 
 /**
  * Wrap a Supabase query promise with a hard timeout. If the query doesn't
- * resolve within `timeoutMs`, the promise rejects with a timeout error,
- * releasing any row-level locks the transaction holds on the server side.
+ * resolve within `timeoutMs`, the promise rejects with a timeout error.
  *
- * This prevents the "underground deadlock" where a flaky network causes a
- * DB query to hang indefinitely, holding row locks that block all
- * subsequent reads/writes and freezing the entire app.
+ * NOTE: This races the query against a timeout but does NOT cancel the
+ * underlying fetch. Callers that need true cancellation should pass an
+ * AbortSignal to the query builder via `.abortSignal(signal)` before
+ * awaiting. The forceSyncUnified function in useResultPolling does this
+ * to prevent zombie queries from saturating the connection pool at the
+ * 85-97% bottleneck.
  */
 export function withQueryTimeout<T>(
   queryPromise: PromiseLike<T>,

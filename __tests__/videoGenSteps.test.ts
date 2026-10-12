@@ -43,11 +43,11 @@ describe('videoGenSteps', () => {
     expect(steps.every((s) => s.status === 'done')).toBe(true);
   });
 
-  it('error phase marks submit as active if progress was low', () => {
+  it('error phase marks remaining steps as pending', () => {
     const steps = resolveVideoGenSteps(makeProgress('error', 0.20));
     expect(steps[0].status).toBe('done');
     expect(steps[1].status).toBe('done');
-    expect(steps[2].status).toBe('active');
+    expect(steps[2].status).toBe('pending');
     expect(steps[3].status).toBe('pending');
   });
 

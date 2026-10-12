@@ -141,6 +141,9 @@ function createPoolWorker(blobUrl: string): PoolWorker | null {
     worker.onerror = () => {
       pw.pending.forEach((task) => task.reject(new Error('Worker error')));
       pw.pending.clear();
+      pool = pool.filter((p) => p !== pw);
+      if (rrIndex >= pool.length) rrIndex = 0;
+      try { worker.terminate(); } catch { /* already dead */ }
     };
     return pw;
   } catch {

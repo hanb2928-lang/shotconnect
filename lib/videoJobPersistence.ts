@@ -75,6 +75,7 @@ export async function updateActiveVideoJobStep(step: string, progress?: number):
 
 export async function clearActiveVideoJob(): Promise<void> {
   clearGeneration++;
+  saveGeneration = clearGeneration;
   await setItem(ACTIVE_VIDEO_JOB_KEY, '');
   if (typeof window !== 'undefined' && window.localStorage) {
     try {

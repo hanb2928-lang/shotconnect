@@ -27,6 +27,8 @@ const STEP_TO_PROGRESS: Record<string, number> = {
   planning: 0.25,
   submitting: 0.35,
   rendering: 0.85,
+  encoding: 0.90,
+  uploading: 0.93,
   muxing: 0.97,
   completed: 1.0,
   failed: 0,
@@ -92,10 +94,6 @@ export function resolveVideoGenSteps(progress: VideoGenProgress | null): VideoGe
     return VIDEO_GEN_STEPS.map((s) => {
       if (p >= s.threshold) {
         return { ...s, status: 'done' as VideoGenStepStatus };
-      }
-      const activeStep = VIDEO_GEN_STEPS.find((step) => p < step.threshold);
-      if (activeStep && s.id === activeStep.id) {
-        return { ...s, status: 'active' as VideoGenStepStatus };
       }
       return { ...s, status: 'pending' as VideoGenStepStatus };
     });

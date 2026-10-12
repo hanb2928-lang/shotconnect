@@ -18,6 +18,8 @@ import {
 
 export function useDraftAutoSave(source: DraftSource) {
   const draftIdRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestParamsRef = useRef<Parameters<typeof saveDraftState>[0] | null>(null);
 
   const ensureDraftId = useCallback((): string => {
     if (!draftIdRef.current) {
@@ -41,31 +43,37 @@ export function useDraftAutoSave(source: DraftSource) {
   }): void => {
     if (params.imageUris.length === 0 && !params.scanId) return;
 
-    const id = ensureDraftId();
-    const angleLabels = params.angleLabels ?? [];
-    const now = Date.now();
+    latestParamsRef.current = params;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const p = latestParamsRef.current;
+      if (!p) return;
+      const id = ensureDraftId();
+      const angleLabels = p.angleLabels ?? [];
+      const now = Date.now();
 
-    const entry: DraftEntry = {
-      id,
-      source,
-      status: params.status ?? 'editing',
-      imageUris: params.imageUris,
-      angleLabels,
-      modelImageUri: params.modelImageUri,
-      scanId: params.scanId,
-      jobId: params.jobId,
-      resultVideoUrl: params.resultVideoUrl,
-      genMode: params.genMode,
-      mood: params.mood,
-      platform: params.platform,
-      uploaded: params.uploaded ?? false,
-      createdAt: now,
-      updatedAt: now,
-      label: makeDraftLabel(angleLabels, source),
-      thumbnailUri: params.imageUris[0],
-    };
+      const entry: DraftEntry = {
+        id,
+        source,
+        status: p.status ?? 'editing',
+        imageUris: p.imageUris,
+        angleLabels,
+        modelImageUri: p.modelImageUri,
+        scanId: p.scanId,
+        jobId: p.jobId,
+        resultVideoUrl: p.resultVideoUrl,
+        genMode: p.genMode,
+        mood: p.mood,
+        platform: p.platform,
+        uploaded: p.uploaded ?? false,
+        createdAt: now,
+        updatedAt: now,
+        label: makeDraftLabel(angleLabels, source),
+        thumbnailUri: p.imageUris[0],
+      };
 
-    saveDraft(entry).catch(() => {}).finally(() => { /* release entry closure ref */ });
+      saveDraft(entry).catch(() => {}).finally(() => { /* release entry closure ref */ });
+    }, 800);
   }, [ensureDraftId, source]);
 
   const loadDraft = useCallback(async (draftId: string): Promise<DraftEntry | null> => {

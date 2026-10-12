@@ -116,40 +116,45 @@ function buildProgressMap(states: FileUploadState[]): BatchUploadProgress {
   };
 }
 
-async function uploadWholeFile(
+async function uploadChunk(
   data: Uint8Array,
+  offset: number,
+  chunkSize: number,
   bucket: string,
   path: string,
   mimeType: string,
+  totalSize: number,
   signal?: AbortSignal,
 ): Promise<boolean> {
   const safePath = path.split('/').map(encodeURIComponent).join('/');
   const url = `${supabaseUrl}/storage/v1/object/${bucket}/${safePath}`;
+  const slice = data.subarray(offset, offset + chunkSize);
 
   const authHeaders = await getAuthHeaders();
   const headers: Record<string, string> = {
     ...authHeaders,
     'Content-Type': mimeType,
     'x-upsert': 'true',
+    'Content-Range': `bytes ${offset}-${offset + chunkSize - 1}/${totalSize}`,
   };
 
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   if (signal) {
-    if (signal.aborted) { controller.abort(); return false; }
+    if (signal.aborted) return false;
     signal.addEventListener('abort', onAbort, { once: true });
   }
 
-  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+  const timeoutId = setTimeout(() => controller.abort(), 60_000);
 
   try {
     let fetchBody: BodyInit;
     if (Platform.OS === 'web') {
-      fetchBody = new Blob([data as BlobPart], { type: mimeType });
+      fetchBody = new Blob([slice as BlobPart], { type: mimeType });
     } else {
-      fetchBody = (data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
-        ? data
-        : data.slice()) as BodyInit;
+      fetchBody = (slice.byteOffset === 0 && slice.byteLength === slice.buffer.byteLength
+        ? slice
+        : slice.slice()) as BodyInit;
     }
 
     const resp = await fetch(url, {
@@ -160,13 +165,8 @@ async function uploadWholeFile(
     });
 
     if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      addBreadcrumb('upload', `Upload failed (${resp.status})`, 'warning', {
-        bucket, path, status: resp.status, respBody: text.slice(0, 200),
-      });
       return false;
     }
-
     return true;
   } catch {
     return false;
@@ -188,6 +188,8 @@ async function uploadFileWithRetry(
     throw new Error('빈 파일은 업로드할 수 없습니다.');
   }
 
+  // Upload chunks sequentially, resuming from the first un-uploaded chunk
+  // on retry. This avoids re-transmitting the entire file on failure.
   for (let attempt = 0; attempt < MAX_CHUNK_RETRIES; attempt++) {
     if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
 
@@ -196,7 +198,7 @@ async function uploadFileWithRetry(
       onProgress?.();
       await new Promise((r) => setTimeout(r, 1000));
       if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
-      attempt = -1; // don't consume retry budget while waiting for circuit
+      attempt = -1;
       continue;
     }
 
@@ -213,21 +215,38 @@ async function uploadFileWithRetry(
     state.status = 'uploading';
     onProgress?.();
 
-    const success = await uploadWholeFile(
-      item.data,
-      item.bucket,
-      item.path,
-      item.mimeType,
-      signal,
-    );
+    let allChunksUploaded = true;
+    for (const chunk of state.chunks) {
+      if (chunk.uploaded) continue;
+      if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
 
-    if (success) {
-      state.uploadedBytes = totalSize;
+      const success = await uploadChunk(
+        item.data,
+        chunk.offset,
+        chunk.size,
+        item.bucket,
+        item.path,
+        item.mimeType,
+        totalSize,
+        signal,
+      );
+
+      if (success) {
+        chunk.uploaded = true;
+        state.uploadedBytes += chunk.size;
+        onProgress?.();
+      } else {
+        allChunksUploaded = false;
+        recordUploadFailure();
+        break;
+      }
+    }
+
+    if (allChunksUploaded) {
       const safePath = item.path.split('/').map(encodeURIComponent).join('/');
       return `${supabaseUrl}/storage/v1/object/public/${item.bucket}/${safePath}`;
     }
 
-    recordUploadFailure();
     if (attempt < MAX_CHUNK_RETRIES - 1) {
       await new Promise((r) => setTimeout(r, chunkBackoff(attempt)));
     }

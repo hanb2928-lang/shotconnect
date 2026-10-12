@@ -856,6 +856,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     setResultVideoUrl(null);
     genStartRef.current = Date.now();
     prefetchedHookRef.current = null;
+    serverProgRef.current = null;
+    renderStallSinceRef.current = null;
+    stepStallRef.current = null;
 
     let simProgress = 0;
     setVideoProgress({ phase: 'submitting', progress: 0.02, message: '촬영 에셋 준비 중...', elapsedSec: 0 });
@@ -876,10 +879,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     let nudgeTimer: ReturnType<typeof setInterval> | null = null;
 
     try {
-      // Pre-fetch hook analysis during the scan insert wait — this
-      // overlaps the local CPU work with the DB round-trip so the hook
-      // is ready by the time submitVideoJobAsync needs it, shaving
-      // 1-3 seconds off the perceived generation start.
+      // Pre-fetch hook analysis AND refresh the session during the scan
+      // insert — both overlap with the DB round-trip so neither adds to
+      // the critical path. This saves ~100-500ms of session refresh time
+      // that was previously sequential with the submit.
       const hookPrefetchPromise = new Promise<void>((resolve) => {
         try {
           prefetchedHookRef.current = autoSelectHook({ productName: params.productName });
@@ -888,6 +891,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         }
         resolve();
       });
+      const sessionRefreshPromise = ensureFreshSession().catch(() => { /* non-fatal */ });
 
       setVideoProgress({ phase: 'submitting', progress: 0.10, message: 'AI 렌더링 요청 전송 중...', elapsedSec: 0 });
       clearInterval(simTimer);
@@ -918,8 +922,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       }
       scanIdRef.current = scanData.id;
 
-      // Ensure the hook prefetch completed before proceeding.
+      // Ensure the hook prefetch and session refresh completed before proceeding.
       await hookPrefetchPromise;
+      await sessionRefreshPromise;
 
       const submitResult = await submitVideoJobAsync(params.promptText, {
         durationSec: 5,

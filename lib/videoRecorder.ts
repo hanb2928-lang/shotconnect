@@ -206,6 +206,12 @@ export function stopVideoRecording(recorder: MediaRecorder): void {
   if (recorder.state !== 'inactive') {
     recorder.stop();
   }
+  // Release the MediaStream tracks so the camera/mic hardware is freed.
+  try {
+    recorder.stream.getTracks().forEach((track) => {
+      track.stop();
+    });
+  } catch { /* tracks may already be stopped */ }
 }
 
 // Not used — recording duration is tracked by the caller via recordingTimerRef.

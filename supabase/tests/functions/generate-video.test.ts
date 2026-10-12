@@ -41,6 +41,7 @@ describe('generate-video edge function', () => {
       SUPABASE_URL: 'https://test.supabase.co',
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-key',
       RUNWAY_API_KEY: 'test-runway-key',
+      RUNWAY_WEBHOOK_SECRET: 'test-webhook-secret',
     };
 
     mockFetch = jest.fn();
@@ -335,7 +336,7 @@ describe('generate-video edge function', () => {
       });
 
       const req = new Request(
-        'https://test.supabase.co/functions/v1/generate-video?mode=webhook&taskId=task-789&scanId=scan-789',
+        'https://test.supabase.co/functions/v1/generate-video?mode=webhook&taskId=task-789&scanId=scan-789&secret=test-webhook-secret',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -354,7 +355,7 @@ describe('generate-video edge function', () => {
 
     it('returns 400 when taskId is missing from webhook', async () => {
       const req = new Request(
-        'https://test.supabase.co/functions/v1/generate-video?mode=webhook',
+        'https://test.supabase.co/functions/v1/generate-video?mode=webhook&secret=test-webhook-secret',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -377,7 +378,7 @@ describe('generate-video edge function', () => {
       });
 
       const req = new Request(
-        'https://test.supabase.co/functions/v1/generate-video?mode=webhook&taskId=t1&scanId=s1',
+        'https://test.supabase.co/functions/v1/generate-video?mode=webhook&taskId=t1&scanId=s1&secret=test-webhook-secret',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -407,7 +408,7 @@ describe('generate-video edge function', () => {
       });
 
       const req = new Request(
-        'https://test.supabase.co/functions/v1/generate-video?mode=webhook&taskId=runway-1&scanId=scan-1',
+        'https://test.supabase.co/functions/v1/generate-video?mode=webhook&taskId=runway-1&scanId=scan-1&secret=test-webhook-secret',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

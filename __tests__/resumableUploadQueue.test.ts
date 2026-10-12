@@ -55,7 +55,7 @@ describe('resumableUploadQueue', () => {
   });
 
   it('uploads a file in a single request', async () => {
-    const file = makeFile('f1', 1024);
+    const file = makeFile('f1', 256);
     mockFetch.mockResolvedValue({ ok: true, text: () => Promise.resolve('ok') });
 
     const results = await uploadFilesResumable([file], { chunkSize: 256 });
@@ -223,6 +223,8 @@ describe('resumableUploadQueue', () => {
     const results = await uploadFilesResumable([file], { chunkSize: 256 });
 
     expect(results).toHaveLength(1);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // 1024 bytes / 256 chunkSize = 4 chunks. First attempt fails on chunk 1,
+    // then retry resumes and uploads all 4 chunks = 5 fetch calls.
+    expect(mockFetch).toHaveBeenCalledTimes(5);
   });
 });

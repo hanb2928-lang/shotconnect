@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Animated, {
+  useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
-  withTiming,
-  Easing,
+  runOnJS,
   type SharedValue,
 } from 'react-native-reanimated';
 import { theme } from '@/lib/theme';
@@ -72,6 +72,25 @@ export function AidcaProgressTracker({ progressSV, totalDurationSec = 15 }: Aidc
     return PHASE_ORDER.length - 1;
   });
 
+  const [pctText, setPctText] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [phaseIdx, setPhaseIdx] = useState(0);
+
+  useAnimatedReaction(
+    () => Math.round(progressSV.value * 100),
+    (val, prev) => { if (val !== prev) runOnJS(setPctText)(val); },
+  );
+  useAnimatedReaction(
+    () => Math.round(progressSV.value * totalDurationSec),
+    (val, prev) => { if (val !== prev) runOnJS(setElapsed)(val); },
+  );
+  useAnimatedReaction(
+    () => currentPhaseIndex.value,
+    (val, prev) => { if (val !== prev) runOnJS(setPhaseIdx)(val); },
+  );
+
+  const remaining = Math.max(0, totalDurationSec - elapsed);
+
   const barFillStyle = useAnimatedStyle(() => ({
     width: `${Math.max(0, Math.min(progressSV.value, 1)) * 100}%`,
   }));
@@ -80,21 +99,18 @@ export function AidcaProgressTracker({ progressSV, totalDurationSec = 15 }: Aidc
     opacity: progressSV.value > 0.02 ? 1 : 0.3,
   }));
 
-  const elapsedSec = useDerivedValue(() => Math.round(progressSV.value * totalDurationSec));
-  const remainingSec = useDerivedValue(() => Math.max(0, totalDurationSec - elapsedSec.value));
-
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Animated.Text style={[styles.pctText, pctTextStyle]}>
-          {Math.round(progressSV.value * 100)}%
+          {pctText}%
         </Animated.Text>
         <View style={styles.timeRow}>
-          <Text style={styles.timeText}>{elapsedSec.value}s</Text>
+          <Text style={styles.timeText}>{elapsed}s</Text>
           <Text style={styles.timeDimText}> / {totalDurationSec}s</Text>
         </View>
-        {remainingSec.value > 0 && (
-          <Text style={styles.remainingText}>남은 시간 ~{remainingSec.value}s</Text>
+        {remaining > 0 && (
+          <Text style={styles.remainingText}>남은 시간 ~{remaining}s</Text>
         )}
       </View>
 
@@ -105,7 +121,7 @@ export function AidcaProgressTracker({ progressSV, totalDurationSec = 15 }: Aidc
 
         {phases.map((p, i) => {
           const leftPct = phases.slice(0, i).reduce((sum, ph) => sum + ph.ratio, 0) * 100;
-          const isActive = currentPhaseIndex.value === i;
+          const isActive = phaseIdx === i;
           return (
             <View
               key={p.phase}
@@ -142,7 +158,7 @@ export function AidcaProgressTracker({ progressSV, totalDurationSec = 15 }: Aidc
               style={[
                 styles.phaseDescText,
                 {
-                  color: currentPhaseIndex.value === i ? p.color : theme.colors.dark.textFaint,
+                  color: phaseIdx === i ? p.color : theme.colors.dark.textFaint,
                 },
               ]}
               numberOfLines={1}

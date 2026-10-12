@@ -272,6 +272,7 @@ export async function findSimilarMultiAngleCache(
   motionTemplateHash: string,
   toneManner: string,
   productCategory?: string,
+  imageHash?: string,
 ): Promise<SimilarCacheMatch | null> {
   if (!motionTemplateHash) return null;
   try {
@@ -296,7 +297,7 @@ export async function findSimilarMultiAngleCache(
       const rowCategory = (ctx.productCategory as string) || '';
 
       // Skip entries from the same image_hash (that's the exact-match path)
-      if (row.image_hash === toneManner) continue;
+      if (imageHash && row.image_hash === imageHash) continue;
 
       let score = 0;
 

@@ -3,10 +3,10 @@ import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession, withQueryTimeout } from '@/lib/supabase';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
-import { pauseAllTicks, resumeAllTicks } from '@/lib/tickGate';
+
 import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 import { stepToProgress } from '@/lib/videoGenSteps';
-import { HybridRealtimePoller, type ChannelHealth } from '@/lib/hybridRealtimePoller';
+import { HybridRealtimePoller } from '@/lib/hybridRealtimePoller';
 
 export type JobState = 'idle' | 'polling' | 'completed' | 'failed' | 'timeout';
 
@@ -104,9 +104,12 @@ export function useResultPolling(
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
     let pollInFlight = false;
-    let pollInFlightWatchdog: ReturnType<typeof setTimeout> | null = null;
-    const POLL_LOCK_TIMEOUT_MS = 5000;
     let isPaused = false;
+    // Guard against repeated Realtime re-subscribe attempts at 85%+.
+    // Without this, every 4s poll cycle triggers a createRealtimeChannel()
+    // call when the channel is null, creating a reconnect storm that
+    // saturates the native bridge and connection pool.
+    let realtimeReconnectAttempted = false;
     // Monotonic guard: track the highest progress and latest step seen
     // across both realtime and polling. Stale realtime payloads that arrive
     // after a newer poll result (common on background→foreground transition)
@@ -271,7 +274,6 @@ export function useResultPolling(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (softWarnTimer) clearTimeout(softWarnTimer);
       if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
-      if (pollInFlightWatchdog) { clearTimeout(pollInFlightWatchdog); pollInFlightWatchdog = null; }
       pollInFlight = false;
       if (realtimeChannel) {
         safeRemoveChannel(realtimeChannel);
@@ -296,98 +298,59 @@ export function useResultPolling(
     // Direct DB force-sync: query video_jobs table as a fallback.
     // For soft-fallback task IDs, look up by scan_id since no real row
     // has the fake task ID.
-    const forceSyncDb = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
+    // Unified DB force-sync: checks scans once (video_url + muxed_video_url),
+    // then video_jobs once — 2 queries total. This replaces the previous
+    // pattern of calling forceSyncDb() + forceSyncByScan() separately which
+    // duplicated the scans query (4 queries/cycle → 2 queries/cycle),
+    // halving DB load and render cycles at the 97% bottleneck.
+    const forceSyncUnified = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
+      const signal = forceSyncAbort.signal;
       try {
-        // Check scans.video_url FIRST — the server writes the render result
-        // here when generation completes. muxed_video_url is a separate
-        // post-processing step on the result page and may never arrive during
-        // generation, causing the 97% stall.
-        if (scanId) {
-          const { data: scanData } = await withQueryTimeout(
-            supabase
-              .from('scans')
-              .select('video_url, muxed_video_url')
-              .eq('id', scanId)
-              .maybeSingle(),
-            5000,
-            'forceSyncDb.scans',
-          );
-          if (forceSyncAbort.signal.aborted) return null;
-          const finalUrl = scanData?.video_url ?? scanData?.muxed_video_url;
-          if (finalUrl) {
-            return { status: 'SUCCESS', videoUrl: finalUrl, step: 'completed', progress: 1.0 };
-          }
+        // Parallel query: fire scans and video_jobs simultaneously.
+        // Sequential queries doubled the wall-clock time at 85%+ where
+        // every 4s cycle waited ~200-400ms for scans before even
+        // starting the video_jobs query. Parallel execution halves the
+        // round-trip time and reduces the window for bridge saturation.
+        const scanPromise = scanId
+          ? withQueryTimeout(
+              supabase.from('scans').select('video_url, muxed_video_url').eq('id', scanId).abortSignal(signal).maybeSingle(),
+              5000,
+              'forceSyncUnified.scans',
+            )
+          : Promise.resolve({ data: null } as { data: { video_url: string | null; muxed_video_url: string | null } | null });
+
+        let vjQuery = supabase.from('video_jobs').select('status, video_url, step, progress');
+        const jobsPromise = isSoftTaskId && scanId
+          ? withQueryTimeout(vjQuery.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).abortSignal(signal).maybeSingle(), 5000, 'forceSyncUnified.jobs')
+          : withQueryTimeout(vjQuery.eq('task_id', jobId).abortSignal(signal).maybeSingle(), 5000, 'forceSyncUnified.jobs');
+
+        const [scanResult, jobsResult] = await Promise.all([scanPromise, jobsPromise]);
+
+        if (signal.aborted) return null;
+
+        // Check scans first — the webhook writes the terminal URL here,
+        // so it's the fastest completion signal.
+        const scanData = scanResult.data as { video_url: string | null; muxed_video_url: string | null } | null;
+        const finalUrl = scanData?.video_url ?? scanData?.muxed_video_url;
+        if (finalUrl) {
+          return { status: 'SUCCESS', videoUrl: finalUrl, step: 'completed', progress: 1.0 };
         }
-        let query = supabase
-          .from('video_jobs')
-          .select('status, video_url, step, progress');
-        const { data, error: dbError } = isSoftTaskId && scanId
-          ? await withQueryTimeout(query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle(), 5000, 'forceSyncDb.jobs')
-          : await withQueryTimeout(query.eq('task_id', jobId).maybeSingle(), 5000, 'forceSyncDb.jobs');
-        if (forceSyncAbort.signal.aborted || dbError || !data) return null;
+
+        const data = jobsResult.data;
+        const dbError = jobsResult.error;
+        if (signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
         if (row.status === 'SUCCESS' && row.video_url) {
           return { status: 'SUCCESS', videoUrl: row.video_url, step: 'completed', progress: 1.0 };
         }
-        return { status: row.status, videoUrl: null, step: row.step, progress: row.progress };
-      } catch (err) {
-        console.error('[useResultPolling] forceSyncDb error:', err);
-        return null;
-      }
-    };
-
-    const forceSyncByScan = async (): Promise<{ status: string; videoUrl: string | null; step: string | null; progress: number | null } | null> => {
-      if (!scanId) return null;
-      forceSyncAbort?.abort();
-      forceSyncAbort = new AbortController();
-      try {
-        // ALWAYS check scans first — video_url is the render result written
-        // by the server on completion. muxed_video_url is post-processing.
-        const { data: scanData } = await withQueryTimeout(
-          supabase
-            .from('scans')
-            .select('video_url, muxed_video_url')
-            .eq('id', scanId)
-            .maybeSingle(),
-          5000,
-          'forceSyncByScan.scans',
-        );
-        if (forceSyncAbort.signal.aborted) return null;
-        if (scanData) {
-          const finalUrl = scanData.video_url ?? scanData.muxed_video_url;
-          if (finalUrl) {
-            return { status: 'SUCCESS', videoUrl: finalUrl, step: 'completed', progress: 1.0 };
-          }
-        }
-
-        // Check video_jobs for progress/step info and terminal status.
-        const { data, error: dbError } = await withQueryTimeout(
-          supabase
-            .from('video_jobs')
-            .select('status, video_url, step, progress')
-            .eq('scan_id', scanId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          5000,
-          'forceSyncByScan.jobs',
-        );
-        if (forceSyncAbort.signal.aborted || dbError || !data) return null;
-        const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
-
         if (row.status === 'FAILED') {
           return { status: 'FAILED', videoUrl: null, step: row.step, progress: row.progress };
         }
-
-        if (row.status === 'SUCCESS' && row.video_url) {
-          return { status: 'SUCCESS', videoUrl: row.video_url, step: 'completed', progress: 1.0 };
-        }
-
         return { status: row.status, videoUrl: null, step: row.step, progress: row.progress };
       } catch (err) {
-        console.error('[useResultPolling] forceSyncByScan error:', err);
+        console.error('[useResultPolling] forceSyncUnified error:', err);
         return null;
       }
     };
@@ -405,14 +368,9 @@ export function useResultPolling(
       if (cancelled || settledRef.current) return;
       if (pollInFlight) return;
       pollInFlight = true;
-      if (pollInFlightWatchdog) clearTimeout(pollInFlightWatchdog);
-      pollInFlightWatchdog = setTimeout(() => {
-        pollInFlight = false;
-      }, POLL_LOCK_TIMEOUT_MS);
       try {
         await pollOnceInner();
       } finally {
-        if (pollInFlightWatchdog) { clearTimeout(pollInFlightWatchdog); pollInFlightWatchdog = null; }
         pollInFlight = false;
       }
     };
@@ -428,20 +386,26 @@ export function useResultPolling(
       // saturated the bridge and caused the 97% stall.
       if (highestProgressSeen >= 0.85) {
         // Re-subscribe Realtime if the channel was dropped (e.g. after a
-        // background transition). The 85%+ path previously relied solely on
-        // the 6s DB poll, but on native the Realtime channel is the fastest
-        // path to detect completion — especially the scans table callback
-        // which carries muxed_video_url.
-        if (!realtimeChannel) {
-          createRealtimeChannel().then((ch) => { realtimeChannel = ch; }).catch(() => {
-            // Realtime unavailable — DB poll still works as fallback
+        // background transition). Only attempt once per channel loss —
+        // retrying on every 4s poll cycle creates a reconnect storm that
+        // saturates the native bridge and connection pool at 97%.
+        if (!realtimeChannel && !realtimeReconnectAttempted) {
+          realtimeReconnectAttempted = true;
+          createRealtimeChannel().then((ch) => {
+            realtimeChannel = ch;
+            realtimeReconnectAttempted = false;
+          }).catch(() => {
+            // Realtime unavailable — DB poll still works as fallback.
+            // Reset the flag so a future cycle can retry.
+            realtimeReconnectAttempted = false;
           });
         }
-        // DB force-sync: for soft task IDs, forceSyncByScan checks scans
-        // first (muxed_video_url) then video_jobs. For regular task IDs,
-        // forceSyncDb checks video_jobs only, so we also run forceSyncByScan
-        // to check scans.muxed_video_url.
-        const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
+        // Unified DB force-sync: checks scans first (video_url/muxed_video_url),
+        // then video_jobs. This replaces the previous pattern of calling both
+        // forceSyncDb() and forceSyncByScan() which duplicated the scans query
+        // (4 queries/cycle → 2 queries/cycle), halving DB load at the 97%
+        // bottleneck.
+        const dbResult = await forceSyncUnified();
         if (cancelled || settledRef.current) return;
         if (dbResult) {
           if (dbResult.step) {
@@ -453,20 +417,14 @@ export function useResultPolling(
           handleResult(dbResult.status, dbResult.videoUrl);
           if (settledRef.current) return;
         }
-        // For non-soft task IDs, also check scans directly.
-        if (!cancelled && !settledRef.current && scanId && !isSoftTaskId) {
-          const scanResult = await forceSyncByScan();
-          if (!cancelled && !settledRef.current && scanResult) {
-            handleResult(scanResult.status, scanResult.videoUrl);
-            if (settledRef.current) return;
-          }
-        }
-        // Tightened interval: 4s when we're in the final stretch.
-        // 2s was too aggressive — it doubled with the (now removed) tick
-        // gate poll and caused microtask starvation at 97%. 4s is still
-        // fast enough to catch a URL that lands within one cycle.
+        // Gradual polling interval: starts at 4s when entering the 85%+
+        // range, decreases to 2s as progress approaches 100%. This smooths
+        // the transition from the adaptive backoff (up to 30s) and catches
+        // completion faster when the video is nearly done.
         if (!cancelled && !settledRef.current && !isPaused) {
-          pollTimer = setTimeout(pollOnce, 4000);
+          const prog = highestProgressSeen;
+          const renderPollMs = prog >= 0.97 ? 2000 : prog >= 0.90 ? 3000 : 4000;
+          pollTimer = setTimeout(pollOnce, renderPollMs);
         }
         return;
       }
@@ -489,7 +447,7 @@ export function useResultPolling(
       // server-side even though we never got the response. Also propagate
       // step/progress so the UI stays live during the soft path.
       if (isSoftTaskId) {
-        const scanResult = await forceSyncByScan();
+        const scanResult = await forceSyncUnified();
         if (cancelled || settledRef.current) return;
         if (scanResult) {
           if (scanResult.step) {
@@ -530,18 +488,11 @@ export function useResultPolling(
               return;
             }
             // Server says SUCCESS but didn't include the URL. Immediately
-            // force-sync the DB instead of pinning to 97% and waiting for
-            // a Realtime callback that may never arrive on flaky networks.
-            const dbSync = await forceSyncByScan();
+            // force-sync the DB — unified call checks scans + video_jobs.
+            const dbSync = await forceSyncUnified();
             if (cancelled || settledRef.current) return;
             if (dbSync?.videoUrl) {
               handleResult('SUCCESS', dbSync.videoUrl);
-              return;
-            }
-            const dbSyncFallback = await forceSyncDb();
-            if (cancelled || settledRef.current) return;
-            if (dbSyncFallback?.videoUrl) {
-              handleResult('SUCCESS', dbSyncFallback.videoUrl);
               return;
             }
             settle('timeout', '서버가 영상 생성 완료를 보고했지만 주소를 가져오지 못했습니다. 다시 시도해주세요.');
@@ -577,15 +528,9 @@ export function useResultPolling(
           pollErrorWindow.shift();
         }
         if (pollErrorWindow.length >= MAX_POLL_ERRORS_IN_WINDOW) {
-          // Force-sync DB as a last resort before giving up.
-          const dbResult = await forceSyncDb();
-          if (!dbResult) {
-            const scanResult = await forceSyncByScan();
-            if (scanResult) {
-              handleResult(scanResult.status, scanResult.videoUrl);
-              return;
-            }
-          } else {
+          // Unified DB force-sync as a last resort before giving up.
+          const dbResult = await forceSyncUnified();
+          if (dbResult) {
             handleResult(dbResult.status, dbResult.videoUrl);
             return;
           }
@@ -597,21 +542,11 @@ export function useResultPolling(
       // Fallback: also try DB force-sync if we haven't resolved yet and
       // the poll failed (but hasn't hit the threshold yet).
       if (!cancelled && !settledRef.current && pollErrorWindow.length > 0) {
-        const dbResult = await forceSyncDb();
+        const dbResult = await forceSyncUnified();
         if (cancelled) return;
         if (dbResult) {
           handleResult(dbResult.status, dbResult.videoUrl);
           if (settledRef.current) return;
-        }
-        // Also check scans.video_url — the webhook may have completed
-        // without the video_jobs row being visible yet.
-        if (scanId) {
-          const scanResult = await forceSyncByScan();
-          if (cancelled) return;
-          if (scanResult) {
-            handleResult(scanResult.status, scanResult.videoUrl);
-            if (settledRef.current) return;
-          }
         }
       }
 
@@ -664,7 +599,7 @@ export function useResultPolling(
       // may take 1-2 seconds to re-subscribe after a network drop, so check
       // the DB directly to catch any completion that happened while
       // backgrounded. This fills the gap before the first poll cycle fires.
-      const dbResult = isSoftTaskId ? await forceSyncByScan() : await forceSyncDb();
+      const dbResult = await forceSyncUnified();
       if (cancelled || settledRef.current || resumeBurstAborted) { resumeBurstTimer = null; return; }
       if (dbResult) {
         if (dbResult.step) {
@@ -675,14 +610,6 @@ export function useResultPolling(
         }
         handleResult(dbResult.status, dbResult.videoUrl);
         if (settledRef.current) return;
-      }
-      // Also check scans directly for non-soft task IDs.
-      if (!cancelled && !settledRef.current && !resumeBurstAborted && scanId && !isSoftTaskId) {
-        const scanResult = await forceSyncByScan();
-        if (!cancelled && !settledRef.current && !resumeBurstAborted && scanResult) {
-          handleResult(scanResult.status, scanResult.videoUrl);
-          if (settledRef.current) return;
-        }
       }
       if (!cancelled && !settledRef.current && !resumeBurstAborted) {
         const delayMs = hybridPoller.nextPollDelayMs();

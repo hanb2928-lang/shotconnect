@@ -118,6 +118,8 @@ export function mediaCacheEvict(key: string): void {
     } catch {}
   }
   l1Map.delete(key);
+  l2Pending.delete(key);
+  removeL2(key).catch(() => {});
 }
 
 export function mediaCacheClear(): void {
@@ -152,19 +154,39 @@ async function writeL2(key: string, dataUrl: string): Promise<void> {
   }
 }
 
+async function removeL2(key: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    const db = await initIndexedDB();
+    if (!db) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('media', 'readwrite');
+        tx.objectStore('media').delete(L2_KEY_PREFIX + key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch { resolve(); }
+    });
+  } else {
+    const fs = await getFileSystem();
+    if (!fs) return;
+    try {
+      const path = `${fs.cacheDirectory}media_cache_${key.replace(/[^a-zA-Z0-9]/g, '_')}.txt`;
+      await fs.deleteAsync(path, { idempotent: true });
+    } catch { /* best-effort */ }
+  }
+}
+
 function promoteL2toL1(key: string, dataUrl: string): void {
   let url = dataUrl;
   let isBlobUrl = false;
   if (Platform.OS === 'web' && dataUrl.startsWith('data:')) {
     try {
-      const res = new XMLHttpRequest();
-      res.open('GET', dataUrl, false);
-      res.overrideMimeType('text/plain; charset=x-user-defined');
-      res.send(null);
-      const binary = res.responseText;
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i) & 0xff;
-      const blob = new Blob([bytes.buffer]);
+      const byteString = atob(dataUrl.split(',')[1] || '');
+      const mimeMatch = dataUrl.match(/data:(.*?);base64,/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const bytes = new Uint8Array(byteString.length);
+      for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i) & 0xff;
+      const blob = new Blob([bytes.buffer], { type: mime });
       url = URL.createObjectURL(blob);
       isBlobUrl = true;
     } catch {
@@ -222,6 +244,11 @@ async function readL2IndexedDB(key: string): Promise<string | null> {
         if (result == null) { resolve(null); return; }
         if (typeof result === 'string') { resolve(result); return; }
         if (typeof result === 'object' && result !== null && typeof result.data === 'string') {
+          const ts = (result as { ts?: number }).ts ?? 0;
+          if (ts > 0 && Date.now() - ts > L2_MAX_AGE_MS) {
+            resolve(null);
+            return;
+          }
           resolve(result.data);
           return;
         }

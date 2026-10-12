@@ -225,8 +225,19 @@ export default function RootLayout() {
       // banner, Control Center). Tearing down on 'inactive' causes a
       // reconnect stampede when 'active' follows, crashing the app.
       if (nextState === 'background') {
-        sweepZombieSockets();
+        // pauseAllTicks is pure JS (flag flips) — safe in immediate phase.
         pauseAllTicks();
+        // sweepZombieSockets calls removeChannel + socket.disconnect,
+        // which are WebSocket bridge calls. On Android, the JS thread
+        // suspends faster than iOS — calling these synchronously in the
+        // immediate phase blocks the JS thread waiting for bridge
+        // responses that will never arrive, causing an ANR → watchdog
+        // SIGKILL. Defer to a setTimeout(0) macrotask: if the OS
+        // suspends before it fires, the socket stays alive but the
+        // reconnect guard handles it cleanly on foreground return.
+        setTimeout(() => {
+          try { sweepZombieSockets(); } catch { /* non-fatal */ }
+        }, 0);
       }
     });
     const unsubTickResume = registerAppStateHandler('deferred', (nextState: string) => {

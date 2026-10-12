@@ -108,6 +108,7 @@ export function useSoundPunch() {
 
   useEffect(() => {
     mountedRef.current = true;
+    if (typeof document === 'undefined') return;
 
     const handleVisibilityChange = () => {
       const r = refs.current;
@@ -150,15 +151,14 @@ export function useSoundPunch() {
         // user gesture). The user will need to press record again to restart
         // the mic stream, but the context itself is preserved.
         const resumePromise = r.audioContext.resume();
-        const timeoutPromise = new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error('resume timeout')), 3000),
+        const timeoutPromise = new Promise<void>((resolve) =>
+          setTimeout(resolve, 3000),
         );
         Promise.race([resumePromise, timeoutPromise])
           .then(() => {
             r.suspendedOnBackground = false;
           })
           .catch(() => {
-            // Resume failed or timed out — close the context to free resources.
             try { r.audioContext?.close(); } catch { /* ignore */ }
             r.audioContext = null;
             r.suspendedOnBackground = false;

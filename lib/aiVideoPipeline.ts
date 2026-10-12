@@ -357,7 +357,7 @@ export async function generateAiVideo(
     const [cached, similar] = await Promise.all([
       getMultiAngleCache(options.imageHash, options.contentTone, motionTemplateHash),
       options.contentTone
-        ? findSimilarMultiAngleCache(motionTemplateHash, options.contentTone, options.productVision?.productCategory)
+        ? findSimilarMultiAngleCache(motionTemplateHash, options.contentTone, options.productVision?.productCategory, options.imageHash)
         : Promise.resolve(null),
     ]);
     if (cached) {
@@ -1250,7 +1250,10 @@ export async function submitVideoJobAsync(
     mainImageUrl: options.mainImageUrl,
   });
 
-  await ensureFreshSession();
+  await Promise.race([
+    ensureFreshSession(),
+    new Promise((resolve) => setTimeout(resolve, 5000)),
+  ]).catch(() => { /* non-fatal — proceed with existing session */ });
 
   report('submitting', 0.08, 'AI 렌더링 요청 전송 중...');
 
@@ -1310,18 +1313,23 @@ export async function submitVideoJobAsync(
     ),
   );
 
-  const hardTimeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
-    setTimeout(
+  let hardTimeoutCleanup: (() => void) | null = null;
+  const hardTimeoutPromise = new Promise<{ data: null; error: Error }>((resolve) => {
+    const timer = setTimeout(
       () => { submitController.abort(); resolve({ data: null, error: new Error('영상 생성 요청 시간이 초과되었습니다. 다시 시도해주세요.') }); },
       SUBMIT_TIMEOUT_MS,
-    ),
-  );
+    );
+    hardTimeoutCleanup = () => clearTimeout(timer);
+  });
 
   const { data, error } = await Promise.race([
     invokePromise,
     softTimeoutPromise,
     hardTimeoutPromise,
-  ]).finally(() => clearTimeout(submitTimeoutId));
+  ]).finally(() => {
+    clearTimeout(submitTimeoutId);
+    if (hardTimeoutCleanup) hardTimeoutCleanup();
+  });
 
   if (error) throw await buildVideoFunctionError(error);
   // If the soft timeout won the race, use the fallback task ID. Polling will

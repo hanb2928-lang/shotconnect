@@ -469,10 +469,10 @@ function EditorScreenInner() {
     if (bgEditLockRef.current) return;
     bgEditLockRef.current = true;
     setBgEditorVisible(false);
-    if (!resultDataUrl) {
-      // No user edit — use the AI result as-is (already in bgEditorDataUrl)
-      const dataUrl = bgEditorDataUrl;
-      try {
+    try {
+      if (!resultDataUrl) {
+        // No user edit — use the AI result as-is (already in bgEditorDataUrl)
+        const dataUrl = bgEditorDataUrl;
         let newUri: string;
         if (dataUrl.startsWith('http')) {
           newUri = dataUrl;
@@ -483,17 +483,12 @@ function EditorScreenInner() {
         if (!mountedRef.current) return;
         updateImage(newUri);
         setBgPickerVisible(true);
-      } catch (err) {
-        if (!mountedRef.current) return;
-        setError(err instanceof Error ? err.message : '이미지 저장 실패');
+        return;
       }
-      return;
-    }
 
-    // User edited the mask — send to server with mask for final processing
-    setProcessing(true);
-    setProgressText('사용자 편집 적용 중...');
-    try {
+      // User edited the mask — send to server with mask for final processing
+      setProcessing(true);
+      setProgressText('사용자 편집 적용 중...');
       const base64 = cleanBase64(resultDataUrl);
       const newUri = await uploadEditedImage(base64, 'image/png');
       if (!mountedRef.current) return;
@@ -502,9 +497,10 @@ function EditorScreenInner() {
     } catch (err) {
       if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : '편집 결과 저장 실패');
+    } finally {
+      if (mountedRef.current) setProcessing(false);
+      bgEditLockRef.current = false;
     }
-    if (mountedRef.current) setProcessing(false);
-    bgEditLockRef.current = false;
   }, [bgEditorDataUrl, updateImage]);
 
   const handleBgEditorCancel = useCallback(() => {

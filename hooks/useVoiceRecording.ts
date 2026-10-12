@@ -42,6 +42,8 @@ export function useVoiceRecording(): MediaRecorderLike {
     mediaRecorderRef.current = null;
     chunksRef.current = [];
     stoppingRef.current = false;
+    // Resolve any queued stop callers before clearing the array
+    for (const r of pendingStopsRef.current) r(null);
     pendingStopsRef.current = [];
     durationRef.current = 0;
   }, []);
