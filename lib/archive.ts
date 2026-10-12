@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabase, withQueryTimeout } from '@/lib/supabase';
 import { getStaleCached, setCached } from '@/lib/offlineCache';
 
 export interface ArchiveItem {
@@ -94,14 +94,18 @@ export async function fetchArchiveListCached(): Promise<ArchiveListResponse | nu
 }
 
 export async function fetchArchiveItem(id: string): Promise<ArchiveItem | null> {
-  const { data, error } = await supabase
-    .from('scans')
-    .select(
-      'id, title, product_name, product_category, image_url, video_url, muxed_video_url, tts_url, one_liner, template_data, created_at',
-    )
-    .eq('id', id)
-    .not('video_url', 'is', null)
-    .maybeSingle();
+  const { data, error } = await withQueryTimeout(
+    supabase
+      .from('scans')
+      .select(
+        'id, title, product_name, product_category, image_url, video_url, muxed_video_url, tts_url, one_liner, template_data, created_at',
+      )
+      .eq('id', id)
+      .not('video_url', 'is', null)
+      .maybeSingle(),
+    5000,
+    'fetchArchiveItem',
+  );
 
   if (error || !data) return null;
 

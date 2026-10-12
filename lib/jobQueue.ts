@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { supabase, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey, withQueryTimeout } from '@/lib/supabase';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
 import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 
@@ -97,11 +97,15 @@ export async function enqueueJob(
   } catch (timeoutErr) {
     // The insert may still succeed in the background. Try to fetch the row we
     // just inserted — if it exists, return it; otherwise surface the timeout.
-    const { data: fetched } = await supabase
-      .from('render_jobs')
-      .select('id')
-      .eq('id', clientId)
-      .maybeSingle();
+    const { data: fetched } = await withQueryTimeout(
+      supabase
+        .from('render_jobs')
+        .select('id')
+        .eq('id', clientId)
+        .maybeSingle(),
+      5000,
+      'enqueueJob.fallback',
+    );
     if (fetched) {
       data = fetched as { id: string };
     } else {
@@ -117,11 +121,15 @@ export async function enqueueJob(
 }
 
 export async function getJob(jobId: string): Promise<RenderJob | null> {
-  const { data, error } = await supabase
-    .from('render_jobs')
-    .select('*')
-    .eq('id', jobId)
-    .maybeSingle();
+  const { data, error } = await withQueryTimeout(
+    supabase
+      .from('render_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .maybeSingle(),
+    5000,
+    'getJob',
+  );
 
   if (error) throw new Error(`Job fetch failed: ${error.message}`);
   return data as RenderJob | null;

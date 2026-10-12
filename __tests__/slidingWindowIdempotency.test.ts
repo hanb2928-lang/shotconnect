@@ -30,6 +30,7 @@ jest.mock('@/lib/supabase', () => ({
   },
   supabaseUrl: 'https://test.supabase.co',
   supabaseAnonKey: 'test-key',
+  withQueryTimeout: (p: Promise<unknown>) => p,
 }));
 
 // ─── useResultPolling requires React rendering; test the logic indirectly ───

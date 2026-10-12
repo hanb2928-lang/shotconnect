@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { onFlushComplete } from '@/lib/foregroundFlushGuard';
-import { supabase, ensureFreshSession } from '@/lib/supabase';
+import { supabase, ensureFreshSession, withQueryTimeout } from '@/lib/supabase';
 import { getItem, setItem, removeItem } from '@/lib/storage';
 
 export interface OrphanedScan {
@@ -59,11 +59,15 @@ async function queryOrphanedScans(): Promise<OrphanedScan[]> {
 
 async function checkScanCompletion(scanId: string): Promise<OrphanedScan | null> {
   try {
-    const { data, error } = await supabase
-      .from('scans')
-      .select('id, created_at, image_url, video_url, muxed_video_url, edited_image_url')
-      .eq('id', scanId)
-      .maybeSingle();
+    const { data, error } = await withQueryTimeout(
+      supabase
+        .from('scans')
+        .select('id, created_at, image_url, video_url, muxed_video_url, edited_image_url')
+        .eq('id', scanId)
+        .maybeSingle(),
+      5000,
+      'orphanJobRecovery.checkScanCompletion',
+    );
     if (error || !data) return null;
     return data as OrphanedScan;
   } catch {

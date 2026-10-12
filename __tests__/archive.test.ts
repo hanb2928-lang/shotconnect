@@ -24,6 +24,7 @@ jest.mock('@/lib/supabase', () => {
     supabase: {
       from: jest.fn(() => ({ select: mockSelect })),
     },
+    withQueryTimeout: <T>(p: Promise<T>): Promise<T> => p,
   };
 });
 

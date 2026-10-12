@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabase, withQueryTimeout } from '@/lib/supabase';
 import { getCached, setCached } from '@/lib/offlineCache';
 import { hashObject } from '@/lib/contentHash';
 
@@ -26,11 +26,15 @@ async function setL1<T>(key: string, data: T): Promise<void> {
 
 async function getL2<T>(cacheKey: string): Promise<T | null> {
   try {
-    const { data, error } = await supabase
-      .from('ai_content_cache')
-      .select('result, expires_at, hit_count')
-      .eq('cache_key', cacheKey)
-      .maybeSingle();
+    const { data, error } = await withQueryTimeout(
+      supabase
+        .from('ai_content_cache')
+        .select('result, expires_at, hit_count')
+        .eq('cache_key', cacheKey)
+        .maybeSingle(),
+      5000,
+      'aiCache.getL2',
+    );
 
     if (error || !data) return null;
 
@@ -180,12 +184,16 @@ export async function getMultiAngleCache(
   motionTemplateHash = '',
 ): Promise<MultiAngleCacheEntry | null> {
   try {
-    const { data, error } = await supabase
-      .from('ai_analysis_cache')
-      .select('product_context, hook_options, rendered_video_url, expires_at')
-      .eq('image_hash', imageHash)
-      .eq('motion_template_hash', motionTemplateHash)
-      .maybeSingle();
+    const { data, error } = await withQueryTimeout(
+      supabase
+        .from('ai_analysis_cache')
+        .select('product_context, hook_options, rendered_video_url, expires_at')
+        .eq('image_hash', imageHash)
+        .eq('motion_template_hash', motionTemplateHash)
+        .maybeSingle(),
+      5000,
+      'aiCache.getMultiAngleCache',
+    );
 
     if (error || !data) return null;
 

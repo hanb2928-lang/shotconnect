@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { getActiveVideoJob, clearActiveVideoJob } from '@/lib/videoJobPersistence';
-import { supabase, ensureFreshSession } from '@/lib/supabase';
+import { supabase, ensureFreshSession, withQueryTimeout } from '@/lib/supabase';
 
 export type RecoveryState = 'idle' | 'checking' | 'in_progress' | 'completed' | 'failed' | 'not_found';
 
@@ -60,11 +60,15 @@ export function useVideoJobRecovery() {
       // result is already there, clear local storage and show the result
       // without entering a phantom in-progress state.
       if (scanId) {
-        const { data: scanData } = await supabase
-          .from('scans')
-          .select('video_url, muxed_video_url')
-          .eq('id', scanId)
-          .maybeSingle();
+        const { data: scanData } = await withQueryTimeout(
+          supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle(),
+          5000,
+          'videoJobRecovery.scans',
+        );
         const scanFinalUrl = scanData?.video_url ?? scanData?.muxed_video_url;
         if (scanFinalUrl) {
           clearActiveVideoJob();
