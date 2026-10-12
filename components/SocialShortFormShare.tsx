@@ -53,7 +53,7 @@ export function SocialShortFormShare({
 
   useEffect(() => {
     let mounted = true;
-    getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {});
+    getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {}).finally(() => { /* release ref */ });
     registerPause(expandAnim, babyBounce, sparkleRot, introOpacity);
     return () => {
       mounted = false;

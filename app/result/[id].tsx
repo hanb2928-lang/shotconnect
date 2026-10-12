@@ -562,11 +562,11 @@ function ResultScreenInner() {
   useEffect(() => {
     const tag = 'result-mux-gen';
     if (isGeneratingVideo || isMuxing) {
-      activateKeepAwakeAsync(tag).catch(() => {});
+      activateKeepAwakeAsync(tag).catch(() => {}).finally(() => { /* release ref */ });
     } else {
-      deactivateKeepAwake(tag).catch(() => {});
+      deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ });
     }
-    return () => { deactivateKeepAwake(tag).catch(() => {}); };
+    return () => { deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ }); };
   }, [isGeneratingVideo, isMuxing]);
 
   useEffect(() => {
@@ -1062,9 +1062,9 @@ function ResultScreenInner() {
             supabase.from('scans').select('tts_url').eq('id', scan.id).maybeSingle()
           ).then(({ data }: { data: { tts_url: string } | null }) => {
             if (data?.tts_url && mountedRef.current) setTtsUrl(data.tts_url);
-          }).catch(() => {});
+          }).catch(() => {}).finally(() => { /* release ref */ });
         }
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => { /* release ref */ });
     }
 
     try {
@@ -1584,7 +1584,7 @@ function ResultScreenInner() {
                 }
               } else {
                 // Stale snapshot — clear it
-                setItem(`mux_snapshot:${scanData.id}`, '').catch(() => {});
+                setItem(`mux_snapshot:${scanData.id}`, '').catch(() => {}).finally(() => { /* release ref */ });
               }
             }
           } catch { /* corrupt snapshot — ignore */ }
@@ -1644,7 +1644,7 @@ function ResultScreenInner() {
         if (data?.tts_url && mountedRef.current) {
           setTtsUrl(data.tts_url);
         }
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => { /* release ref */ });
     }, 5000);
     return () => {
       clearInterval(interval);
@@ -1674,7 +1674,7 @@ function ResultScreenInner() {
             if (data?.tts_url && mountedRef.current) {
               setTtsUrl(data.tts_url);
             }
-          }).catch(() => {});
+          }).catch(() => {}).finally(() => { /* release ref */ });
         });
       }
     };
@@ -2070,7 +2070,7 @@ function ResultScreenInner() {
             generatedVideoUrl,
             ttsUrl,
             timestamp: Date.now(),
-          })).catch(() => {});
+          })).catch(() => {}).finally(() => { /* release ref */ });
         }
         // Clear the done-guard so the effect can re-enter on foreground
         // return with a fresh encoder instance. Without this, muxDoneRef
@@ -2086,7 +2086,7 @@ function ResultScreenInner() {
         // Clear the snapshot on successful foreground return — the mux
         // effect will re-run naturally if needed via its dependency array.
         if (scan?.id) {
-          setItem(`mux_snapshot:${scan.id}`, '').catch(() => {});
+          setItem(`mux_snapshot:${scan.id}`, '').catch(() => {}).finally(() => { /* release ref */ });
         }
       }
     };
@@ -2290,7 +2290,7 @@ function ResultScreenInner() {
             setVideoGenProgress(null);
           }
         }
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => { /* release ref */ });
     };
 
     const connectChannel = () => {
@@ -2490,7 +2490,7 @@ function ResultScreenInner() {
             if (data && mountedRef.current && (data.status === 'done' || data.status === 'error')) {
               handleJobUpdateRef.current?.(data as RenderJob);
             }
-          }).catch(() => {});
+          }).catch(() => {}).finally(() => { /* release ref */ });
         });
       }
     };
@@ -2757,11 +2757,11 @@ function ResultScreenInner() {
         const fileUri = `${dir}${fileName}`;
         const downloadResult = await FileSystem.downloadAsync(generatedVideoUrl, fileUri);
         if (downloadResult.status !== 200) {
-          FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+          FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
           throw new Error(`영상 다운로드 실패 (${downloadResult.status})`);
         }
         await MediaLibrary.createAssetAsync(downloadResult.uri);
-        FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {});
+        FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
       }
 
       if (!mountedRef.current) return;
@@ -2850,7 +2850,7 @@ function ResultScreenInner() {
             });
             await MediaLibrary.createAssetAsync(fileUri);
           } finally {
-            FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+            FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
           }
         }
       }
@@ -4963,7 +4963,7 @@ function ResultScreenInner() {
                       try {
                         await MediaLibrary.saveToLibraryAsync(fileUri);
                       } finally {
-                        FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+                        FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
                       }
                     } catch { /* non-fatal */ }
                   }}

@@ -168,7 +168,7 @@ async function doFetch(
 
       if (cacheKey && response.ok) {
         const cloned = response.clone();
-        cloned.json().then((data) => setCached(cacheKey, data)).catch(() => {});
+        cloned.json().then((data) => setCached(cacheKey, data)).catch(() => {}).finally(() => { /* release ref */ });
       }
 
       return response;

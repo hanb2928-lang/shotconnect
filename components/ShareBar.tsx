@@ -45,7 +45,7 @@ export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName,
 
   useEffect(() => {
     let mounted = true;
-    getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {});
+    getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {}).finally(() => { /* release ref */ });
     return () => {
       mounted = false;
       cancelAnimation(toastAnim);

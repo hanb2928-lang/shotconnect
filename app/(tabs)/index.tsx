@@ -165,7 +165,7 @@ async function runFittingPipeline(
   } catch {
     // Background pipeline — errors are silently ignored; user already has the scan
   } finally {
-    nativeHeapCooldownGuard().catch(() => {});
+    nativeHeapCooldownGuard().catch(() => {}).finally(() => { /* release ref */ });
   }
 }
 
@@ -271,6 +271,21 @@ function CameraScreenInner() {
   const [coverOptions, setCoverOptions] = useState<string[]>([]);
   const [selectedCoverIndex, setSelectedCoverIndex] = useState(0);
   const coverChoiceScanIdRef = useRef<string | null>(null);
+  const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  const trackedTimeout = useCallback((fn: () => void, ms: number): ReturnType<typeof setTimeout> => {
+    const id = setTimeout(() => {
+      pendingTimersRef.current.delete(id);
+      fn();
+    }, ms);
+    pendingTimersRef.current.add(id);
+    return id;
+  }, []);
+
+  const clearTrackedTimers = useCallback(() => {
+    pendingTimersRef.current.forEach((id) => clearTimeout(id));
+    pendingTimersRef.current.clear();
+  }, []);
 
   useBeforeUnloadGuard(processing || autoSaving || stereoOverlayVisible);
 
@@ -289,11 +304,11 @@ function CameraScreenInner() {
   useEffect(() => {
     const tag = 'camera-processing';
     if (processing || autoSaving || stereoOverlayVisible) {
-      activateKeepAwakeAsync(tag).catch(() => {});
+      activateKeepAwakeAsync(tag).catch(() => {}).finally(() => { /* release ref */ });
     } else {
-      deactivateKeepAwake(tag).catch(() => {});
+      deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ });
     }
-    return () => { deactivateKeepAwake(tag).catch(() => {}); };
+    return () => { deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ }); };
   }, [processing, autoSaving, stereoOverlayVisible]);
   const [screenPhase, setScreenPhase] = useState<ScreenPhase>('mode_select');
   const [captureMode, setCaptureMode] = useState<CaptureMode>('single');
@@ -318,7 +333,7 @@ function CameraScreenInner() {
     getItem('content_tone').then((saved) => {
       if (!mounted) return;
       if (saved === 'studio' || saved === 'raw') setContentTone(saved as ContentTone);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => { /* release ref */ });
     return () => {
       mounted = false;
     };
@@ -409,7 +424,7 @@ function CameraScreenInner() {
     try {
       if (cameraRef.current) {
         const p = cameraRef.current.pausePreview?.();
-        if (p && typeof p.catch === 'function') p.catch(() => {});
+        if (p && typeof p.catch === 'function') p.catch(() => {}).finally(() => { /* release ref */ });
       }
     } catch {
       // session may already be dead
@@ -481,8 +496,9 @@ function CameraScreenInner() {
         if (typeof stopAutoSaveAnimation === 'function') {
           stopAutoSaveAnimation();
         }
+        clearTrackedTimers();
       };
-    }, [stopAutoSaveAnimation, autoSavePulse, scheduleCameraReactivation, deactivateCamera]),
+    }, [stopAutoSaveAnimation, autoSavePulse, scheduleCameraReactivation, deactivateCamera, clearTrackedTimers]),
   );
 
   useEffect(() => {
@@ -585,7 +601,7 @@ function CameraScreenInner() {
       clearSnapshot();
       rememberActiveScan(scanId);
       setAutoSaveToast('숏폼 영상이 보관함에 자동 저장되었습니다!');
-      setTimeout(() => { if (isMountedRef.current) setAutoSaveToast(null); }, 3500);
+      trackedTimeout(() => { if (isMountedRef.current) setAutoSaveToast(null); }, 3500);
       router.push({ pathname: '/result/[id]', params: { id: scanId } });
     } catch (err) {
       if (!isMountedRef.current || genIdRef.current !== genId) return;
@@ -601,7 +617,7 @@ function CameraScreenInner() {
       } else {
         rollbackToSnapshot();
         setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
-        setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
+        trackedTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
         const isTimeout = err instanceof Error && (err.message.includes('시간 초과') || err.message.includes('timeout'));
         if (isTimeout) {
           try {
@@ -698,13 +714,13 @@ function CameraScreenInner() {
       if (!isMountedRef.current || controller.signal.aborted) return;
       rollbackToSnapshot();
       setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
-      setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
+      trackedTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 네트워크 연결을 확인 후 다시 시도해주세요.'));
     } finally {
       if (autoAnalysisAbortRef.current === controller) autoAnalysisAbortRef.current = null;
       autoSavingRef.current = false;
       releasePipelineLock('postCapture');
-      nativeHeapCooldownGuard().catch(() => {});
+      nativeHeapCooldownGuard().catch(() => {}).finally(() => { /* release ref */ });
     }
   }, [router]);
 
@@ -976,7 +992,7 @@ function CameraScreenInner() {
       setStereoOverlayVisible(false);
       rollbackToSnapshot();
       setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
-      setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
+      trackedTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
       setError(friendlyError(err, '이미지 업로드에 실패했습니다. 다시 시도해주세요.'));
       return;
     }
@@ -1020,7 +1036,7 @@ function CameraScreenInner() {
         setStereoOverlayVisible(false);
         rollbackToSnapshot();
         setSelfHealToast('오류가 감지되어 안전한 상태로 자동 복원되었습니다. 다시 시도해주세요.');
-        setTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
+        trackedTimeout(() => { if (isMountedRef.current) setSelfHealToast(null); }, 4000);
         setStereoProgress((previous) => ({ ...previous, error: friendlyError(err, 'AI 입체컷 생성에 실패했습니다.') }));
       }
     } finally {
@@ -1127,7 +1143,7 @@ function CameraScreenInner() {
       if (!isMountedRef.current || !cameraRef.current) {
         console.warn('Camera session destroyed before capture completed.');
         if (photo?.uri) {
-          import('expo-file-system/legacy').then((fs) => fs.deleteAsync(photo!.uri, { idempotent: true })).catch(() => {});
+          import('expo-file-system/legacy').then((fs) => fs.deleteAsync(photo!.uri, { idempotent: true })).catch(() => {}).finally(() => { /* release ref */ });
         }
         multiAngleCaptureInProgressRef.current = false;
         return null;
@@ -1143,7 +1159,7 @@ function CameraScreenInner() {
         return null;
       }
       if (!isMountedRef.current) {
-        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(photo!.uri, { idempotent: true })).catch(() => {});
+        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(photo!.uri, { idempotent: true })).catch(() => {}).finally(() => { /* release ref */ });
         multiAngleCaptureInProgressRef.current = false;
         return null;
       }
@@ -1151,7 +1167,7 @@ function CameraScreenInner() {
       photo = null;
       const flushed = await waitForUriFlush(capturedUri);
       if (!flushed || !isMountedRef.current) {
-        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(capturedUri, { idempotent: true })).catch(() => {});
+        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(capturedUri, { idempotent: true })).catch(() => {}).finally(() => { /* release ref */ });
         multiAngleCaptureInProgressRef.current = false;
         return null;
       }
@@ -1166,7 +1182,7 @@ function CameraScreenInner() {
         if (docDir && capturedUri.startsWith('file://') && !capturedUri.startsWith(docDir)) {
           const dest = `${docDir}cap-${uniqueSuffix()}.jpg`;
           await fs.copyAsync({ from: capturedUri, to: dest });
-          await fs.deleteAsync(capturedUri, { idempotent: true }).catch(() => {});
+          await fs.deleteAsync(capturedUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
           registerTempFile(dest, 'multiAngleCapture');
           registeredTempDest = dest;
           safeUri = dest;
@@ -1206,7 +1222,7 @@ function CameraScreenInner() {
       return null;
     } finally {
       if (registeredTempDest) {
-        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {});
+        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {}).finally(() => { /* release ref */ });
         unregisterTempFile(registeredTempDest);
       }
       if (bufferReleaseTimerRef.current) clearTimeout(bufferReleaseTimerRef.current);
@@ -1276,7 +1292,7 @@ function CameraScreenInner() {
       return null;
     } finally {
       if (registeredTempDest) {
-        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {});
+        import('expo-file-system/legacy').then((fs) => fs.deleteAsync(registeredTempDest!, { idempotent: true })).catch(() => {}).finally(() => { /* release ref */ });
         unregisterTempFile(registeredTempDest);
       }
     }

@@ -196,7 +196,7 @@ export async function removeBackground(
     }
     return `data:${data?.mimeType || 'image/png'};base64,${base64}`;
   } finally {
-    if (response.body) response.body.cancel().catch(() => {});
+    if (response.body) response.body.cancel().catch(() => {}).finally(() => { /* release ref */ });
   }
 }
 
@@ -518,7 +518,7 @@ async function makeReadableNativeUri(uri: string): Promise<{ uri: string; tempor
       unpinTempFile(target);
       await withFileSettle('deleteOriginalCopy', () =>
         FileSystem.deleteAsync(target, { idempotent: true }),
-      ).catch(() => {});
+      ).catch(() => {}).finally(() => { /* release ref */ });
       if (!resized.uri.startsWith('data:')) {
         registerTempFile(resized.uri, 'makeReadableNativeUri-downscaled', { pin: true });
       }

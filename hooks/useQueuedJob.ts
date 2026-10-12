@@ -123,7 +123,7 @@ export function useQueuedJob() {
       if (job && (job.status === 'done' || job.status === 'error')) {
         handleUpdate(job);
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => { /* release ref */ });
 
     const pollErrorTimestamps: number[] = [];
     const POLL_ERROR_WINDOW_MS = 30000;

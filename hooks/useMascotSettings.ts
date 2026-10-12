@@ -26,8 +26,8 @@ function isCacheVersionValid(): boolean {
 
 function validateAndMigrateCache(): void {
   if (!isCacheVersionValid()) {
-    removeItem(STORAGE_KEY).catch(() => {});
-    setItem(CACHE_VERSION_KEY, CACHE_VERSION).catch(() => {});
+    removeItem(STORAGE_KEY).catch(() => {}).finally(() => { /* release ref */ });
+    setItem(CACHE_VERSION_KEY, CACHE_VERSION).catch(() => {}).finally(() => { /* release ref */ });
   }
 }
 

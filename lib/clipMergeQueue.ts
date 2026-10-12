@@ -106,7 +106,7 @@ export async function mergeClipsSequentially(
         progressCallback = null;
         currentAbort?.abort();
         currentAbort = null;
-        flushPostSynthesisMemory().catch(() => {});
+        flushPostSynthesisMemory().catch(() => {}).finally(() => { /* release ref */ });
       }
     }, failsafeRemainingMs);
   };
@@ -265,7 +265,7 @@ export function cancelMergeQueue(): void {
   }
   pendingClips.length = 0;
   completedResults = [];
-  flushPostSynthesisMemory().catch(() => {});
+  flushPostSynthesisMemory().catch(() => {}).finally(() => { /* release ref */ });
 }
 
 export function getMergeQueueState(): QueueState {

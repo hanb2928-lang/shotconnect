@@ -67,11 +67,11 @@ export function useWebPush(): UseWebPushResult {
 
     fetchVapidKey().then((key) => {
       if (!cancelled && key) setVapidPublicKey(key);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => { /* release ref */ });
 
     getOrCreateDeviceId().then((id) => {
       if (!cancelled) setDeviceId(id);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => { /* release ref */ });
 
     (async () => {
       try {

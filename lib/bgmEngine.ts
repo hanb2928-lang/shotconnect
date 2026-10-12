@@ -363,7 +363,7 @@ export class BgmPlayer {
   unlockAudio(): void {
     const ctx = this.getOrCreateContext();
     if (!ctx) return;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {}).finally(() => { /* release ref */ });
   }
 
   /**
@@ -389,7 +389,7 @@ export class BgmPlayer {
     if (this.isPlaying) this.stop();
 
     this.unlockAudio();
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {}).finally(() => { /* release ref */ });
 
     const category = moodLabelToCategory(bgmTemplateId);
     this.currentCategory = category;
@@ -726,12 +726,12 @@ export class BgmPlayer {
     const ctx = this.getOrCreateContext();
     if (!ctx || !this.masterGain) return;
     this.unlockAudio();
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {}).finally(() => { /* release ref */ });
     this.masterGain.gain.cancelScheduledValues(ctx.currentTime);
     this.masterGain.gain.linearRampToValueAtTime(this.volume, ctx.currentTime + 0.2);
     this.isPlaying = true;
     if (this.usingBundledFile && this.bundledAudioEl) {
-      this.bundledAudioEl.play().catch(() => {});
+      this.bundledAudioEl.play().catch(() => {}).finally(() => { /* release ref */ });
       return;
     }
     if (this.usingBundledFile && this.currentBundledTrack) {

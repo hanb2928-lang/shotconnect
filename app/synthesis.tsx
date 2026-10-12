@@ -332,7 +332,7 @@ function SynthesisScreenInner() {
 
   // Warm-up the generate-video edge function on screen mount to avoid cold-start delay.
   useEffect(() => {
-    supabase.functions.invoke('generate-video', { body: { mode: 'warmup' } }).catch(() => {});
+    supabase.functions.invoke('generate-video', { body: { mode: 'warmup' } }).catch(() => {}).finally(() => { /* release promise ref */ });
   }, []);
 
   // Pre-upload: start uploading images to storage as soon as they're added,
@@ -488,23 +488,41 @@ function SynthesisScreenInner() {
 
   // Auto-save draft when images or options change — skip while backgrounded
   // to prevent async state writes from colliding with React's reconciliation
-  // on foreground return (the "frozen UI on resume" bug).
+  // on foreground return (the "frozen UI on resume" bug). A debounce + 
+  // foreground-settle delay ensures state has normalized before persisting,
+  // preventing desync between option card UI state and the stored draft.
+  const foregroundSettleRef = useRef(false);
+  useEffect(() => {
+    const unsub = registerAppStateHandler('deferred', (state) => {
+      if (state === 'active') {
+        foregroundSettleRef.current = true;
+        setTimeout(() => { foregroundSettleRef.current = false; }, 1500);
+      }
+    });
+    return unsub;
+  }, []);
+
   useEffect(() => {
     if (isBackgroundRef.current) return;
+    if (foregroundSettleRef.current) return;
     if (productImages.length > 0) {
-      saveDraftState({
-        imageUris: productImages.map((img) => img.uri),
-        angleLabels: productImages.map((img) => img.angle || ''),
-        modelImageUri: modelImage?.uri,
-        status: isGenerating ? 'generating' : 'editing',
-        scanId: scanIdRef.current ?? undefined,
-        jobId: jobId ?? undefined,
-        resultVideoUrl: resultVideoUrl ?? undefined,
-        genMode,
-        mood,
-        platform,
-        uploaded: productImages.some((img) => img.uri.startsWith('http')),
-      });
+      const timer = setTimeout(() => {
+        if (isBackgroundRef.current || foregroundSettleRef.current) return;
+        saveDraftState({
+          imageUris: productImages.map((img) => img.uri),
+          angleLabels: productImages.map((img) => img.angle || ''),
+          modelImageUri: modelImage?.uri,
+          status: isGenerating ? 'generating' : 'editing',
+          scanId: scanIdRef.current ?? undefined,
+          jobId: jobId ?? undefined,
+          resultVideoUrl: resultVideoUrl ?? undefined,
+          genMode,
+          mood,
+          platform,
+          uploaded: productImages.some((img) => img.uri.startsWith('http')),
+        });
+      }, 500);
+      return () => clearTimeout(timer);
     }
   }, [productImages, modelImage, isGenerating, jobId, resultVideoUrl, genMode, mood, platform, saveDraftState]);
 
@@ -621,6 +639,8 @@ function SynthesisScreenInner() {
         captionText: captionText || '시선 집중! 지금 바로 확인하세요',
         platform: platform === 'shortform' ? 'shorts' : platform,
         genMode,
+        contentTone: mood,
+        bgmMood: mood === 'raw_psychology' ? 'asmr' : 'cinematic',
         enableOrbit360,
         enableCaustics: genMode === 'auto_3d' ? enableCaustics : undefined,
         orbitSpeed: enableOrbit360 ? cameraSpeed : undefined,
@@ -654,7 +674,7 @@ function SynthesisScreenInner() {
     } finally {
       generateLockRef.current = false;
     }
-  }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating, startGeneration]);
+  }, [productImages, outputMode, genMode, modelImage, enableOrbit360, enableCaustics, enableVirtualFitting, enableFabricPhysics, cameraSpeed, manualPrompt, captionText, platform, isGenerating, startGeneration, mood]);
 
   const handleDownload = useCallback(() => {
     setIsExporting(true);

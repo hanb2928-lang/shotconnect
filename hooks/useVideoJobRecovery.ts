@@ -138,7 +138,7 @@ export function useVideoJobRecovery() {
         });
         pollTimerRef.current = setTimeout(() => {
           pollTimerRef.current = null;
-          checkJob(jobId).catch(() => {});
+          checkJob(jobId).catch(() => {}).finally(() => { /* release ref */ });
         }, 5000);
       }
     } catch {
@@ -167,22 +167,22 @@ export function useVideoJobRecovery() {
   useEffect(() => {
     mountedRef.current = true;
     // Check on mount in case app was backgrounded and reopened
-    runRecovery().catch(() => {});
+    runRecovery().catch(() => {}).finally(() => { /* release ref */ });
 
     const handleVisibility = () => {
       if (typeof document === 'undefined') return;
       if (!document.hidden) {
-        runRecovery().catch(() => {});
+        runRecovery().catch(() => {}).finally(() => { /* release ref */ });
       }
     };
 
     const handleOnline = () => {
-      runRecovery().catch(() => {});
+      runRecovery().catch(() => {}).finally(() => { /* release ref */ });
     };
 
     // Pause recovery checks while backgrounded; resume on foreground.
     const unsubAppState = registerAppStateHandler('deferred', (nextState) => {
-      if (nextState === 'active') onFlushComplete(() => { runRecovery().catch(() => {}); });
+      if (nextState === 'active') onFlushComplete(() => { runRecovery().catch(() => {}).finally(() => { /* release ref */ }); });
     });
 
     let cleanupFns: (() => void)[] = [];

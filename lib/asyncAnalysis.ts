@@ -304,7 +304,7 @@ async function createScanWithAnalysis(
   const hookText = analysis.templateData?.hook || analysis.oneLiner || analysis.summary || dp0?.templateData?.hook || dp0?.oneLiner || dp0?.productName || '';
   if (hookText) {
     // Fire-and-forget TTS via direct fetch
-    triggerTTS(data.id, hookText).catch(() => {});
+    triggerTTS(data.id, hookText).catch(() => {}).finally(() => { /* release ref */ });
   }
 
   return data.id;
@@ -457,7 +457,7 @@ export async function finalizeAnalysisFromJob(
     dp0?.productName ||
     '';
   if (hookText) {
-    triggerTTS(scanId, hookText).catch(() => {});
+    triggerTTS(scanId, hookText).catch(() => {}).finally(() => { /* release ref */ });
   }
 }
 

@@ -162,7 +162,7 @@ async function saveImageToGallery(base64: string, mimeType: string, fileName: st
   try {
     await MediaLibrary.createAssetAsync(fileUri);
   } finally {
-    FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+    FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
   }
 }
 

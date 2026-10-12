@@ -82,7 +82,7 @@ export async function fetchArchiveList(
   const hasMore = offset + PAGE_SIZE < total;
 
   if (page === 0) {
-    setCached(CACHE_KEY, { items, total, hasMore }).catch(() => {});
+    setCached(CACHE_KEY, { items, total, hasMore }).catch(() => {}).finally(() => { /* release ref */ });
   }
 
   return { items, total, hasMore };

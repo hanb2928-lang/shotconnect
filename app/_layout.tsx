@@ -41,6 +41,7 @@ import { armFlushWindow } from '@/lib/foregroundFlushGuard';
 import { armBridgeThrottle, withBridgeThrottle } from '@/lib/bridgeRateLimiter';
 import { installRealtimeReconnectGuard } from '@/lib/realtimeReconnectGuard';
 import { sweepZombieSockets } from '@/lib/channelManager';
+import { pauseAllTicks, resumeAllTicks } from '@/lib/tickGate';
 const NetworkBanner = lazy(() =>
   import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
 );
@@ -221,6 +222,12 @@ export default function RootLayout() {
     const unsubChannelTeardown = registerAppStateHandler('immediate', (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
         sweepZombieSockets();
+        pauseAllTicks();
+      }
+    });
+    const unsubTickResume = registerAppStateHandler('deferred', (nextState: string) => {
+      if (nextState === 'active') {
+        resumeAllTicks();
       }
     });
     const sub = AppState.addEventListener('change', (nextState: string) => {
@@ -230,6 +237,7 @@ export default function RootLayout() {
       unsubFlush();
       unsubReconnect();
       unsubChannelTeardown();
+      unsubTickResume();
       sub.remove();
       cancelPendingDeferred();
     };
@@ -359,9 +367,9 @@ export default function RootLayout() {
   // Refresh auth session and sweep stale resources when the app returns
   // to the foreground (native: AppState 'active', web: visibilitychange).
   useAppLifecycleSync(() => {
-    sweepTempFiles().catch(() => {});
-    sweepNativeOrphanTemp().catch(() => {});
-    sweepStaleOfflineCache().catch(() => {});
+    sweepTempFiles().catch(() => {}).finally(() => { /* release ref */ });
+    sweepNativeOrphanTemp().catch(() => {}).finally(() => { /* release ref */ });
+    sweepStaleOfflineCache().catch(() => {}).finally(() => { /* release ref */ });
   });
 
   // Runtime sweeps: register lifecycle-aware cleanup listeners inside a
@@ -372,19 +380,19 @@ export default function RootLayout() {
   useEffect(() => {
     // Initial sweep on mount
     registerAllNamespaces();
-    sweepTempFiles().catch(() => {});
-    sweepStaleOfflineCache().catch(() => {});
-    runBootSweep().catch(() => {});
-    runStorageGC().catch(() => {});
+    sweepTempFiles().catch(() => {}).finally(() => { /* release ref */ });
+    sweepStaleOfflineCache().catch(() => {}).finally(() => { /* release ref */ });
+    runBootSweep().catch(() => {}).finally(() => { /* release ref */ });
+    runStorageGC().catch(() => {}).finally(() => { /* release ref */ });
     startPeriodicStorageGC();
     const cleanups: (() => void)[] = [() => stopPeriodicStorageGC()];
 
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const onHidden = () => {
         if (document.visibilityState === 'hidden') {
-          sweepTempFiles().catch(() => {});
-          sweepStaleOfflineCache().catch(() => {});
-          runStorageGC().catch(() => {});
+          sweepTempFiles().catch(() => {}).finally(() => { /* release ref */ });
+          sweepStaleOfflineCache().catch(() => {}).finally(() => { /* release ref */ });
+          runStorageGC().catch(() => {}).finally(() => { /* release ref */ });
         }
       };
       document.addEventListener('visibilitychange', onHidden);
@@ -394,8 +402,8 @@ export default function RootLayout() {
     if (Platform.OS !== 'web') {
       const RUNTIME_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
       const intervalId = setInterval(() => {
-        sweepTempFiles().catch(() => {});
-        sweepNativeOrphanTemp().catch(() => {});
+        sweepTempFiles().catch(() => {}).finally(() => { /* release ref */ });
+        sweepNativeOrphanTemp().catch(() => {}).finally(() => { /* release ref */ });
       }, RUNTIME_SWEEP_INTERVAL_MS);
       cleanups.push(() => clearInterval(intervalId));
     }
@@ -418,7 +426,7 @@ export default function RootLayout() {
     if (typeof Linking.getInitialURL === 'function') {
       Linking.getInitialURL().then((url) => {
         if (url) handleDeepLink(url);
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => { /* release ref */ });
     }
 
     return () => {
@@ -441,6 +449,48 @@ export default function RootLayout() {
   //   Frame 3: mount AppShell — reflow happens on a settled compositor
   const [shellReady, setShellReady] = useState(false);
   const [uploadDebugVisible, setUploadDebugVisible] = useState(false);
+
+  // rAF-based mount defer bridge: on foreground return, briefly gate
+  // accessory components (NetworkBanner, VideoJobRecoveryToast, etc.)
+  // for one rAF cycle so they don't re-render in the same frame as
+  // AppShell's header and progress bar. Without this, the concurrent
+  // re-renders cause layout thrashing — the header and progress bar
+  // flicker simultaneously on foreground return.
+  const [accessoriesReady, setAccessoriesReady] = useState(true);
+  const settleRafRef = useRef<number[]>([]);
+  useEffect(() => {
+    const unsub = registerAppStateHandler('immediate', (nextState: string) => {
+      if (nextState !== 'active') return;
+      setAccessoriesReady(false);
+      settleRafRef.current.forEach((id) => cancelAnimationFrame(id));
+      settleRafRef.current = [];
+      if (Platform.OS === 'web' && typeof requestAnimationFrame !== 'undefined') {
+        const raf1 = requestAnimationFrame(() => {
+          const raf2 = requestAnimationFrame(() => {
+            setAccessoriesReady(true);
+            settleRafRef.current = [];
+          });
+          settleRafRef.current.push(raf2);
+        });
+        settleRafRef.current.push(raf1);
+      } else {
+        const id = setTimeout(() => {
+          setAccessoriesReady(true);
+          settleRafRef.current = [];
+        }, 32);
+        settleRafRef.current.push(id as unknown as number);
+      }
+    });
+    return () => {
+      unsub();
+      settleRafRef.current.forEach((id) => {
+        if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(id);
+        else clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+      });
+      settleRafRef.current = [];
+    };
+  }, []);
+
   useEffect(() => {
     if (!isReady || shellReady) return;
     if (bootReadyMarkedRef.current) return;
@@ -482,10 +532,14 @@ export default function RootLayout() {
                   {shellReady && (
                     <>
                       <AppShell />
-                      <Suspense fallback={<BootFallback />}><NetworkBanner /></Suspense>
-                      <Suspense fallback={<BootFallback />}><VideoJobRecoveryToast /></Suspense>
-                      <VideoGenGlobalToast />
-                      {__DEV__ && (
+                      {accessoriesReady && (
+                        <>
+                          <Suspense fallback={<BootFallback />}><NetworkBanner /></Suspense>
+                          <Suspense fallback={<BootFallback />}><VideoJobRecoveryToast /></Suspense>
+                          <VideoGenGlobalToast />
+                        </>
+                      )}
+                      {__DEV__ && accessoriesReady && (
                         <Suspense fallback={null}>
                           <UploadDebugOverlay visible={uploadDebugVisible} onClose={() => setUploadDebugVisible(false)} />
                         </Suspense>

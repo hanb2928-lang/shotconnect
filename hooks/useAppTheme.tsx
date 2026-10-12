@@ -110,7 +110,7 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
           await setItem('display_density', dn);
           await setItem('theme_preset', tp);
         })
-        .catch(() => {});
+        .catch(() => {}).finally(() => { /* release ref */ });
     })();
     return () => {
       mounted = false;

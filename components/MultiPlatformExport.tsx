@@ -813,7 +813,7 @@ export function MultiPlatformExport({
 
   useEffect(() => {
     let mounted = true;
-    getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {});
+    getUserSettings().then((s) => { if (mounted && s) setAutoDisclosure(s.auto_disclosure ?? true); }).catch(() => {}).finally(() => { /* release ref */ });
     return () => { mounted = false; };
   }, []);
 

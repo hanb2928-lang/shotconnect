@@ -385,7 +385,7 @@ export async function generateAiVideo(
           similar.hookOptions,
           similar.renderedVideoUrl,
           motionTemplateHash,
-        ).catch(() => {});
+        ).catch(() => {}).finally(() => { /* release ref */ });
       }
       return {
         videoUrl: similar.renderedVideoUrl,
@@ -532,7 +532,7 @@ export async function generateAiVideo(
       },
       result.videoUrl,
       motionTemplateHash,
-    ).catch(() => {});
+    ).catch(() => {}).finally(() => { /* release ref */ });
   }
 
   return result;
@@ -1110,8 +1110,8 @@ function waitForVideoCompletion(
       if (resumeBurstCount === 1) {
         try { await ensureFreshSession(); } catch { /* non-fatal */ }
       }
-      checkDb();
-      checkScanVideoUrl();
+      checkDb().catch(() => {}).finally(() => { /* release promise ref */ });
+      checkScanVideoUrl().catch(() => {}).finally(() => { /* release promise ref */ });
       resumeBurstTimer = setTimeout(runResumeBurst, RESUME_BURST_INTERVAL_MS);
     };
 
@@ -1150,8 +1150,8 @@ function waitForVideoCompletion(
 
     // Initial DB check in case the webhook already completed before we subscribed
     _dbg('initial-check');
-    checkDb();
-    checkScanVideoUrl();
+    checkDb().catch(() => {}).finally(() => { /* release promise ref */ });
+    checkScanVideoUrl().catch(() => {}).finally(() => { /* release promise ref */ });
   });
 }
 
@@ -1180,6 +1180,8 @@ export interface SubmitOnlyResult {
  * with the task ID. Does NOT wait for completion — the caller should use
  * subscribeVideoJob to listen for the result via Realtime.
  */
+const inFlightSubmits = new Map<string, Promise<SubmitOnlyResult>>();
+
 export async function submitVideoJobAsync(
   prompt: string,
   options: GenerateAiVideoOptions,
@@ -1194,6 +1196,16 @@ export async function submitVideoJobAsync(
 
   const idempotencyKey = generateIdempotencyKey();
 
+  // Deduplicate concurrent submits for the same scanId. If a submit is
+  // already in-flight (button double-tap, retry race, network jitter), the
+  // second caller receives the same promise instead of firing a duplicate
+  // request to the server. This prevents conflicting job rows and the
+  // 0%/97% stall seeds caused by duplicate payloads.
+  const dedupKey = options.scanId ?? idempotencyKey;
+  const existing = inFlightSubmits.get(dedupKey);
+  if (existing) return existing;
+
+  const submitPromise = (async (): Promise<SubmitOnlyResult> => {
   const submitBody = compactBody({
     mode: 'submit',
     prompt,
@@ -1211,6 +1223,7 @@ export async function submitVideoJobAsync(
     memeText: options.memeText,
     cutCount: options.cutCount,
     productVision: options.productVision,
+    contentTone: options.contentTone,
     draft: options.draft,
     isCleanVideoMode: options.isCleanVideoMode,
     promptStrength: options.promptStrength,
@@ -1322,6 +1335,12 @@ export async function submitVideoJobAsync(
     aspectRatio: data.aspectRatio as string,
     variationSeed: data.variationSeed as number,
   };
+  })().finally(() => {
+    inFlightSubmits.delete(dedupKey);
+  });
+
+  inFlightSubmits.set(dedupKey, submitPromise);
+  return submitPromise;
 }
 
 export type VideoJobCallback = (result: {
@@ -1702,13 +1721,13 @@ export function subscribeVideoJob(
         void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
       }
       callback({ status: 'FAILED', error: msg });
-    });
+    }).catch(() => {}).finally(() => { /* release promise ref */ });
   }, 240_000);
 
   _dbg('initial-setup');
   setupChannel();
   scheduleNextPoll();
-  checkAndNotify();
+  checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
   startRunwayPollFallback();
 
   const removeBgPause = installBackgroundPause({
@@ -1750,7 +1769,7 @@ export function subscribeVideoJob(
             void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
           }
           callback({ status: 'FAILED', error: msg });
-        });
+        }).catch(() => {}).finally(() => { /* release promise ref */ });
       }, 240_000);
       // Clear stale timers before re-arming — rapid inactive↔active
       // oscillations on iOS can stack timers if resume fires before
@@ -1765,7 +1784,7 @@ export function subscribeVideoJob(
         if (settled) return;
         setupChannel();
         scheduleNextPoll();
-        checkAndNotify();
+        checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
         startRunwayPollFallback();
         resumeBurstCount = 0;
         runResumeBurst();
@@ -2112,12 +2131,12 @@ export function subscribeHdUpgrade(
       cleanup();
       removeBgPause();
       callback({ status: 'FAILED', error: '고화질 업그레이드가 4분(240초)을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
-    });
+    }).catch(() => {}).finally(() => { /* release promise ref */ });
   }, 240_000);
 
   setupChannel();
   scheduleNextPoll();
-  checkAndNotify();
+  checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
 
   const removeBgPause = installBackgroundPause({
     isSettled: () => settled,
@@ -2147,7 +2166,7 @@ export function subscribeHdUpgrade(
           cleanup();
           removeBgPause();
           callback({ status: 'FAILED', error: '고화질 업그레이드가 4분(240초)을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
-        });
+        }).catch(() => {}).finally(() => { /* release promise ref */ });
       }, 240_000);
       // Clear stale timers before re-arming to prevent timer stacking.
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
@@ -2159,7 +2178,7 @@ export function subscribeHdUpgrade(
         if (settled) return;
         setupChannel();
         scheduleNextPoll();
-        checkAndNotify();
+        checkAndNotify().catch(() => {}).finally(() => { /* release promise ref */ });
         resumeBurstCount = 0;
         runResumeBurst();
       });

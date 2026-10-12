@@ -140,7 +140,7 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
   const handleReplay = (item: ArchiveItem) => {
     setReplayItem(item);
     setReplayVisible(true);
-    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {});
+    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {}).finally(() => { /* release ref */ });
   };
 
   const handleCloseReplay = () => {
@@ -151,7 +151,7 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
   const handleDownload = useCallback(async (item: ArchiveItem) => {
     if (!item.videoUrl) return;
     setDownloadingId(item.id);
-    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {});
+    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {}).finally(() => { /* release ref */ });
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');
@@ -189,7 +189,7 @@ export function ArchiveSection({ embedded = false }: ArchiveSectionProps) {
 
   const handleShare = useCallback(async (item: ArchiveItem) => {
     if (!item.videoUrl) return;
-    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {});
+    touchStorageObject(item.id, 'videos', item.videoUrl, 'video').catch(() => {}).finally(() => { /* release ref */ });
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');

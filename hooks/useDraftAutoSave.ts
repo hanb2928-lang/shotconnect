@@ -65,7 +65,7 @@ export function useDraftAutoSave(source: DraftSource) {
       thumbnailUri: params.imageUris[0],
     };
 
-    saveDraft(entry).catch(() => {});
+    saveDraft(entry).catch(() => {}).finally(() => { /* release entry closure ref */ });
   }, [ensureDraftId, source]);
 
   const loadDraft = useCallback(async (draftId: string): Promise<DraftEntry | null> => {

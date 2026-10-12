@@ -23,13 +23,13 @@ const STORAGE_KEY_LAST_SCAN_ID = 'last_active_scan_id';
 const STORAGE_KEY_LAST_SCAN_AT = 'last_active_scan_at';
 
 export function rememberActiveScan(scanId: string): void {
-  setItem(STORAGE_KEY_LAST_SCAN_ID, scanId).catch(() => {});
-  setItem(STORAGE_KEY_LAST_SCAN_AT, String(Date.now())).catch(() => {});
+  setItem(STORAGE_KEY_LAST_SCAN_ID, scanId).catch(() => {}).finally(() => { /* release ref */ });
+  setItem(STORAGE_KEY_LAST_SCAN_AT, String(Date.now())).catch(() => {}).finally(() => { /* release ref */ });
 }
 
 export function forgetActiveScan(): void {
-  removeItem(STORAGE_KEY_LAST_SCAN_ID).catch(() => {});
-  removeItem(STORAGE_KEY_LAST_SCAN_AT).catch(() => {});
+  removeItem(STORAGE_KEY_LAST_SCAN_ID).catch(() => {}).finally(() => { /* release ref */ });
+  removeItem(STORAGE_KEY_LAST_SCAN_AT).catch(() => {}).finally(() => { /* release ref */ });
 }
 
 async function getStoredScanId(): Promise<string | null> {

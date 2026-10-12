@@ -3,6 +3,7 @@ import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession, withQueryTimeout } from '@/lib/supabase';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
+import { registerTick, pauseAllTicks, resumeAllTicks } from '@/lib/tickGate';
 import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 import { stepToProgress } from '@/lib/videoGenSteps';
 import { HybridRealtimePoller, type ChannelHealth } from '@/lib/hybridRealtimePoller';
@@ -736,10 +737,23 @@ export function useResultPolling(
     const unsubPause = registerAppStateHandler('immediate', handlePauseImmediate);
     const unsubResume = registerAppStateHandler('deferred', handleResumeDeferred);
 
+    // Register the DB force-sync poll with the centralized tick gate so
+    // it doesn't interfere with aiVideoPipeline's concurrent poll loop.
+    // The tick gate serializes execution, preventing the race vortex.
+    const unsubTick = registerTick(
+      `result-poll-${jobId}`,
+      async () => {
+        if (cancelled || settledRef.current || isPaused) return;
+        await pollOnce().catch(() => {});
+      },
+      3000,
+    );
+
     return () => {
       cleanup();
       unsubPause();
       unsubResume();
+      unsubTick();
     };
   }, [jobId, scanId, settle]);
 

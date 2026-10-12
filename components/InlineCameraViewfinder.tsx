@@ -290,7 +290,7 @@ export const InlineCameraViewfinder = forwardRef<
         if (!uriReady) {
           await withFileSettle('deleteUnflushedCapture', () =>
             FileSystem.deleteAsync(capturedUri!, { idempotent: true }),
-          ).catch(() => {});
+          ).catch(() => {}).finally(() => { /* release ref */ });
           return null;
         }
         const docDir = FileSystem.documentDirectory;
@@ -302,14 +302,14 @@ export const InlineCameraViewfinder = forwardRef<
           await waitForFileChannelFlush();
           await withFileSettle('deleteOrigCapture', () =>
             FileSystem.deleteAsync(capturedUri!, { idempotent: true }),
-          ).catch(() => {});
+          ).catch(() => {}).finally(() => { /* release ref */ });
           capturedUri = safePath;
           registerTempFile(safePath, 'inline-capture');
           const copiedReady = await waitForUriFlush(capturedUri);
           if (!copiedReady) {
             await withFileSettle('deleteUnflushedCopy', () =>
               FileSystem.deleteAsync(safePath, { idempotent: true }),
-            ).catch(() => {});
+            ).catch(() => {}).finally(() => { /* release ref */ });
             unregisterTempFile(safePath);
             return null;
           }
@@ -319,7 +319,7 @@ export const InlineCameraViewfinder = forwardRef<
         await debugSaveNormalizedCapture(compressed.base64, compressed.mimeType, 720, 720, 'inline-native-normalized');
         await withFileSettle('deleteCapturedUri', () =>
           FileSystem.deleteAsync(uriToDelete, { idempotent: true }),
-        ).catch(() => {});
+        ).catch(() => {}).finally(() => { /* release ref */ });
         unregisterTempFile(uriToDelete);
         await waitForFileChannelFlush();
         capturedUri = null;
@@ -334,7 +334,7 @@ export const InlineCameraViewfinder = forwardRef<
             unregisterTempFile(verifiedUri);
             await withFileSettle('deleteUnflushedCompressed', () =>
               FileSystem.deleteAsync(verifiedUri!, { idempotent: true }),
-            ).catch(() => {});
+            ).catch(() => {}).finally(() => { /* release ref */ });
             verifiedUri = undefined;
           }
         }
@@ -345,7 +345,7 @@ export const InlineCameraViewfinder = forwardRef<
           const errUri = capturedUri;
           await withFileSettle('deleteCapturedUriErr', () =>
             FileSystem.deleteAsync(errUri, { idempotent: true }),
-          ).catch(() => {});
+          ).catch(() => {}).finally(() => { /* release ref */ });
           unregisterTempFile(errUri);
           await waitForFileChannelFlush();
           capturedUri = null;
@@ -367,7 +367,7 @@ export const InlineCameraViewfinder = forwardRef<
     // Enqueue: each capture waits for the previous one to fully complete
     // (including its post-capture cooldown) before starting.
     const next = captureQueueRef.current.then(() => runCapture());
-    captureQueueRef.current = next.catch(() => {});
+    captureQueueRef.current = next.catch(() => {}).finally(() => { /* release ref */ });
     return next;
   }, [cameraReady, nativeCameraActive]);
 

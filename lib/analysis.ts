@@ -513,7 +513,7 @@ export async function uploadVideoBlob(
     const buf = await resp.arrayBuffer();
     body = new Uint8Array(buf);
   } finally {
-    if (resp.body) resp.body.cancel().catch(() => {});
+    if (resp.body) resp.body.cancel().catch(() => {}).finally(() => { /* release ref */ });
   }
 
   const finishLog = logUploadStart({
@@ -562,7 +562,7 @@ export async function extractVideoFrameFromServer(
       ...(data.frameUrl ? { frameUrl: data.frameUrl } : {}),
     };
   } finally {
-    if (response.body) response.body.cancel().catch(() => {});
+    if (response.body) response.body.cancel().catch(() => {}).finally(() => { /* release ref */ });
   }
 }
 
@@ -793,7 +793,7 @@ export async function saveScan(
 
   const hookText = analysis.templateData?.hook || analysis.oneLiner || '';
   if (hookText) {
-    generateAndUploadTTS(data.id, hookText).catch(() => {});
+    generateAndUploadTTS(data.id, hookText).catch(() => {}).finally(() => { /* release ref */ });
   }
 
   return data.id;

@@ -1537,7 +1537,7 @@ function SettingsScreenInner() {
                   style={[styles.progressStyleCard, mascot.style === 'cute-crawler' && styles.progressStyleCardActive]}
                   onPress={() => {
                     mascot.updateStyle('cute-crawler');
-                    persistUserSettings({ mascot_style: 'cute-crawler' }).then(() => invalidateSettingsCache()).catch(() => {});
+                    persistUserSettings({ mascot_style: 'cute-crawler' }).then(() => invalidateSettingsCache()).catch(() => {}).finally(() => { /* release ref */ });
                   }}
                   activeOpacity={0.7}
                 >
@@ -1551,7 +1551,7 @@ function SettingsScreenInner() {
                   style={[styles.progressStyleCard, mascot.style === 'minimal-dot' && styles.progressStyleCardActive]}
                   onPress={() => {
                     mascot.updateStyle('minimal-dot');
-                    persistUserSettings({ mascot_style: 'minimal-dot' }).then(() => invalidateSettingsCache()).catch(() => {});
+                    persistUserSettings({ mascot_style: 'minimal-dot' }).then(() => invalidateSettingsCache()).catch(() => {}).finally(() => { /* release ref */ });
                   }}
                   activeOpacity={0.7}
                 >
@@ -1565,7 +1565,7 @@ function SettingsScreenInner() {
                   style={[styles.progressStyleCard, mascot.style === 'none' && styles.progressStyleCardActive]}
                   onPress={() => {
                     mascot.updateStyle('none');
-                    persistUserSettings({ mascot_style: 'none' }).then(() => invalidateSettingsCache()).catch(() => {});
+                    persistUserSettings({ mascot_style: 'none' }).then(() => invalidateSettingsCache()).catch(() => {}).finally(() => { /* release ref */ });
                   }}
                   activeOpacity={0.7}
                 >

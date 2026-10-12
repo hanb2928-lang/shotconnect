@@ -160,7 +160,7 @@ export function log(
     breadcrumbs: consumeBreadcrumbs(),
     timestamp: new Date().toISOString(),
   });
-  flushQueue().catch(() => {});
+  flushQueue().catch(() => {}).finally(() => { /* release ref */ });
 }
 
 export function logError(error: unknown, context?: LogContext): void {

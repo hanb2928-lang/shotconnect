@@ -40,6 +40,8 @@ export interface StartGenerationParams {
   captionText: string;
   platform: string;
   genMode: string;
+  contentTone?: string;
+  bgmMood?: string;
   enableOrbit360: boolean;
   enableCaustics?: boolean;
   orbitSpeed?: number;
@@ -147,11 +149,11 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const tag = 'videogen-global';
     if (isGenerating) {
-      activateKeepAwakeAsync(tag).catch(() => {});
+      activateKeepAwakeAsync(tag).catch(() => {}).finally(() => { /* release ref */ });
     } else {
-      deactivateKeepAwake(tag).catch(() => {});
+      deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ });
     }
-    return () => { deactivateKeepAwake(tag).catch(() => {}); };
+    return () => { deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ }); };
   }, [isGenerating]);
 
   // Track app active/background state so background-sensitive timers
@@ -628,7 +630,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ss = polling.serverStep;
     if (ss) {
-      updateActiveVideoJobStep(ss, polling.serverProgress ?? undefined).catch(() => {});
+      updateActiveVideoJobStep(ss, polling.serverProgress ?? undefined).catch(() => {}).finally(() => { /* release ref */ });
       setVideoProgress((prev) => {
         if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
         if (prev.serverStep === ss) return prev;
@@ -888,6 +890,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         scanId: scanData.id,
         captionText: params.captionText,
         platform: params.platform,
+        contentTone: params.contentTone,
+        bgmMood: params.bgmMood,
         isCleanVideoMode: params.genMode === 'auto_3d',
         selectedMode: params.genMode as 'auto_3d' | 'universal_synthesis' | 'manual',
         enableOrbit360: params.enableOrbit360,

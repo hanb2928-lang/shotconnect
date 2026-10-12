@@ -80,7 +80,7 @@ export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalPro
     const videoUrl = item.videoUrl;
     if (!videoUrl) return;
     setDownloading(true);
-    touchStorageObject(item.id, 'videos', videoUrl, 'video').catch(() => {});
+    touchStorageObject(item.id, 'videos', videoUrl, 'video').catch(() => {}).finally(() => { /* release ref */ });
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');
@@ -120,7 +120,7 @@ export function VideoReplayModal({ visible, item, onClose }: VideoReplayModalPro
     if (!item) return;
     const videoUrl = item.videoUrl;
     if (!videoUrl) return;
-    touchStorageObject(item.id, 'videos', videoUrl, 'video').catch(() => {});
+    touchStorageObject(item.id, 'videos', videoUrl, 'video').catch(() => {}).finally(() => { /* release ref */ });
     try {
       if (Platform.OS === 'web') {
         const a = document.createElement('a');
