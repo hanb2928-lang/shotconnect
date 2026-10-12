@@ -203,7 +203,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
 
         // Check scans first — the webhook writes here directly and it's the
         // most reliable completion signal.
-        const scanFinalUrl = scanResult.data?.muxed_video_url || scanResult.data?.video_url;
+        const scanFinalUrl = scanResult.data?.video_url || scanResult.data?.muxed_video_url;
         if (scanFinalUrl) {
           if (active.jobId.startsWith('hd-')) {
             outputModeRef.current = 'video';
@@ -281,7 +281,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                   .select('video_url, muxed_video_url')
                   .eq('id', scanIdRef.current)
                   .maybeSingle();
-                const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+                const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
                 if (scanFinalUrl) {
                   transitionToCompleted(scanFinalUrl);
                   return;
@@ -305,7 +305,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                       .select('video_url, muxed_video_url')
                       .eq('id', scanIdRef.current)
                       .maybeSingle();
-                    const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+                    const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
                     if (scanFinalUrl) {
                       transitionToCompleted(scanFinalUrl);
                       return;
@@ -437,7 +437,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                 .maybeSingle();
               if (generationTokenRef.current !== token) return;
               if (scanData) {
-                const scanFinalUrl = scanData.muxed_video_url || scanData.video_url;
+                const scanFinalUrl = scanData.video_url || scanData.muxed_video_url;
                 if (scanFinalUrl) {
                   transitionToCompleted(scanFinalUrl);
                   return;
@@ -738,7 +738,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                     .maybeSingle();
                   if (generationTokenRef.current !== stallToken) return;
                   if (scanData) {
-                    const scanFinalUrl = scanData.muxed_video_url || scanData.video_url;
+                    const scanFinalUrl = scanData.video_url || scanData.muxed_video_url;
                     if (scanFinalUrl) {
                       transitionToCompleted(scanFinalUrl);
                       return;
@@ -1014,7 +1014,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         .select('video_url, muxed_video_url')
         .eq('id', active.scanId)
         .maybeSingle();
-      const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+      const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
       if (scanFinalUrl) {
         transitionToCompleted(scanFinalUrl);
         return true;

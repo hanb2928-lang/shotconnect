@@ -198,7 +198,7 @@ export function useResultPolling(
             hybridPoller.onRealtimeEvent();
             try {
               const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-              const finalUrl = row?.muxed_video_url ?? row?.video_url;
+              const finalUrl = row?.video_url ?? row?.muxed_video_url;
               if (finalUrl) {
                 handleResult('SUCCESS', finalUrl);
               }
@@ -245,8 +245,10 @@ export function useResultPolling(
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
-        // Check scans.muxed_video_url FIRST — it's the final product with
-        // audio. video_jobs.video_url is the raw render without audio.
+        // Check scans.video_url FIRST — the server writes the render result
+        // here when generation completes. muxed_video_url is a separate
+        // post-processing step on the result page and may never arrive during
+        // generation, causing the 97% stall.
         if (scanId) {
           const { data: scanData } = await supabase
             .from('scans')
@@ -254,7 +256,7 @@ export function useResultPolling(
             .eq('id', scanId)
             .maybeSingle();
           if (forceSyncAbort.signal.aborted) return null;
-          const finalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+          const finalUrl = scanData?.video_url ?? scanData?.muxed_video_url;
           if (finalUrl) {
             return { status: 'SUCCESS', videoUrl: finalUrl, step: 'completed', progress: 1.0 };
           }
@@ -282,7 +284,8 @@ export function useResultPolling(
       forceSyncAbort?.abort();
       forceSyncAbort = new AbortController();
       try {
-        // ALWAYS check scans first — muxed_video_url is the final product.
+        // ALWAYS check scans first — video_url is the render result written
+        // by the server on completion. muxed_video_url is post-processing.
         const { data: scanData } = await supabase
           .from('scans')
           .select('video_url, muxed_video_url')
@@ -290,7 +293,7 @@ export function useResultPolling(
           .maybeSingle();
         if (forceSyncAbort.signal.aborted) return null;
         if (scanData) {
-          const finalUrl = scanData.muxed_video_url ?? scanData.video_url;
+          const finalUrl = scanData.video_url ?? scanData.muxed_video_url;
           if (finalUrl) {
             return { status: 'SUCCESS', videoUrl: finalUrl, step: 'completed', progress: 1.0 };
           }

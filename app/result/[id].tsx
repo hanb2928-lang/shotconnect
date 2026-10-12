@@ -1932,7 +1932,7 @@ function ResultScreenInner() {
           (payload: { new: Record<string, unknown> | null }) => {
             if (!mountedRef.current || !payload.new) return;
             const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-            const finalUrl = row.muxed_video_url || row.video_url;
+            const finalUrl = row.video_url || row.muxed_video_url;
             if (finalUrl && !generatedVideoUrlRef.current) {
               setGeneratedVideoUrl(finalUrl);
               setVideoStage('draft_ready');

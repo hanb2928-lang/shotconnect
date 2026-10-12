@@ -65,7 +65,7 @@ export function useVideoJobRecovery() {
           .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        const scanFinalUrl = scanData?.muxed_video_url ?? scanData?.video_url;
+        const scanFinalUrl = scanData?.video_url ?? scanData?.muxed_video_url;
         if (scanFinalUrl) {
           clearActiveVideoJob();
           safeSetInfo({

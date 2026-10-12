@@ -782,8 +782,10 @@ function waitForVideoCompletion(
     };
 
     // Check scans for the persisted URL (webhook writes here too).
-    // Prefers muxed_video_url (final product with audio) but falls back
-    // to video_url (raw render). Muxing is a separate post-generation step.
+    // Prefers video_url (server writes this on generation completion) and
+    // falls back to muxed_video_url (post-processing audio mux). Checking
+    // video_url first prevents the 97% stall — muxed_video_url is a separate
+    // post-generation step that may never arrive during generation.
     const checkScanVideoUrl = async () => {
       if (settled || !scanId) return;
       try {
@@ -794,7 +796,7 @@ function waitForVideoCompletion(
           .eq('id', scanId)
           .maybeSingle();
         if (error || !data) { _dbg('checkScanVideoUrl:no-data'); return; }
-        const finalUrl = data.muxed_video_url ?? data.video_url;
+        const finalUrl = data.video_url ?? data.muxed_video_url;
         if (finalUrl) {
           _dbg('checkScanVideoUrl:FOUND', { url: finalUrl.slice(0, 80) });
           report('completed', 1.0, 'AI 비디오 생성 완료');
@@ -1344,7 +1346,7 @@ export function subscribeVideoJob(
             .select('video_url, muxed_video_url')
             .eq('id', scanId)
             .maybeSingle();
-          const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+          const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
           if (scanFinalUrl) {
             _dbg('checkAndNotify:scan-fallback-SUCCESS');
             settled = true;
@@ -1380,7 +1382,7 @@ export function subscribeVideoJob(
           .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+        const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
         if (scanFinalUrl) {
           _dbg('checkAndNotify:scan-video-url-SUCCESS');
           settled = true;
@@ -1517,7 +1519,7 @@ export function subscribeVideoJob(
           // is the most reliable terminal completion signal.
           try {
             const row = payload.new as { video_url?: string | null; muxed_video_url?: string | null };
-            const finalUrl = row.muxed_video_url || row.video_url;
+            const finalUrl = row.video_url || row.muxed_video_url;
             if (finalUrl) {
               if (settled) return;
               settled = true;
@@ -1892,7 +1894,7 @@ export function subscribeHdUpgrade(
           .select('video_url, muxed_video_url')
           .eq('id', scanId)
           .maybeSingle();
-        const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+        const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
         if (scanFinalUrl) {
           settled = true;
           cleanup();
@@ -2120,7 +2122,7 @@ export async function recoverVideoJob(
         .select('video_url, muxed_video_url')
         .eq('id', scanId)
         .maybeSingle();
-      const scanFinalUrl = scanData?.muxed_video_url || scanData?.video_url;
+      const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
       if (scanFinalUrl) {
         return { videoUrl: scanFinalUrl, isHd: false, status: 'SUCCESS' };
       }
