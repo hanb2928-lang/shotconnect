@@ -15,8 +15,17 @@
 
 type TickFn = () => Promise<void>;
 
-function yieldToMacrotask(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+function yieldToFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    const frame = (globalThis as typeof globalThis & {
+      requestAnimationFrame?: (callback: () => void) => number;
+    }).requestAnimationFrame;
+    if (typeof frame === 'function') {
+      frame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 16);
+  });
 }
 
 interface TickRegistration {
@@ -46,7 +55,7 @@ function processTick(): void {
     for (const [index, reg] of ready.entries()) {
       if (!reg.active) continue;
       reg.lastFired = now;
-      if (index > 0) await yieldToMacrotask();
+      if (index > 0) await yieldToFrame();
       try {
         await reg.fn();
       } catch {
@@ -123,7 +132,7 @@ export function pauseAllTicks(): void {
  * fire immediately on the next global tick (foreground return burst).
  */
 export function resumeAllTicks(): void {
-  const resumeAt = Date.now();
+  const resumeAt = Date.now() + 32;
   registrations.forEach((r, index) => {
     r.active = true;
     r.lastFired = resumeAt - r.intervalMs + index * 250;

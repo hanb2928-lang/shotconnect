@@ -113,6 +113,36 @@ export function useResultPolling(
     // are rejected instead of regressing the UI backwards.
     let highestProgressSeen = 0;
     let latestStepSeen: string | null = null;
+    let progressFrame: number | ReturnType<typeof setTimeout> | null = null;
+    let pendingProgressMessage: string | null = null;
+    let pendingServerProgress: number | null = null;
+    let pendingServerStep: string | null = null;
+
+    const flushProgressState = () => {
+      progressFrame = null;
+      if (pendingProgressMessage !== null) {
+        setProgressMessage(pendingProgressMessage);
+        pendingProgressMessage = null;
+      }
+      if (pendingServerProgress !== null) {
+        const nextProgress = pendingServerProgress;
+        pendingServerProgress = null;
+        setServerProgress((prev) => Math.max(prev ?? 0, nextProgress));
+      }
+      if (pendingServerStep !== null) {
+        setServerStep(pendingServerStep);
+        pendingServerStep = null;
+      }
+    };
+
+    const scheduleProgressState = () => {
+      if (progressFrame !== null) return;
+      if (typeof requestAnimationFrame === 'function') {
+        progressFrame = requestAnimationFrame(flushProgressState);
+      } else {
+        progressFrame = setTimeout(flushProgressState, 16);
+      }
+    };
 
     const applyProgress = (stepProg: number | null, step: string | null) => {
       if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
@@ -127,12 +157,14 @@ export function useResultPolling(
         else highestProgressSeen = Math.max(highestProgressSeen, stepProg);
         const elapsedSec = Math.round((Date.now() - startTime) / 1000);
         const pctLabel = ` (${Math.round(stepProg * 100)}%)`;
-        setProgressMessage(`AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`);
-        setServerProgress((prev) => Math.max(prev ?? 0, stepProg));
+        pendingProgressMessage = `AI가 영상을 렌더링하고 있어요${pctLabel} · ${elapsedSec}초`;
+        pendingServerProgress = Math.max(pendingServerProgress ?? 0, stepProg);
+        scheduleProgressState();
       }
       if (step && step !== latestStepSeen) {
         latestStepSeen = step;
-        setServerStep(step);
+        pendingServerStep = step;
+        scheduleProgressState();
       }
     };
 
@@ -244,6 +276,17 @@ export function useResultPolling(
         realtimeChannel = null;
       }
       clearAllSafeTimers(pendingRemovals);
+      if (progressFrame !== null) {
+        if (typeof cancelAnimationFrame === 'function' && typeof progressFrame === 'number') {
+          cancelAnimationFrame(progressFrame);
+        } else {
+          clearTimeout(progressFrame);
+        }
+        progressFrame = null;
+      }
+      pendingProgressMessage = null;
+      pendingServerProgress = null;
+      pendingServerStep = null;
       pollAbort?.abort();
       forceSyncAbort?.abort();
     };
