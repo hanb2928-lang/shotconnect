@@ -3,7 +3,7 @@ import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession, withQueryTimeout } from '@/lib/supabase';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
-import { registerTick, pauseAllTicks, resumeAllTicks } from '@/lib/tickGate';
+import { pauseAllTicks, resumeAllTicks } from '@/lib/tickGate';
 import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 import { stepToProgress } from '@/lib/videoGenSteps';
 import { HybridRealtimePoller, type ChannelHealth } from '@/lib/hybridRealtimePoller';
@@ -148,11 +148,15 @@ export function useResultPolling(
       if (stepProg !== null && !isNaN(stepProg) && stepProg > 0) {
         const isStepChange = step !== null && step !== latestStepSeen;
         if (stepProg < highestProgressSeen && !isStepChange) return; // stale — reject
-        // On step change, only update highestProgressSeen if the new step
-        // maps to a HIGHER progress. A stale Realtime payload carrying an
-        // older step (e.g. "submitting" arriving after "rendering") must
-        // not regress highestProgressSeen back below 0.85, which would
-        // re-activate the edge-function path and cause flapping.
+        // Suppress sub-0.5% progress deltas when above 95%. At 97-100%,
+        // the server sends rapid micro-updates (97.1%, 97.3%, 97.7%...)
+        // that each trigger a state update + re-render. Coalescing them
+        // via rAF isn't enough — the sheer volume of Realtime payloads
+        // saturates the JS main thread with microtask processing before
+        // the rAF flush even runs. Dropping deltas < 0.5% above 95%
+        // reduces render count from ~20/frame to ~2/frame.
+        const delta = stepProg - highestProgressSeen;
+        if (stepProg >= 0.95 && !isStepChange && delta < 0.005) return;
         if (isStepChange) highestProgressSeen = Math.max(highestProgressSeen, stepProg);
         else highestProgressSeen = Math.max(highestProgressSeen, stepProg);
         const elapsedSec = Math.round((Date.now() - startTime) / 1000);
@@ -457,11 +461,12 @@ export function useResultPolling(
             if (settledRef.current) return;
           }
         }
-        // Tightened interval: 3s instead of 6s when we're in the final
-        // stretch. When the DB shows SUCCESS-without-URL, every second
-        // counts — the URL may land in the next query.
+        // Tightened interval: 4s when we're in the final stretch.
+        // 2s was too aggressive — it doubled with the (now removed) tick
+        // gate poll and caused microtask starvation at 97%. 4s is still
+        // fast enough to catch a URL that lands within one cycle.
         if (!cancelled && !settledRef.current && !isPaused) {
-          pollTimer = setTimeout(pollOnce, 2000);
+          pollTimer = setTimeout(pollOnce, 4000);
         }
         return;
       }
@@ -698,6 +703,9 @@ export function useResultPolling(
     // return multiple hooks simultaneously try to re-subscribe, flooding
     // the native network module.
     const handlePauseImmediate = (nextState: string) => {
+      // Only pause on full background — NOT on iOS 'inactive'.
+      // 'inactive' fires for transient UI interruptions; pausing on it
+      // causes a reconnect burst when 'active' follows seconds later.
       if (nextState !== 'background') return;
       isPaused = true;
       bgEnterTime = Date.now();
@@ -774,23 +782,17 @@ export function useResultPolling(
     const unsubPause = registerAppStateHandler('immediate', handlePauseImmediate);
     const unsubResume = registerAppStateHandler('deferred', handleResumeDeferred);
 
-    // Register the DB force-sync poll with the centralized tick gate so
-    // it doesn't interfere with aiVideoPipeline's concurrent poll loop.
-    // The tick gate serializes execution, preventing the race vortex.
-    const unsubTick = registerTick(
-      `result-poll-${jobId}`,
-      async () => {
-        if (cancelled || settledRef.current || isPaused) return;
-        await pollOnce().catch(() => {});
-      },
-      3000,
-    );
+    // NOTE: The tick gate registration was removed. The setTimeout-based
+    // pollTimer above already drives pollOnce at the correct adaptive
+    // interval. The parallel registerTick(3s) caused double-polling at
+    // 85%+ where the poll interval tightens to 2s — two concurrent
+    // pollOnce calls hit the DB simultaneously, doubling render cycles
+    // and saturating the JS thread at the 97% bottleneck.
 
     return () => {
       cleanup();
       unsubPause();
       unsubResume();
-      unsubTick();
     };
   }, [jobId, scanId, settle]);
 

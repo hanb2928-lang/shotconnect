@@ -71,7 +71,12 @@ export function installRealtimeReconnectGuard(): () => void {
   }
 
   const unsubBg = registerAppStateHandler('immediate', (nextState: string) => {
-    if (nextState === 'background' || nextState === 'inactive') {
+    // Only disconnect on full background — NOT on iOS 'inactive'.
+    // 'inactive' fires for transient interruptions (notification banner,
+    // Control Center, Siri). Tearing down the socket on 'inactive'
+    // triggers a full reconnect stampede when 'active' follows seconds
+    // later, overloading the native bridge and crashing the app.
+    if (nextState === 'background') {
       try { rt.disconnect(); } catch { /* non-fatal */ }
     }
   });

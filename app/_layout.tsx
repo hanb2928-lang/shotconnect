@@ -220,7 +220,11 @@ export default function RootLayout() {
     });
     const unsubReconnect = installRealtimeReconnectGuard();
     const unsubChannelTeardown = registerAppStateHandler('immediate', (nextState: string) => {
-      if (nextState === 'background' || nextState === 'inactive') {
+      // Only tear down on full background — NOT on iOS 'inactive'.
+      // 'inactive' fires for transient UI interruptions (notification
+      // banner, Control Center). Tearing down on 'inactive' causes a
+      // reconnect stampede when 'active' follows, crashing the app.
+      if (nextState === 'background') {
         sweepZombieSockets();
         pauseAllTicks();
       }
