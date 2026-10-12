@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, AppState } from 'react-native';
 import { Coins, Plus } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { getCreditBalance, type CreditBalance } from '@/lib/credits';
@@ -26,10 +26,21 @@ export function CreditBalanceBadge({ onPress, compact = false, layout = 'horizon
   useEffect(() => {
     mountedRef.current = true;
     loadBalance();
-    const interval = setInterval(loadBalance, 15000);
+    let interval: ReturnType<typeof setInterval> | null = setInterval(loadBalance, 15000);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background' || state === 'inactive') {
+        if (interval) { clearInterval(interval); interval = null; }
+      } else if (state === 'active') {
+        if (!interval) {
+          loadBalance();
+          interval = setInterval(loadBalance, 15000);
+        }
+      }
+    });
     return () => {
       mountedRef.current = false;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
+      sub.remove();
     };
   }, [loadBalance]);
 

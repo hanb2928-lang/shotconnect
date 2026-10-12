@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect, memo } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
@@ -770,7 +770,7 @@ const cropStyles = StyleSheet.create({
 
 // ─── Main component ──────────────────────────────────────────────────────
 
-export function MultiPlatformExport({
+function MultiPlatformExportInner({
   imageUrl,
   hook,
   title,
@@ -1639,3 +1639,5 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
+
+export const MultiPlatformExport = memo(MultiPlatformExportInner);

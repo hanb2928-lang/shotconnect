@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -52,7 +52,7 @@ interface ShortFormPreviewPlayerProps {
   ttsUrl?: string | null;
 }
 
-const TICK_MS = 250;
+const TICK_MS = 500;
 const LUMINANCE_SAMPLE_MS = 1000;
 const VIDEO_LOAD_TIMEOUT_MS = 5000;
 const BUFFERING_TIMEOUT_MS = 5000;
@@ -75,7 +75,7 @@ const STORY_PHASE_COLORS: Record<StoryPhase, string> = {
   cta_call: theme.colors.warning[400],
 };
 
-export function ShortFormPreviewPlayer({ editPlan, videoUri, narrativePlan, videoGenProgress, bgmVolume = 0.75, copyOverlays = null, narrationActive = false, ttsUrl = null }: ShortFormPreviewPlayerProps) {
+function ShortFormPreviewPlayerInner({ editPlan, videoUri, narrativePlan, videoGenProgress, bgmVolume = 0.75, copyOverlays = null, narrationActive = false, ttsUrl = null }: ShortFormPreviewPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSec, setCurrentSec] = useState(0);
   const totalDuration = editPlan.totalDurationSec || 15;
@@ -1171,3 +1171,5 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
 });
+
+export const ShortFormPreviewPlayer = memo(ShortFormPreviewPlayerInner);

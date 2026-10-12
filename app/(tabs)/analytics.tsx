@@ -164,6 +164,16 @@ function AnalyticsScreenInner() {
     return Math.max(...data.dailyClicks.map((d) => d.clicks), 1);
   }, [data]);
 
+  const maxRevenueAmount = useMemo(() => {
+    if (!data || data.revenueByPlatform.length === 0) return 1;
+    return Math.max(...data.revenueByPlatform.map((r) => r.amount), 1);
+  }, [data]);
+
+  const maxShareClicks = useMemo(() => {
+    if (!data || data.sharePlatformPerformance.length === 0) return 1;
+    return Math.max(...data.sharePlatformPerformance.map((s) => s.clicks), 1);
+  }, [data]);
+
   const calcEstimatedEarnings = useMemo(() => {
     const clicks = parseFloat(calcClicks) || 0;
     const cvr = parseFloat(calcCvr) || 0;
@@ -458,7 +468,7 @@ function AnalyticsScreenInner() {
                 {d.revenueByPlatform.map((item, i) => {
                   const meta = getPlatformMeta(item.platform);
                   const Icon = meta.icon;
-                  const maxAmount = Math.max(...d.revenueByPlatform.map((r) => r.amount), 1);
+                  const maxAmount = maxRevenueAmount;
                   const pct = (item.amount / maxAmount) * 100;
                   return (
                     <View key={i} style={styles.breakdownRow}>
@@ -495,7 +505,7 @@ function AnalyticsScreenInner() {
                 {d.sharePlatformPerformance.map((item, i) => {
                   const meta = getSharePlatformMeta(item.platform);
                   const Icon = meta.icon;
-                  const maxClicks = Math.max(...d.sharePlatformPerformance.map(s => s.clicks), 1);
+                  const maxClicks = maxShareClicks;
                   const barPct = (item.clicks / maxClicks) * 100;
                   return (
                     <View key={i} style={styles.breakdownRow}>

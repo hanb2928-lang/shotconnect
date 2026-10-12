@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
 import {
   View,
@@ -37,7 +37,7 @@ interface StockVideoPickerProps {
   onSelectClip: (clip: StockVideoClip | null) => void;
 }
 
-export function StockVideoPicker({
+function StockVideoPickerInner({
   productName,
   productCategory,
   orientation = 'portrait',
@@ -60,16 +60,13 @@ export function StockVideoPicker({
     progressAnim.setValue(0);
     if (progressInterval.current) clearInterval(progressInterval.current);
     progressInterval.current = setInterval(() => {
-      setProgress((prev) => {
-      const next = Math.min(prev + Math.random() * 15 + 5, 90);
-        return next;
-      });
+      const next = Math.min((progressAnim as any)._value * 100 + Math.random() * 15 + 5, 90);
+      progressAnim.setValue(next / 100);
     }, 200);
   }, [progressAnim]);
 
   const finishProgress = useCallback(() => {
     if (progressInterval.current) clearInterval(progressInterval.current);
-    setProgress(100);
     Animated.timing(progressAnim, {
       toValue: 1,
       duration: 300,
@@ -77,15 +74,6 @@ export function StockVideoPicker({
       useNativeDriver: false,
     }).start();
   }, [progressAnim]);
-
-  useEffect(() => {
-    Animated.timing(progressAnim, {
-      toValue: progress / 100,
-      duration: 200,
-      easing: Easing.inOut(Easing.ease),
-      useNativeDriver: false,
-    }).start();
-  }, [progress, progressAnim]);
 
   useEffect(() => {
     return () => {
@@ -550,7 +538,7 @@ export function StockVideoPicker({
         <View style={styles.progressContainer}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressLabel}>{mediaType === 'image' ? '이미지 다운로드 중...' : '영상 다운로드 중...'}</Text>
-            <Text style={styles.progressPercent}>{Math.round(progress)}%</Text>
+            <Text style={styles.progressPercent}>{Math.round((progressAnim as any)._value * 100)}%</Text>
           </View>
           <View style={styles.progressTrack}>
             <Animated.View
@@ -1316,3 +1304,5 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 });
+
+export const StockVideoPicker = memo(StockVideoPickerInner);

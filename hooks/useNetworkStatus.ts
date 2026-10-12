@@ -171,6 +171,10 @@ function stopProbing() {
     clearInterval(probeTimer);
     probeTimer = null;
   }
+  if (recoveryDispatchTimer) {
+    clearTimeout(recoveryDispatchTimer);
+    recoveryDispatchTimer = null;
+  }
   abortActiveProbe();
   consecutiveProbeFailures = 0;
   clearUnstable();

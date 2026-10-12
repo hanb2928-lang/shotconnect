@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -51,7 +51,7 @@ interface VideoEditPlanCardProps {
 
 
 
-export function VideoEditPlanCard({
+function VideoEditPlanCardInner({
   productName,
   productCategory,
   platform,
@@ -82,7 +82,8 @@ export function VideoEditPlanCard({
     progressAnim.setValue(0);
     if (progressInterval.current) clearInterval(progressInterval.current);
     progressInterval.current = setInterval(() => {
-      setProgress((prev) => Math.min(prev + Math.random() * 12 + 4, 92));
+      const next = Math.min((progressAnim as any)._value * 100 + Math.random() * 12 + 4, 92);
+      progressAnim.setValue(next / 100);
     }, 250);
   }, [progressAnim]);
 
@@ -96,15 +97,6 @@ export function VideoEditPlanCard({
       useNativeDriver: false,
     }).start();
   }, [progressAnim]);
-
-  useEffect(() => {
-    Animated.timing(progressAnim, {
-      toValue: progress / 100,
-      duration: 200,
-      easing: Easing.inOut(Easing.ease),
-      useNativeDriver: false,
-    }).start();
-  }, [progress, progressAnim]);
 
   useEffect(() => {
     return () => {
@@ -162,6 +154,33 @@ export function VideoEditPlanCard({
     ].join('\n');
     copyToClipboard(full, `variant-${index}`);
   }, [copyToClipboard]);
+
+  const beatSyncData = useMemo(() => {
+    if (!plan) return null;
+    const bpmMap: Record<string, number> = {
+      '하이텐션': 128, '시네마틱': 90, 'ASMR': 60, '감성': 75, '로파이': 82,
+    };
+    const effectiveBpm = bpmMap[plan.musicMood] ?? 120;
+    const sync = buildBeatSync(
+      effectiveBpm,
+      plan.duration,
+      plan.segments.map((s, i) => ({
+        index: i,
+        startSec: s.startSec,
+        endSec: s.endSec,
+        label: s.label,
+        purpose: s.purpose,
+        textOverlay: '',
+        position: 'center' as const,
+        storyPhase: 'gaze_hook' as const,
+        narrationCue: s.purpose,
+      })),
+      plan.musicMood ?? '하이텐션',
+    );
+    const accuracy = getBeatSyncAccuracyLabel(sync);
+    const downbeats = sync.beats.filter((b) => b.isDownbeat);
+    return { sync, accuracy, downbeats };
+  }, [plan]);
 
   if (!hasVideoSelected) {
     return (
@@ -238,7 +257,7 @@ export function VideoEditPlanCard({
         <View style={styles.progressContainer}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressLabel}>AI 편집 계획 생성 중...</Text>
-            <Text style={styles.progressPercent}>{Math.round(progress)}%</Text>
+            <Text style={styles.progressPercent}>{Math.round((progressAnim as any)._value * 100)}%</Text>
           </View>
           <View style={styles.progressTrack}>
             <Animated.View
@@ -305,29 +324,8 @@ export function VideoEditPlanCard({
           </View>
 
           {/* Beat sync card */}
-          {(() => {
-            const bpmMap: Record<string, number> = {
-              '하이텐션': 128, '시네마틱': 90, 'ASMR': 60, '감성': 75, '로파이': 82,
-            };
-            const effectiveBpm = bpmMap[plan.musicMood] ?? 120;
-            const sync = buildBeatSync(
-              effectiveBpm,
-              plan.duration,
-              plan.segments.map((s, i) => ({
-                index: i,
-                startSec: s.startSec,
-                endSec: s.endSec,
-                label: s.label,
-                purpose: s.purpose,
-                textOverlay: '',
-                position: 'center' as const,
-                storyPhase: 'gaze_hook' as const,
-                narrationCue: s.purpose,
-              })),
-              plan.musicMood ?? '하이텐션',
-            );
-            const accuracy = getBeatSyncAccuracyLabel(sync);
-            const downbeats = sync.beats.filter((b) => b.isDownbeat);
+          {beatSyncData && (() => {
+            const { sync, accuracy, downbeats } = beatSyncData;
             return (
               <View style={styles.beatSyncCard}>
                 <View style={styles.beatSyncHeader}>
@@ -1068,3 +1066,5 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
 });
+
+export const VideoEditPlanCard = memo(VideoEditPlanCardInner);

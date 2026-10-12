@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, memo } from 'react';
 import {
   View,
   Text,
@@ -36,7 +36,7 @@ function getShareMeta(key: string) {
   return SHARE_PLATFORM_META[key] || { label: key, icon: Globe, color: '#8B5CF6' };
 }
 
-export function PerformanceReportCard() {
+function PerformanceReportCardInner() {
   const router = useRouter();
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,6 +101,11 @@ export function PerformanceReportCard() {
     if (filteredRevenue.length === 0) return 1;
     return Math.max(...filteredRevenue.map((d) => d.amount), 1);
   }, [filteredRevenue]);
+
+  const maxShareClicks = useMemo(() => {
+    if (!data || data.sharePlatformPerformance.length === 0) return 1;
+    return Math.max(...data.sharePlatformPerformance.map((s) => s.clicks), 1);
+  }, [data]);
 
   if (loading) {
     return (
@@ -295,7 +300,7 @@ export function PerformanceReportCard() {
               {data.sharePlatformPerformance.map((item, i) => {
                 const meta = getShareMeta(item.platform);
                 const Icon = meta.icon;
-                const maxClicks = Math.max(...data.sharePlatformPerformance.map((s) => s.clicks), 1);
+                const maxClicks = maxShareClicks;
                 const barPct = (item.clicks / maxClicks) * 100;
                 return (
                   <View key={i} style={styles.platformRow}>
@@ -730,3 +735,5 @@ const styles = StyleSheet.create({
     color: theme.colors.dark.textFaint,
   },
 });
+
+export const PerformanceReportCard = memo(PerformanceReportCardInner);

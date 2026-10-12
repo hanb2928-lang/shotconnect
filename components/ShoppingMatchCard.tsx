@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -60,7 +60,7 @@ const PLATFORM_META: {
   { key: 'Custom', label: '직접 추가', icon: Store, color: '#6366F1', issueUrl: '', issueLabel: '' },
 ];
 
-export function ShoppingMatchCard({
+function ShoppingMatchCardInner({
   matches,
   affiliateLinks,
   customAffiliateLinks = [],
@@ -1184,3 +1184,5 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
+
+export const ShoppingMatchCard = memo(ShoppingMatchCardInner);

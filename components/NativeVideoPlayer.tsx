@@ -42,7 +42,16 @@ export function NativeVideoPlayer({ videoUri, isPlaying, ttsUrl, onLoad, onError
         onErrorRef.current?.();
       }
     }) as any;
-    return () => { sub?.remove?.(); };
+    const timeoutId = setTimeout(() => {
+      setStatus((prev) => {
+        if (prev === 'loading') {
+          onErrorRef.current?.();
+          return 'error';
+        }
+        return prev;
+      });
+    }, 15000);
+    return () => { sub?.remove?.(); clearTimeout(timeoutId); };
   }, [player]);
 
   useEffect(() => {

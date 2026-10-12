@@ -98,7 +98,7 @@ export function useBootReady({ fontsReady, bootPhase }: BootReadyInputs): {
             // system fonts than to hang on the splash forever.
             setIsBootReady(true);
           }
-        }, 50);
+        }, 150);
       }
     }).catch(() => {
       if (cancelled) return;

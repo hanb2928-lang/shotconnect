@@ -193,14 +193,28 @@ function waitForOnline(): Promise<boolean> {
   if (isOnline()) return Promise.resolve(true);
   return new Promise((resolve) => {
     const deadline = Date.now() + OFFLINE_WAIT_MAX_MS;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
     const check = () => {
       if (isOnline() || Date.now() >= deadline) {
         resolve(isOnline());
         return;
       }
-      setTimeout(check, OFFLINE_POLL_MS);
+      timerId = setTimeout(check, OFFLINE_POLL_MS);
     };
     check();
+    // Safety: if the promise is not resolved within the deadline,
+    // clear the timer to prevent orphaned recursive setTimeout chains.
+    const safetyTimer = setTimeout(() => {
+      if (timerId) clearTimeout(timerId);
+      resolve(false);
+    }, OFFLINE_WAIT_MAX_MS + 1000);
+    // Allow callers to cancel via the returned promise's resolution
+    const originalResolve = resolve;
+    resolve = ((val: boolean) => {
+      clearTimeout(safetyTimer);
+      if (timerId) clearTimeout(timerId);
+      originalResolve(val);
+    }) as typeof resolve;
   });
 }
 

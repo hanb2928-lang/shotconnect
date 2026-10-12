@@ -5,7 +5,7 @@
  * On mount, call loadDraft() to check for a recoverable draft.
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   saveDraft,
   getDraft,
@@ -86,6 +86,12 @@ export function useDraftAutoSave(source: DraftSource) {
 
   const clearDraftId = useCallback(() => {
     draftIdRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
   }, []);
 
   return { saveDraftState, loadDraft, clearDraftId, draftIdRef };

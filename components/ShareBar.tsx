@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, Share, Platform, Linking, Modal, Pressable, ScrollView } from 'react-native';
 import { CachedImage } from '@/components/CachedImage';
 import { Copy, Check, Clapperboard, Download, CloudUpload, Loader as Loader2, Instagram, MessageCircle, Globe, ClipboardCheck, ChevronDown, Share2, X, ExternalLink, Eye, ArrowLeft, Send } from 'lucide-react-native';
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, memo } from 'react';
 import { useMountedRef } from '@/hooks/useMountedRef';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, withDelay, Easing, cancelAnimation } from 'react-native-reanimated';
 import { theme } from '@/lib/theme';
@@ -25,7 +25,7 @@ interface ShareBarProps {
   affiliatePlatforms?: string[];
 }
 
-export function ShareBar({ cardRef, shareText, affiliateUrl, shortUrl, fileName, affiliatePlatforms = [] }: ShareBarProps) {
+function ShareBarInner({ cardRef, shareText, affiliateUrl, shortUrl, fileName, affiliatePlatforms = [] }: ShareBarProps) {
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [cloudSaving, setCloudSaving] = useState(false);
@@ -970,3 +970,5 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
+
+export const ShareBar = memo(ShareBarInner);
