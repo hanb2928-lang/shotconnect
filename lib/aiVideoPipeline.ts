@@ -1,6 +1,6 @@
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
-import { supabase, ensureFreshSession } from './supabase';
+import { supabase, ensureFreshSession, withQueryTimeout } from './supabase';
 import { createChannel, safeRemoveChannel } from './channelManager';
 import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from './safeTimer';
 import { monotonicStart, monotonicElapsedSec, monotonicElapsedMs } from './timeUtils';
@@ -779,7 +779,11 @@ function waitForVideoCompletion(
         if (!submitData.taskId.startsWith('soft-')) {
           query = query.eq('task_id', submitData.taskId);
         }
-        const { data, error } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
+        const { data, error } = await withQueryTimeout(
+          query.order('created_at', { ascending: false }).limit(1).maybeSingle(),
+          5000,
+          'checkDb',
+        );
         if (error) throw new Error(error.message);
         if (!data) { _dbg('checkDb:no-data'); return; }
         consecutivePollFailures = 0;
@@ -813,11 +817,15 @@ function waitForVideoCompletion(
       scanCheckWatchdog = setTimeout(() => { scanCheckInFlight = false; }, LOCK_TIMEOUT_MS);
       try {
         _dbg('checkScanVideoUrl:start');
-        const { data, error } = await supabase
-          .from('scans')
-          .select('video_url, muxed_video_url')
-          .eq('id', scanId)
-          .maybeSingle();
+        const { data, error } = await withQueryTimeout(
+          supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle(),
+          5000,
+          'checkScanVideoUrl',
+        );
         if (error || !data) { _dbg('checkScanVideoUrl:no-data'); return; }
         const finalUrl = data.video_url ?? data.muxed_video_url;
         if (finalUrl) {

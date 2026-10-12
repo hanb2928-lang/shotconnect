@@ -106,6 +106,46 @@ export function teardownAllChannels(): void {
 }
 
 /**
+ * Zombie Socket Sweeper: force-disconnect the Supabase RealtimeClient's
+ * underlying WebSocket when the app transitions to background or when
+ * a navigation event orphans channel references. Without this, the
+ * RealtimeClient keeps the socket alive in its internal map even after
+ * all tracked channels are removed — the socket continues sending ping
+ * packets, consuming server connection slots, and collides with new
+ * sockets created on foreground return.
+ *
+ * This accesses the Supabase client's internal RealtimeClient via the
+ * stable `.channels` property. If the internal API changes, the
+ * try/catch silently no-ops rather than crashing.
+ */
+export function sweepZombieSockets(): void {
+  teardownAllChannels();
+  try {
+    const client = supabase as unknown as {
+      channels?: Map<string, { close?: () => void; send?: (msg: unknown) => void }>;
+      realtime?: { channels?: Map<string, unknown>; socket?: { disconnect?: () => void } };
+    };
+    // Clear any channels the Supabase client tracks internally that
+    // our registry doesn't know about (orphaned from untracked consumers).
+    const internalChannels = client.channels ?? client.realtime?.channels;
+    if (internalChannels && typeof internalChannels.forEach === 'function') {
+      internalChannels.forEach((ch: unknown) => {
+        try {
+          if (ch && typeof (ch as { close?: () => void }).close === 'function') {
+            (ch as { close: () => void }).close();
+          }
+        } catch { /* non-fatal */ }
+      });
+    }
+    // Force-disconnect the underlying WebSocket if exposed.
+    const socket = client.realtime?.socket;
+    if (socket && typeof socket.disconnect === 'function') {
+      socket.disconnect();
+    }
+  } catch { /* non-fatal — internal API may vary across versions */ }
+}
+
+/**
  * Clear all tracking. Test utility.
  */
 export function _resetChannelManager(): void {

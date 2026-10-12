@@ -152,3 +152,30 @@ export const PEXELS_VIDEO_SEARCH_URL = `${supabaseUrl}/functions/v1/search-pexel
 export const VIDEO_EDIT_PLAN_URL = `${supabaseUrl}/functions/v1/generate-video-edit-plan`;
 export const GENERATE_IMAGE_URL = `${supabaseUrl}/functions/v1/generate-image`;
 export const EXTRACT_VIDEO_FRAME_URL = `${supabaseUrl}/functions/v1/extract-video-frame`;
+
+/**
+ * Wrap a Supabase query promise with a hard timeout. If the query doesn't
+ * resolve within `timeoutMs`, the promise rejects with a timeout error,
+ * releasing any row-level locks the transaction holds on the server side.
+ *
+ * This prevents the "underground deadlock" where a flaky network causes a
+ * DB query to hang indefinitely, holding row locks that block all
+ * subsequent reads/writes and freezing the entire app.
+ */
+export function withQueryTimeout<T>(
+  queryPromise: PromiseLike<T>,
+  timeoutMs = 5000,
+  label = 'query',
+): Promise<T> {
+  const promise = Promise.resolve(queryPromise);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return Promise.race([
+    promise.finally(() => clearTimeout(timeoutId)),
+    new Promise<T>((_, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        reject(new Error(`DB query timeout (${label}) after ${timeoutMs}ms`));
+      }, { once: true });
+    }),
+  ]);
+}

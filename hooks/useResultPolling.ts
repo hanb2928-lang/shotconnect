@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
-import { supabase, ensureFreshSession } from '@/lib/supabase';
+import { supabase, ensureFreshSession, withQueryTimeout } from '@/lib/supabase';
 import { createChannel, safeRemoveChannel } from '@/lib/channelManager';
 import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from '@/lib/safeTimer';
 import { stepToProgress } from '@/lib/videoGenSteps';
@@ -259,11 +259,15 @@ export function useResultPolling(
         // post-processing step on the result page and may never arrive during
         // generation, causing the 97% stall.
         if (scanId) {
-          const { data: scanData } = await supabase
-            .from('scans')
-            .select('video_url, muxed_video_url')
-            .eq('id', scanId)
-            .maybeSingle();
+          const { data: scanData } = await withQueryTimeout(
+            supabase
+              .from('scans')
+              .select('video_url, muxed_video_url')
+              .eq('id', scanId)
+              .maybeSingle(),
+            5000,
+            'forceSyncDb.scans',
+          );
           if (forceSyncAbort.signal.aborted) return null;
           const finalUrl = scanData?.video_url ?? scanData?.muxed_video_url;
           if (finalUrl) {
@@ -274,8 +278,8 @@ export function useResultPolling(
           .from('video_jobs')
           .select('status, video_url, step, progress');
         const { data, error: dbError } = isSoftTaskId && scanId
-          ? await query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
-          : await query.eq('task_id', jobId).maybeSingle();
+          ? await withQueryTimeout(query.eq('scan_id', scanId).order('created_at', { ascending: false }).limit(1).maybeSingle(), 5000, 'forceSyncDb.jobs')
+          : await withQueryTimeout(query.eq('task_id', jobId).maybeSingle(), 5000, 'forceSyncDb.jobs');
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
         if (row.status === 'SUCCESS' && row.video_url) {
@@ -295,11 +299,15 @@ export function useResultPolling(
       try {
         // ALWAYS check scans first — video_url is the render result written
         // by the server on completion. muxed_video_url is post-processing.
-        const { data: scanData } = await supabase
-          .from('scans')
-          .select('video_url, muxed_video_url')
-          .eq('id', scanId)
-          .maybeSingle();
+        const { data: scanData } = await withQueryTimeout(
+          supabase
+            .from('scans')
+            .select('video_url, muxed_video_url')
+            .eq('id', scanId)
+            .maybeSingle(),
+          5000,
+          'forceSyncByScan.scans',
+        );
         if (forceSyncAbort.signal.aborted) return null;
         if (scanData) {
           const finalUrl = scanData.video_url ?? scanData.muxed_video_url;
@@ -309,13 +317,17 @@ export function useResultPolling(
         }
 
         // Check video_jobs for progress/step info and terminal status.
-        const { data, error: dbError } = await supabase
-          .from('video_jobs')
-          .select('status, video_url, step, progress')
-          .eq('scan_id', scanId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const { data, error: dbError } = await withQueryTimeout(
+          supabase
+            .from('video_jobs')
+            .select('status, video_url, step, progress')
+            .eq('scan_id', scanId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          5000,
+          'forceSyncByScan.jobs',
+        );
         if (forceSyncAbort.signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
 

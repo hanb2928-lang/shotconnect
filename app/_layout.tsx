@@ -40,7 +40,7 @@ import { supabase, resetSessionCache } from '@/lib/supabase';
 import { armFlushWindow } from '@/lib/foregroundFlushGuard';
 import { armBridgeThrottle, withBridgeThrottle } from '@/lib/bridgeRateLimiter';
 import { installRealtimeReconnectGuard } from '@/lib/realtimeReconnectGuard';
-import { teardownAllChannels } from '@/lib/channelManager';
+import { sweepZombieSockets } from '@/lib/channelManager';
 const NetworkBanner = lazy(() =>
   import('@/components/NetworkBanner').then((m) => ({ default: m.NetworkBanner })),
 );
@@ -206,7 +206,7 @@ export default function RootLayout() {
     const unsubReconnect = installRealtimeReconnectGuard();
     const unsubChannelTeardown = registerAppStateHandler('immediate', (nextState: string) => {
       if (nextState === 'background' || nextState === 'inactive') {
-        teardownAllChannels();
+        sweepZombieSockets();
       }
     });
     const sub = AppState.addEventListener('change', (nextState: string) => {
