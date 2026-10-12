@@ -55,6 +55,7 @@ const handlers = new Set<RegisteredHandler>();
 let deferredQueue: (() => void)[] = [];
 let deferredTimer: ReturnType<typeof setTimeout> | null = null;
 let lastDispatchedState: string | null = null;
+let throttleImport: ((fn: () => void) => void) | null = null;
 
 // Suspension gate: when true, the coordinator is in the drain phase
 // between immediate handlers and deferred macrotasks. Any attempt to
@@ -82,15 +83,22 @@ function processDeferredQueue(): void {
       deferredTimer = setTimeout(processDeferredQueue, 0);
     }
   };
-  try {
-    const result = task() as unknown;
-    if (result && typeof (result as Promise<unknown>).then === 'function') {
-      (result as Promise<unknown>).then(scheduleNext, scheduleNext);
-    } else {
+  const runTask = () => {
+    try {
+      const result = task() as unknown;
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        (result as Promise<unknown>).then(scheduleNext, scheduleNext);
+      } else {
+        scheduleNext();
+      }
+    } catch {
       scheduleNext();
     }
-  } catch {
-    scheduleNext();
+  };
+  if (throttleImport) {
+    throttleImport(runTask);
+  } else {
+    runTask();
   }
 }
 
@@ -163,6 +171,10 @@ export function cancelPendingDeferred(): void {
   }
   deferredQueue = [];
   suspending = false;
+}
+
+export function setDeferredThrottle(fn: ((cb: () => void) => void) | null): void {
+  throttleImport = fn;
 }
 
 export function _resetForTesting(): void {

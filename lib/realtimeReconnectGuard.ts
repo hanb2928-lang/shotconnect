@@ -23,6 +23,7 @@ import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { onFlushComplete, isInFlushWindow } from '@/lib/foregroundFlushGuard';
+import { withBridgeThrottle } from '@/lib/bridgeRateLimiter';
 
 let installed = false;
 
@@ -81,9 +82,9 @@ export function installRealtimeReconnectGuard(): () => void {
       try { rt.connect(); } catch { /* non-fatal */ }
     };
     if (isInFlushWindow()) {
-      onFlushComplete(doReconnect);
+      onFlushComplete(() => withBridgeThrottle(doReconnect));
     } else {
-      setTimeout(doReconnect, 0);
+      withBridgeThrottle(doReconnect);
     }
   });
 

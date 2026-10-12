@@ -23,6 +23,8 @@
  *   _resetForTesting()     — test utility.
  */
 
+import { withBridgeThrottle } from '@/lib/bridgeRateLimiter';
+
 const FLUSH_WINDOW_MS = 1000;
 
 let flushWindowActive = false;
@@ -49,7 +51,7 @@ export function armFlushWindow(): void {
         return;
       }
       const cb = cbs[i++];
-      try { cb(); } catch { /* non-fatal */ }
+      withBridgeThrottle(() => { try { cb(); } catch { /* non-fatal */ } });
       if (i < cbs.length) setTimeout(runNext, STAGGER_MS);
       else flushWindowActive = false;
     };

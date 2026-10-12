@@ -35,9 +35,10 @@ import { runStorageGC, startPeriodicStorageGC, stopPeriodicStorageGC, registerAl
 import { installProactiveMemoryFlush } from '@/lib/proactiveMemoryFlush';
 import { registerDefaultFlushHandlers } from '@/lib/flushHandlers';
 import { useAppLifecycleSync } from '@/hooks/useAppLifecycleSync';
-import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { dispatchAppStateChange, cancelPendingDeferred, registerAppStateHandler, setDeferredThrottle } from '@/lib/appStateCoordinator';
 import { supabase, resetSessionCache } from '@/lib/supabase';
 import { armFlushWindow } from '@/lib/foregroundFlushGuard';
+import { armBridgeThrottle, withBridgeThrottle } from '@/lib/bridgeRateLimiter';
 import { installRealtimeReconnectGuard } from '@/lib/realtimeReconnectGuard';
 import { teardownAllChannels } from '@/lib/channelManager';
 const NetworkBanner = lazy(() =>
@@ -70,6 +71,7 @@ scheduleIdle(() => {
   startPressureMonitoring();
   registerDefaultFlushHandlers();
   installProactiveMemoryFlush();
+  setDeferredThrottle(withBridgeThrottle);
 });
 
 // GC sweeps run after the app is fully interactive. They clean up
@@ -198,6 +200,7 @@ export default function RootLayout() {
         cancelPendingDeferred();
         resetSessionCache();
         armFlushWindow();
+        armBridgeThrottle();
       }
     });
     const unsubReconnect = installRealtimeReconnectGuard();
