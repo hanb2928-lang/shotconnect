@@ -100,6 +100,7 @@ export function useResultPolling(
     const pollErrorWindow: number[] = [];
     let notFoundRetries = 0;
     const MAX_404_RETRIES = 3;
+    let pollInFlight = false;
     // Monotonic guard: track the highest progress and latest step seen
     // across both realtime and polling. Stale realtime payloads that arrive
     // after a newer poll result (common on background→foreground transition)
@@ -336,6 +337,17 @@ export function useResultPolling(
 
     const pollOnce = async () => {
       if (cancelled || settledRef.current) return;
+      if (pollInFlight) return;
+      pollInFlight = true;
+      try {
+        await pollOnceInner();
+      } finally {
+        pollInFlight = false;
+      }
+    };
+
+    const pollOnceInner = async () => {
+      if (cancelled || settledRef.current) return;
 
       // === SINGLE-SOURCE DB-SCAN POLLING (85%+) ===
       // Once rendering starts, the client polls the DB directly — no edge
@@ -442,8 +454,11 @@ export function useResultPolling(
           const status = pollData.status as string;
 
           if (status === 'SUCCESS') {
-            // Edge function reports render done. The DB poll / Realtime
-            // callback will deliver the actual video_url — just keep polling.
+            const pollVideoUrl = (pollData as { videoUrl?: string }).videoUrl;
+            if (pollVideoUrl) {
+              handleResult('SUCCESS', pollVideoUrl);
+              return;
+            }
             applyProgress(0.97, null);
           } else if (status === 'FAILED') {
             const errStr = (pollData.error as string) ?? '';
@@ -584,7 +599,8 @@ export function useResultPolling(
         }
       }
       if (!cancelled && !settledRef.current && !resumeBurstAborted) {
-        pollOnce();
+        const delayMs = hybridPoller.nextPollDelayMs();
+        pollTimer = setTimeout(pollOnce, delayMs);
       }
       resumeBurstTimer = null;
     };

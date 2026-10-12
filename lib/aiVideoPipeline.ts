@@ -750,8 +750,10 @@ function waitForVideoCompletion(
 
     // Check video_jobs table directly (used for initial check + fallback polling)
     let consecutivePollFailures = 0;
+    let dbCheckInFlight = false;
     const checkDb = async () => {
-      if (settled || !scanId) return;
+      if (settled || !scanId || dbCheckInFlight) return;
+      dbCheckInFlight = true;
       try {
         _dbg('checkDb:start');
         let query = supabase
@@ -778,16 +780,20 @@ function waitForVideoCompletion(
           report('error', 0, msg);
           finish(() => reject(new Error(msg)));
         }
+      } finally {
+        dbCheckInFlight = false;
       }
     };
 
+    let scanCheckInFlight = false;
     // Check scans for the persisted URL (webhook writes here too).
     // Prefers video_url (server writes this on generation completion) and
     // falls back to muxed_video_url (post-processing audio mux). Checking
     // video_url first prevents the 97% stall — muxed_video_url is a separate
     // post-generation step that may never arrive during generation.
     const checkScanVideoUrl = async () => {
-      if (settled || !scanId) return;
+      if (settled || !scanId || scanCheckInFlight) return;
+      scanCheckInFlight = true;
       try {
         _dbg('checkScanVideoUrl:start');
         const { data, error } = await supabase
@@ -814,6 +820,8 @@ function waitForVideoCompletion(
       } catch (err) {
         _dbg('checkScanVideoUrl:error', { err: err instanceof Error ? err.message : String(err) });
         logError(err, { component: 'aiVideoPipeline', action: 'checkScanVideoUrl' });
+      } finally {
+        scanCheckInFlight = false;
       }
     };
 
@@ -1081,9 +1089,6 @@ function waitForVideoCompletion(
       onFlushComplete(() => {
         if (settled) return;
         setupChannel();
-        scheduleNextPoll();
-        checkDb();
-        checkScanVideoUrl();
         runwayFallbackStartTimer = setTimeout(startRunwayPollFallback, RUNWAY_POLL_FALLBACK_START_MS);
         resumeBurstCount = 0;
         runResumeBurst();

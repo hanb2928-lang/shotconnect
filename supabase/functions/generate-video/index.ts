@@ -621,7 +621,7 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
           if (supabaseUrl && serviceRoleKey) {
             await markVideoJobComplete(body.scanId, fallbackJob.internalJobId ?? taskId, originalUrl);
           }
-          persistVideoInBackground(originalUrl, body.scanId, fallbackJob.internalJobId ?? taskId);
+          await persistVideoInBackground(originalUrl, body.scanId, fallbackJob.internalJobId ?? taskId);
           return new Response(
             JSON.stringify({
               mode: "poll",
@@ -630,7 +630,7 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
               videoUrl: originalUrl,
               taskId,
               provider: "runway",
-              persisted: false,
+              persisted: true,
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
@@ -700,7 +700,7 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
       if (supabaseUrl && serviceRoleKey) {
         await markVideoJobComplete(body.scanId, taskId, originalUrl);
       }
-      persistVideoInBackground(originalUrl, body.scanId, taskId);
+      await persistVideoInBackground(originalUrl, body.scanId, taskId);
       return new Response(
         JSON.stringify({
           mode: "poll",
@@ -709,7 +709,7 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
           videoUrl: originalUrl,
           taskId,
           provider: "runway",
-          persisted: false,
+          persisted: true,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -867,7 +867,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     if (supabaseUrl && serviceRoleKey) {
       await markVideoJobComplete(scanId, internalJobId, originalUrl);
     }
-    persistVideoInBackground(originalUrl, scanId, internalJobId);
+    await persistVideoInBackground(originalUrl, scanId, internalJobId);
     await sendVideoCompletePush(scanId);
     return new Response(
       JSON.stringify({
@@ -875,7 +875,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
         status: "SUCCESS",
         videoUrl: originalUrl,
         taskId,
-        persisted: false,
+        persisted: true,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
@@ -1074,11 +1074,11 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
         sendVideoCompletePush(scanId),
       ]);
     }
-    persistVideoInBackground(videoUrl, scanId, internalJobId);
+    await persistVideoInBackground(videoUrl, scanId, internalJobId);
 
     console.log("[generate-video] Webhook: video persisted for scan", scanId);
     return new Response(
-      JSON.stringify({ mode: "webhook", status: "SUCCESS", scanId, persisted: false }),
+      JSON.stringify({ mode: "webhook", status: "SUCCESS", scanId, persisted: true }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
@@ -2526,8 +2526,7 @@ async function updateScanWithVideo(scanId: string, videoUrl: string): Promise<vo
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    // Guard: don't overwrite an existing video_url — the first completion wins.
-    await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${encodeURIComponent(scanId)}&video_url=is.null`, {
+    await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${encodeURIComponent(scanId)}`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey,
