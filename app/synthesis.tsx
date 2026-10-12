@@ -264,6 +264,7 @@ function SynthesisScreenInner() {
   const scanIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const isBackgroundRef = useRef(false);
+  const [suppressProgressRender, setSuppressProgressRender] = useState(false);
   const preUploadCacheRef = useRef<Map<string, string>>(new Map());
   const preUploadInFlightRef = useRef<Set<string>>(new Set());
   const { saveDraftState, loadDraft, clearDraftId } = useDraftAutoSave('synthesis');
@@ -318,6 +319,13 @@ function SynthesisScreenInner() {
   useEffect(() => {
     const unsub = registerAppStateHandler('immediate', (state) => {
       isBackgroundRef.current = state === 'background';
+      if (state === 'active') {
+        // Suppress progress-driven re-renders for the first ~1s after
+        // foreground return so the viewport resize layout pass doesn't
+        // collide with VideoGenStepTracker re-renders (layout thrashing).
+        setSuppressProgressRender(true);
+        setTimeout(() => setSuppressProgressRender(false), 1200);
+      }
     });
     return unsub;
   }, []);
@@ -807,7 +815,7 @@ function SynthesisScreenInner() {
         />
         </View>
 
-        {isGenerating && videoProgress && (
+        {isGenerating && videoProgress && !suppressProgressRender && (
           <VideoGenStepTracker progress={videoProgress} variant="inline" />
         )}
 
