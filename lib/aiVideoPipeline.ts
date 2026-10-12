@@ -2,6 +2,7 @@ import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 import { isInFlushWindow, onFlushComplete } from '@/lib/foregroundFlushGuard';
 import { supabase, ensureFreshSession } from './supabase';
 import { createChannel, safeRemoveChannel } from './channelManager';
+import { safeSetTimeout, type SafeTimerSet, createSafeTimerSet, clearAllSafeTimers } from './safeTimer';
 import { monotonicStart, monotonicElapsedSec, monotonicElapsedMs } from './timeUtils';
 import type { ProductVisionResult } from './productVision';
 import { isOnline } from '@/hooks/useNetworkStatus';
@@ -661,13 +662,14 @@ function waitForVideoCompletion(
     let isBackgrounded = false;
     let appSub: (() => void) | null = null;
     let appSubImmediate: (() => void) | null = null;
+    const pendingRemovals: SafeTimerSet = createSafeTimerSet();
 
 
     const cleanup = () => {
       if (channel) {
         const ch = channel;
         channel = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -681,6 +683,7 @@ function waitForVideoCompletion(
       if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
       if (runwayFallbackStartTimer) { clearTimeout(runwayFallbackStartTimer); runwayFallbackStartTimer = null; }
       if (resumeBurstTimer) { clearTimeout(resumeBurstTimer); resumeBurstTimer = null; }
+      clearAllSafeTimers(pendingRemovals);
       appSub?.();
       appSubImmediate?.();
     };
@@ -835,7 +838,7 @@ function waitForVideoCompletion(
       if (channel) {
         const ch = channel;
         channel = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       channel = createChannel(`video-job:${scanId}:${submitData.taskId}`)
         .on(
@@ -890,7 +893,7 @@ function waitForVideoCompletion(
         if (channel) {
           const ch = channel;
           channel = null;
-          setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+          safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
         }
         setupChannel();
       }, delayMs);
@@ -1057,7 +1060,7 @@ function waitForVideoCompletion(
       const channelToRemove = channel;
       channel = null;
       if (channelToRemove) {
-        setTimeout(() => {
+        safeSetTimeout(pendingRemovals, () => {
           try { safeRemoveChannel(channelToRemove); } catch { /* non-fatal */ }
         }, 0);
       }
@@ -1326,6 +1329,7 @@ export function subscribeVideoJob(
   let pollBackoffAttempt = 0;
   let channel: ReturnType<typeof supabase.channel> | null = null;
   let consecutivePollFailures = 0;
+  const pendingRemovals: SafeTimerSet = createSafeTimerSet();
 
   const isSoftTaskId = taskId.startsWith('soft-') || taskId.startsWith('hd-soft-');
   const pollStartTime = Date.now();
@@ -1455,13 +1459,14 @@ export function subscribeVideoJob(
     if (channel) {
       const ch = channel;
       channel = null;
-      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+      safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (runwayPollTimer) clearTimeout(runwayPollTimer);
     if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
     if (overallTimeoutTimer) clearTimeout(overallTimeoutTimer);
+    clearAllSafeTimers(pendingRemovals);
   };
 
   const scheduleReconnect = () => {
@@ -1474,7 +1479,7 @@ export function subscribeVideoJob(
       if (channel) {
         const ch = channel;
         channel = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       setupChannel();
     }, delayMs);
@@ -1486,7 +1491,7 @@ export function subscribeVideoJob(
     if (channel) {
       const ch = channel;
       channel = null;
-      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+      safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     channel = createChannel(`video-job:${scanId}:${taskId}`)
       .on(
@@ -1684,7 +1689,7 @@ export function subscribeVideoJob(
       if (channel) {
         const ch = channel;
         channel = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       // Reset the Runway fallback flag so it can re-fire on resume.
       // Without this, the Runway direct-poll backup is permanently
@@ -1886,6 +1891,7 @@ export function subscribeHdUpgrade(
   let pollBackoffAttempt = 0;
   let channel: ReturnType<typeof supabase.channel> | null = null;
   let consecutivePollFailures = 0;
+  const pendingRemovals: SafeTimerSet = createSafeTimerSet();
 
   const checkAndNotify = async () => {
     if (settled) return;
@@ -1958,12 +1964,13 @@ export function subscribeHdUpgrade(
     if (channel) {
       const ch = channel;
       channel = null;
-      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+      safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (resumeBurstTimer) clearTimeout(resumeBurstTimer);
     if (hdOverallTimeoutTimer) clearTimeout(hdOverallTimeoutTimer);
+    clearAllSafeTimers(pendingRemovals);
   };
 
   const scheduleReconnect = () => {
@@ -1976,7 +1983,7 @@ export function subscribeHdUpgrade(
       if (channel) {
         const ch = channel;
         channel = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
       setupChannel();
     }, delayMs);
@@ -1987,7 +1994,7 @@ export function subscribeHdUpgrade(
     if (channel) {
       const ch = channel;
       channel = null;
-      setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+      safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
     }
     channel = createChannel(`hd-upgrade:${scanId}:${draftJobId}`)
       .on(
@@ -2078,7 +2085,7 @@ export function subscribeHdUpgrade(
       if (channel) {
         const ch = channel;
         channel = null;
-        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
     },
     resume: () => {

@@ -49,6 +49,7 @@ import type { DraftEntry } from '@/lib/draftStorage';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
 import { useVideoGen } from '@/hooks/useVideoGen';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
 
 const MAX_NATIVE_IMAGE_BYTES = 2_000_000;
 const UPLOAD_MAX_RETRIES = 3;
@@ -262,6 +263,7 @@ function SynthesisScreenInner() {
   const [localError, setLocalError] = useState<string | null>(null);
   const scanIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
+  const isBackgroundRef = useRef(false);
   const preUploadCacheRef = useRef<Map<string, string>>(new Map());
   const preUploadInFlightRef = useRef<Set<string>>(new Set());
   const { saveDraftState, loadDraft, clearDraftId } = useDraftAutoSave('synthesis');
@@ -306,6 +308,18 @@ function SynthesisScreenInner() {
 
   useEffect(() => {
     return () => { mountedRef.current = false; };
+  }, []);
+
+  // Track background state to prevent the auto-save effect from firing
+  // async state writes while the native bridge is suspended. On foreground
+  // return, a stale draft save can race with React's state reconciliation
+  // and block the UI thread — skipping saves while backgrounded eliminates
+  // this collision.
+  useEffect(() => {
+    const unsub = registerAppStateHandler('immediate', (state) => {
+      isBackgroundRef.current = state === 'background';
+    });
+    return unsub;
   }, []);
 
   // Warm-up the generate-video edge function on screen mount to avoid cold-start delay.
@@ -464,8 +478,11 @@ function SynthesisScreenInner() {
     };
   }, []);
 
-  // Auto-save draft when images or options change
+  // Auto-save draft when images or options change — skip while backgrounded
+  // to prevent async state writes from colliding with React's reconciliation
+  // on foreground return (the "frozen UI on resume" bug).
   useEffect(() => {
+    if (isBackgroundRef.current) return;
     if (productImages.length > 0) {
       saveDraftState({
         imageUris: productImages.map((img) => img.uri),
