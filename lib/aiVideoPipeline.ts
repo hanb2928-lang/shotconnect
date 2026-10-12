@@ -961,19 +961,28 @@ function waitForVideoCompletion(
           }
           const resp = data as { status?: string; videoUrl?: string; error?: string };
           _dbg('runwayPoll:resp', { status: resp.status, hasVideoUrl: !!resp.videoUrl });
-          if (resp.status === 'SUCCESS' && resp.videoUrl) {
-            _dbg('runwayPoll:SUCCESS');
-            report('completed', 1.0, 'AI 비디오 생성 완료');
-            finish(() => resolve({
-              videoUrl: resp.videoUrl!,
-              jobId: submitData.taskId,
-              motionPrompt: submitData.motionPrompt,
-              durationSec: submitData.durationSec,
-              aspectRatio: submitData.aspectRatio,
-              variationSeed: submitData.variationSeed,
-              persisted: true,
-              provider: 'runway',
-            }));
+          if (resp.status === 'SUCCESS') {
+            if (resp.videoUrl) {
+              _dbg('runwayPoll:SUCCESS');
+              report('completed', 1.0, 'AI 비디오 생성 완료');
+              finish(() => resolve({
+                videoUrl: resp.videoUrl!,
+                jobId: submitData.taskId,
+                motionPrompt: submitData.motionPrompt,
+                durationSec: submitData.durationSec,
+                aspectRatio: submitData.aspectRatio,
+                variationSeed: submitData.variationSeed,
+                persisted: true,
+                provider: 'runway',
+              }));
+              return;
+            }
+            // SUCCESS without URL — immediately DB force-sync to grab it
+            // instead of polling again and risking a 240s timeout.
+            _dbg('runwayPoll:SUCCESS-no-url, forcing DB sync');
+            await Promise.all([checkDb(), checkScanVideoUrl()]);
+            if (settled) return;
+            scheduleNext();
             return;
           }
           if (resp.status === 'FAILED') {
@@ -1577,12 +1586,18 @@ export function subscribeVideoJob(
         } else {
           const resp = data as { status?: string; videoUrl?: string; error?: string };
           _dbg('runwayPoll:resp', { status: resp.status, hasVideoUrl: !!resp.videoUrl });
-          if (resp.status === 'SUCCESS' && resp.videoUrl) {
-            _dbg('runwayPoll:SUCCESS');
-            settled = true;
-            cleanup();
-            callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: resp.videoUrl });
-            return;
+          if (resp.status === 'SUCCESS') {
+            if (resp.videoUrl) {
+              _dbg('runwayPoll:SUCCESS');
+              settled = true;
+              cleanup();
+              callback({ status: 'SUCCESS', step: 'completed', progress: 1, videoUrl: resp.videoUrl });
+              return;
+            }
+            // SUCCESS without URL — DB force-sync to grab it
+            _dbg('runwayPoll:SUCCESS-no-url, DB sync');
+            await checkAndNotify();
+            if (settled) return;
           }
           if (resp.status === 'FAILED') {
             settled = true;

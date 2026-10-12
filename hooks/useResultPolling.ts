@@ -459,7 +459,23 @@ export function useResultPolling(
               handleResult('SUCCESS', pollVideoUrl);
               return;
             }
-            applyProgress(0.97, null);
+            // Server says SUCCESS but didn't include the URL. Immediately
+            // force-sync the DB instead of pinning to 97% and waiting for
+            // a Realtime callback that may never arrive on flaky networks.
+            const dbSync = await forceSyncByScan();
+            if (cancelled || settledRef.current) return;
+            if (dbSync?.videoUrl) {
+              handleResult('SUCCESS', dbSync.videoUrl);
+              return;
+            }
+            const dbSyncFallback = await forceSyncDb();
+            if (cancelled || settledRef.current) return;
+            if (dbSyncFallback?.videoUrl) {
+              handleResult('SUCCESS', dbSyncFallback.videoUrl);
+              return;
+            }
+            settle('timeout', '서버가 영상 생성 완료를 보고했지만 주소를 가져오지 못했습니다. 다시 시도해주세요.');
+            return;
           } else if (status === 'FAILED') {
             const errStr = (pollData.error as string) ?? '';
             if (errStr.includes('404') && notFoundRetries < MAX_404_RETRIES) {
