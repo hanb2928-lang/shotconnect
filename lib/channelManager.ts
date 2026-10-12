@@ -21,8 +21,20 @@ import { supabase } from '@/lib/supabase';
 
 type RealtimeChannel = ReturnType<typeof supabase.channel>;
 
+type RealtimeClientInternals = {
+  getChannels?: () => RealtimeChannel[];
+};
+
 const tearingDown = new Set<string>();
 const activeChannels = new Map<string, RealtimeChannel>();
+
+function detachFromClient(channel: RealtimeChannel): void {
+  const client = supabase as unknown as RealtimeClientInternals;
+  const channels = client.getChannels?.();
+  if (!channels) return;
+  const index = channels.indexOf(channel);
+  if (index >= 0) channels.splice(index, 1);
+}
 
 /**
  * Remove a channel and mark its name as "tearing down" until the next
@@ -37,6 +49,7 @@ export function safeRemoveChannel(channel: RealtimeChannel | null): void {
   } catch {
     // Channel may already be removed — non-fatal.
   }
+  detachFromClient(channel);
   if (name) {
     activeChannels.delete(name);
     tearingDown.add(name);
@@ -69,6 +82,18 @@ export function createChannel(name: string, opts?: Parameters<typeof supabase.ch
     safeRemoveChannel(existing);
   }
 
+  const client = supabase as unknown as RealtimeClientInternals;
+  const topic = `realtime:${name}`;
+  const orphaned = client.getChannels?.().filter((candidate) => candidate.topic === topic) ?? [];
+  for (const channel of orphaned) {
+    try {
+      supabase.removeChannel(channel);
+    } catch {
+      // Channel may already be removed — non-fatal.
+    }
+    detachFromClient(channel);
+  }
+
   const channel = supabase.channel(name, opts);
   activeChannels.set(name, channel);
   return channel;
@@ -98,6 +123,7 @@ export function teardownAllChannels(): void {
     activeChannels.delete(name);
     tearingDown.add(name);
     const channelRef = ch;
+    detachFromClient(channelRef);
     setTimeout(() => {
       try { supabase.removeChannel(channelRef); } catch { /* non-fatal */ }
       tearingDown.delete(name);

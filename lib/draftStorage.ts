@@ -18,6 +18,7 @@ const DRAFT_PREFIX = 'draft:';
 const DRAFT_INDEX_KEY = 'draft:index';
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MAX_DRAFTS = 20;
+let draftWriteQueue: Promise<void> = Promise.resolve();
 
 export type DraftSource = 'camera' | 'synthesis' | 'fitting';
 export type DraftStatus = 'capturing' | 'editing' | 'generating' | 'completed' | 'failed';
@@ -81,26 +82,31 @@ function draftKey(id: string): string {
  * Saves or updates a draft. Automatically manages the draft index
  * and prunes entries beyond MAX_DRAFTS.
  */
-export async function saveDraft(entry: DraftEntry): Promise<void> {
+export function saveDraft(entry: DraftEntry): Promise<void> {
   const now = Date.now();
   const updated: DraftEntry = {
     ...entry,
     updatedAt: now,
   };
 
-  await setItem(draftKey(entry.id), JSON.stringify(updated));
+  const write = draftWriteQueue.then(async () => {
+    await setItem(draftKey(entry.id), JSON.stringify(updated));
 
-  const index = await loadDraftIndex();
-  if (!index.ids.includes(entry.id)) {
-    index.ids.unshift(entry.id);
-    if (index.ids.length > MAX_DRAFTS) {
-      const removed = index.ids.splice(MAX_DRAFTS);
-      for (const id of removed) {
-        await removeItem(draftKey(id));
+    const index = await loadDraftIndex();
+    if (!index.ids.includes(entry.id)) {
+      index.ids.unshift(entry.id);
+      if (index.ids.length > MAX_DRAFTS) {
+        const removed = index.ids.splice(MAX_DRAFTS);
+        for (const id of removed) {
+          await removeItem(draftKey(id));
+        }
       }
+      await saveDraftIndex(index);
     }
-    await saveDraftIndex(index);
-  }
+  });
+
+  draftWriteQueue = write.catch(() => {});
+  return write;
 }
 
 /**

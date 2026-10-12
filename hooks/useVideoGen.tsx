@@ -101,6 +101,25 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const generationTokenRef = useRef(0);
   const mountedRef = useRef(true);
   const terminalLockRef = useRef(false);
+  const pendingProgressRef = useRef<VideoGenProgress | null>(null);
+  const progressFrameRef = useRef<number | ReturnType<typeof setTimeout> | null>(null);
+
+  const flushQueuedProgress = useCallback(() => {
+    progressFrameRef.current = null;
+    const next = pendingProgressRef.current;
+    pendingProgressRef.current = null;
+    if (next && mountedRef.current) setVideoProgress(next);
+  }, []);
+
+  const queueProgressUpdate = useCallback((progress: VideoGenProgress) => {
+    pendingProgressRef.current = progress;
+    if (progressFrameRef.current !== null) return;
+    if (typeof requestAnimationFrame === 'function') {
+      progressFrameRef.current = requestAnimationFrame(flushQueuedProgress);
+    } else {
+      progressFrameRef.current = setTimeout(flushQueuedProgress, 16);
+    }
+  }, [flushQueuedProgress]);
 
   // Single guarded entry point for completion transitions. Prevents
   // double-mutate when concurrent async paths (Realtime, polling, foreground
@@ -179,6 +198,15 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       if (hookTimeoutRef.current) { clearTimeout(hookTimeoutRef.current); hookTimeoutRef.current = null; }
       if (completionFallbackRef.current) { clearTimeout(completionFallbackRef.current); completionFallbackRef.current = null; }
       if (stepStallTimerRef.current) { clearInterval(stepStallTimerRef.current); stepStallTimerRef.current = null; }
+      if (progressFrameRef.current !== null) {
+        if (typeof progressFrameRef.current === 'number' && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(progressFrameRef.current);
+        } else {
+          clearTimeout(progressFrameRef.current);
+        }
+        progressFrameRef.current = null;
+      }
+      pendingProgressRef.current = null;
     };
   }, []);
 
@@ -888,7 +916,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         mainImageUrl: params.mainUrl,
         signal: abortRef.current?.signal,
       }, (p) => {
-        setVideoProgress(p);
+        queueProgressUpdate(p);
       });
 
       clearInterval(nudgeTimer);
@@ -953,7 +981,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
       generateLockRef.current = false;
     }
-  }, [isGenerating]);
+  }, [isGenerating, queueProgressUpdate]);
 
   const clearGeneration = useCallback(() => {
     generationTokenRef.current++;
