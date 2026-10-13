@@ -1115,44 +1115,23 @@ function ResultScreenInner() {
         return;
       }
 
-      // Job submitted — switch to drafting phase. Keep the progress UI alive
-      // so the user sees continuous feedback while the backend renders.
-      // The user can still navigate away; the realtime subscription and
-      // background polling will deliver the result on return.
+      // Fire & Forget: job is safely queued on the server. Navigate the
+      // user to the videos tab immediately — the Realtime subscription
+      // and background polling will deliver the result when they return.
       setVideoStage('drafting');
-      setVideoGenProgress({ phase: 'generating', progress: 0.08, message: 'AI가 영상을 렌더링하고 있어요', elapsedSec: 0 });
-      setBgJobNotice('영상이 접수되었습니다! 완료 시 알림을 보내드릴게요. 다른 메뉴를 이용하셔도 됩니다.');
+      setBgJobNotice('영상이 안전하게 작업 큐에 등록되었습니다! 완료되면 알림으로 알려드릴게요. 이 화면을 떠나셔도 됩니다.');
+      setIsGeneratingVideo(false);
+      setVideoGenProgress(null);
 
-      // Background progress simulator: incrementally advance progress while
-      // the backend job runs, so the UI never freezes in a blank state.
-      const draftStartTime = Date.now();
-      const draftProgressTimer = setInterval(() => {
-        if (!mountedRef.current || videoJobSettledRef.current) return;
-        const elapsed = Math.round((Date.now() - draftStartTime) / 1000);
-        // Asymptotic progress curve — approaches 0.95 so the user sees near-complete
-        // progress while waiting for the server-side webhook/poll to deliver the result.
-        // Was 0.97 which caused the visible "stuck at 97%" symptom. 0.95 gives the
-        // creep timer room to advance visually while the server delivers the result.
-        const simulated = Math.min(0.08 + 0.90 * (1 - Math.exp(-elapsed / 30)), 0.98);
-        setVideoGenProgress((prev) => {
-          if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
-          // Never regress progress — the server/poll/Realtime may have set it higher
-          const effectiveProgress = Math.max(prev.progress, simulated);
-          // Only use the generic message if the server hasn't set a step-specific one
-          const hasServerStep = !!prev.serverStep;
-          const message = hasServerStep
-            ? prev.message
-            : `AI가 영상을 렌더링하고 있어요${elapsed > 5 ? ` (${Math.round(effectiveProgress * 100)}%)` : ''}`;
-          return {
-            ...prev,
-            phase: 'generating',
-            progress: effectiveProgress,
-            message,
-            elapsedSec: elapsed,
-          };
-        });
-      }, 2000);
-      draftProgressTimerRef.current = draftProgressTimer;
+      // Navigate to videos tab after a brief toast
+      setTimeout(() => {
+        if (mountedRef.current) {
+          router.push('/(tabs)/videos');
+        }
+      }, 1500);
+
+      // Progress simulator is no longer needed — the user is navigated away
+      // and the videos tab shows the job status via its own indicator.
 
       // Optimal push permission timing: ask after the user submits their first video generation.
       // This is the moment they have the highest intent to know when the result is ready.
@@ -5305,7 +5284,7 @@ function ResultScreenInner() {
             </View>
             <Text style={styles.pushPromptTitle}>작업 완료 시 알림을 보내드릴까요?</Text>
             <Text style={styles.pushPromptDesc}>
-              AI 영상 생성은 2~4분 소요됩니다. 완료되면 브라우저 알림으로 즉시 알려드리고, 결과 페이지로 바로 이동할 수 있습니다.
+              AI 영상 생성은 1~3분 소요됩니다. 화면 앞에서 기다리실 필요 없이, 완료되면 알림으로 즉시 알려드립니다.
             </Text>
             <View style={styles.pushPromptBtnRow}>
               <TouchableOpacity

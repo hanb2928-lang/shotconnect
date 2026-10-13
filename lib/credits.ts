@@ -33,7 +33,9 @@ export type CreditFeature =
   | 'trend_match'
   | 'persona_simulator'
   | 'localize'
-  | 'shortform_guide';
+  | 'shortform_guide'
+  | 'video_draft'
+  | 'video_hd';
 
 export const CREDIT_COSTS: Record<CreditFeature, number> = {
   photo_analysis: 1,
@@ -51,6 +53,8 @@ export const CREDIT_COSTS: Record<CreditFeature, number> = {
   persona_simulator: 1,
   localize: 1,
   shortform_guide: 1,
+  video_draft: 3,
+  video_hd: 10,
 };
 
 export const CREDIT_PACKAGES = [

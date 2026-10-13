@@ -13,6 +13,7 @@ import { theme } from '@/lib/theme';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
 import { ArchiveSection } from '@/components/ArchiveSection';
+import { BackgroundJobIndicator } from '@/components/BackgroundJobIndicator';
 
 function VideosScreenInner() {
   const router = useRouter();
@@ -31,6 +32,7 @@ function VideosScreenInner() {
         </View>
       </View>
       <View style={{ flex: 1, paddingBottom: tabBarHeight }}>
+        <BackgroundJobIndicator />
         <ArchiveSection embedded />
       </View>
     </View>
