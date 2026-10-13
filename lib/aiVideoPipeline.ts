@@ -318,6 +318,15 @@ async function invokeWithNetworkRetry(
 }
 
 
+const DRAFT_PROGRESS_K = 35;
+const FULL_PROGRESS_K = 120;
+
+function computeTimeProgress(elapsedSec: number, isDraft: boolean): number {
+  const k = isDraft ? DRAFT_PROGRESS_K : FULL_PROGRESS_K;
+  const eased = 1 - Math.exp(-elapsedSec / k);
+  return Math.min(0.15 + eased * 0.84, 0.99);
+}
+
 export async function generateAiVideo(
   prompt: string,
   options: GenerateAiVideoOptions,
@@ -526,7 +535,7 @@ export async function generateAiVideo(
   // Runway's webhook writes the result to video_jobs — we subscribe to that DB
   // change instead of polling the Runway API in a tight loop. A low-frequency
   // fallback poll guards against missed realtime events.
-  const result = await waitForVideoCompletion(submitData, options.scanId, startTime, report, options.signal);
+  const result = await waitForVideoCompletion(submitData, options.scanId, startTime, report, options.signal, isDraft);
 
   // Cache miss path: now that rendering is complete, archive the result
   // into ai_analysis_cache so future requests for the same image+tone
@@ -649,6 +658,7 @@ function waitForVideoCompletion(
   startTime: number,
   report: (phase: VideoGenPhase, progress: number, message: string, serverStep?: string | null) => void,
   signal?: AbortSignal,
+  isDraft: boolean = false,
 ): Promise<VideoGenResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -958,7 +968,7 @@ function waitForVideoCompletion(
         await Promise.all([checkDb(), checkScanVideoUrl()]);
         if (!settled) {
           const elapsedSec = monotonicElapsedSec(startTime);
-          const timeProgress = Math.min(0.15 + (elapsedSec / 300) * 0.82, 0.99);
+          const timeProgress = computeTimeProgress(elapsedSec, isDraft);
           const healthHint = channelHealth === ChannelHealth.HEALTHY
             ? ''
             : ' (실시간 연결 불안정 — 폴링으로 대체 중)';
@@ -1388,6 +1398,7 @@ export function subscribeVideoJob(
   scanId: string,
   taskId: string,
   callback: VideoJobCallback,
+  isDraft: boolean = false,
 ): () => void {
   let settled = false;
   let isPaused = false;
@@ -1495,7 +1506,7 @@ export function subscribeVideoJob(
       // time-based creep, so the UI never freezes at a stale percentage.
       const stepProgress = stepToProgress(row.step);
       const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-      const timeProgress = Math.min(0.15 + (elapsedSec / 300) * 0.82, 0.99);
+      const timeProgress = computeTimeProgress(elapsedSec, isDraft);
       const effectiveProgress = stepProgress != null
         ? Math.max(stepProgress, timeProgress)
         : timeProgress;
@@ -1600,7 +1611,7 @@ export function subscribeVideoJob(
             } else {
               const stepProgress = stepToProgress(row.step);
               const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-              const timeProgress = Math.min(0.15 + (elapsedSec / 300) * 0.82, 0.99);
+              const timeProgress = computeTimeProgress(elapsedSec, isDraft);
               const effectiveProgress = stepProgress != null
                 ? Math.max(stepProgress, timeProgress)
                 : timeProgress;

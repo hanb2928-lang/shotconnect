@@ -1294,7 +1294,7 @@ function ResultScreenInner() {
             setVideoGenProgress(null);
           }
         }
-      });
+      }, true);
     } catch (err) {
       if (mountedRef.current) {
         const msg = err instanceof Error ? err.message : 'AI 영상 생성 요청에 실패했습니다.';
