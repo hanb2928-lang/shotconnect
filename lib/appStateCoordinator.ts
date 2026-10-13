@@ -132,10 +132,15 @@ export function dispatchAppStateChange(nextState: string): void {
   // Phase 2: collect deferred handlers. The suspension gate is set
   // before the microtask drain so that abort-triggered rejection
   // handlers that try to re-dispatch are silently dropped.
-  deferredQueue = [];
+  // Preserve any deferred tasks from the previous dispatch that haven't
+  // fired yet — a rapid inactive→background→active sequence on iOS can
+  // clobber the queue before background cleanup tasks run. Merge new
+  // tasks after the remaining old ones so cleanup completes before
+  // foreground resume work begins.
+  const newDeferred: (() => void)[] = [];
   for (const entry of handlers) {
     if (entry.phase === 'deferred') {
-      deferredQueue.push(() => {
+      newDeferred.push(() => {
         try {
           return entry.fn(nextState);
         } catch {
@@ -143,6 +148,16 @@ export function dispatchAppStateChange(nextState: string): void {
         }
       });
     }
+  }
+
+  // If switching to 'active', drain any pending background cleanup
+  // first, then append foreground resume tasks. If switching to
+  // 'background', the old queue is likely foreground work that's now
+  // irrelevant — replace it.
+  if (nextState === 'active' && deferredQueue.length > 0) {
+    deferredQueue = [...deferredQueue, ...newDeferred];
+  } else {
+    deferredQueue = newDeferred;
   }
 
   if (deferredTimer !== null) {

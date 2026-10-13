@@ -686,6 +686,10 @@ export function useResultPolling(
         onFlushComplete(() => {
           if (cancelled || settledRef.current) return;
           if (!realtimeChannel) {
+            // Clear any pending channel removals from the last background
+            // transition that may not have fired (OS suspended before the
+            // setTimeout(0) ran). This prevents orphaned WebSocket connections.
+            clearAllSafeTimers(pendingRemovals);
             createRealtimeChannel().then((ch) => {
               if (cancelled || settledRef.current) { safeRemoveChannel(ch); return; }
               realtimeChannel = ch;

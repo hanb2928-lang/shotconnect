@@ -235,17 +235,6 @@ export default function RootLayout() {
       if (nextState === 'background') {
         // pauseAllTicks is pure JS (flag flips) — safe in immediate phase.
         pauseAllTicks();
-        // sweepZombieSockets calls removeChannel + socket.disconnect,
-        // which are WebSocket bridge calls. On Android, the JS thread
-        // suspends faster than iOS — calling these synchronously in the
-        // immediate phase blocks the JS thread waiting for bridge
-        // responses that will never arrive, causing an ANR → watchdog
-        // SIGKILL. Defer to a setTimeout(0) macrotask: if the OS
-        // suspends before it fires, the socket stays alive but the
-        // reconnect guard handles it cleanly on foreground return.
-        setTimeout(() => {
-          try { sweepZombieSockets(); } catch { /* non-fatal */ }
-        }, 0);
       }
     });
     const unsubTickResume = registerAppStateHandler('deferred', (nextState: string) => {
@@ -256,6 +245,14 @@ export default function RootLayout() {
         // the staggered onFlushComplete callbacks, re-saturating the native
         // bridge and causing the reconnection stampede.
         onFlushComplete(() => resumeAllTicks());
+      } else if (nextState === 'background') {
+        // sweepZombieSockets calls removeChannel + socket.disconnect,
+        // which are WebSocket bridge calls. Run them in the deferred
+        // phase so they go through the coordinator's throttle and don't
+        // fire during the flush window on the next foreground return.
+        // The raw setTimeout(0) previously used was NOT cancelled by
+        // cancelPendingDeferred() and fired during the flush window.
+        try { sweepZombieSockets(); } catch { /* non-fatal */ }
       }
     });
     const sub = AppState.addEventListener('change', (nextState: string) => {

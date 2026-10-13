@@ -138,6 +138,10 @@ export function pauseAllTicks(): void {
   for (const r of registrations) {
     r.active = false;
   }
+  if (globalTickTimer) {
+    clearInterval(globalTickTimer);
+    globalTickTimer = null;
+  }
 }
 
 /**
@@ -150,6 +154,8 @@ export function resumeAllTicks(): void {
     r.active = true;
     r.lastFired = resumeAt - r.intervalMs + index * 250;
   });
+  // Re-create the global timer if pauseAllTicks cleared it.
+  ensureTimer();
 }
 
 /**

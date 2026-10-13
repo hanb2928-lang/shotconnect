@@ -10,6 +10,8 @@
  */
 
 import { sweepTempFiles } from '@/lib/tempFileManager';
+import { registerAppStateHandler } from '@/lib/appStateCoordinator';
+import { Platform } from 'react-native';
 
 interface Disposable {
   revoke?: () => void;
@@ -19,8 +21,41 @@ interface Disposable {
 
 const pendingDisposables: Disposable[] = [];
 
+let flushRegistered = false;
+function registerBackgroundFlush(): void {
+  if (flushRegistered) return;
+  flushRegistered = true;
+  if (Platform.OS === 'web') return;
+  // Register an immediate AppState handler to release disposables on
+  // background. Without this, Blob URLs and GL contexts from failed
+  // synthesis runs accumulate indefinitely in the JS heap — the
+  // primary cause of OOM kills after repeated background transitions.
+  registerAppStateHandler('immediate', (nextState: string) => {
+    if (nextState === 'background' || nextState === 'inactive') {
+      while (pendingDisposables.length > 0) {
+        const d = pendingDisposables.pop()!;
+        try { d.revoke?.(); } catch {}
+        try { d.close?.(); } catch {}
+        try { d.disconnect?.(); } catch {}
+      }
+    }
+  });
+}
+registerBackgroundFlush();
+
 export function registerDisposable(d: Disposable): void {
   pendingDisposables.push(d);
+  // Safety cap: if disposables accumulate beyond 50 (e.g. synthesis
+  // failed without calling flushPostSynthesisMemory), release the
+  // oldest ones to prevent unbounded memory growth.
+  if (pendingDisposables.length > 50) {
+    const stale = pendingDisposables.splice(0, pendingDisposables.length - 50);
+    for (const d of stale) {
+      try { d.revoke?.(); } catch {}
+      try { d.close?.(); } catch {}
+      try { d.disconnect?.(); } catch {}
+    }
+  }
 }
 
 export function releaseDisposable(d: Disposable): void {

@@ -29,6 +29,7 @@ export function useVideoJobRecovery() {
   const mountedRef = useRef(true);
   const dismissedJobIdRef = useRef<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<{ aborted: boolean } | null>(null);
 
   const safeSetInfo = useCallback((updater: VideoJobRecoveryInfo | ((prev: VideoJobRecoveryInfo) => VideoJobRecoveryInfo)) => {
     if (mountedRef.current) setInfo(updater);
@@ -42,12 +43,14 @@ export function useVideoJobRecovery() {
       pollTimerRef.current = null;
     }
     checkingRef.current = true;
+    const myAbort = { aborted: false };
+    abortRef.current = myAbort;
 
     safeSetInfo({ state: 'checking', jobId, step: null, videoUrl: null, errorMsg: null });
 
     try {
       await ensureFreshSession();
-      if (dismissedJobIdRef.current === jobId) return;
+      if (myAbort.aborted || dismissedJobIdRef.current === jobId) return;
       const isSoft = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
 
       // For soft-fallback IDs, no DB row has that task_id — look up by
@@ -69,6 +72,7 @@ export function useVideoJobRecovery() {
           5000,
           'videoJobRecovery.scans',
         );
+        if (myAbort.aborted) return;
         const scanFinalUrl = scanData?.video_url ?? scanData?.muxed_video_url;
         if (scanFinalUrl) {
           clearActiveVideoJob();
@@ -100,7 +104,7 @@ export function useVideoJobRecovery() {
       const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
       if (timeoutId) clearTimeout(timeoutId);
 
-      if (dismissedJobIdRef.current === jobId) return;
+      if (myAbort.aborted || dismissedJobIdRef.current === jobId) return;
 
       if (error || !data) {
         clearActiveVideoJob();
@@ -136,6 +140,7 @@ export function useVideoJobRecovery() {
           videoUrl: null,
           errorMsg: null,
         });
+        if (myAbort.aborted) return;
         pollTimerRef.current = setTimeout(() => {
           pollTimerRef.current = null;
           checkJob(jobId).catch(() => {}).finally(() => { /* release ref */ });
@@ -193,6 +198,10 @@ export function useVideoJobRecovery() {
           pollTimerRef.current = null;
         }
         checkingRef.current = false;
+        // Abort any in-flight checkJob so its async continuations stop
+        // scheduling new poll timers after the background pause.
+        if (abortRef.current) abortRef.current.aborted = true;
+        abortRef.current = null;
       }
     });
     const unsubResume = registerAppStateHandler('deferred', (nextState) => {

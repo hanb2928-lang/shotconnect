@@ -41,9 +41,16 @@ function flushQueue(): void {
   }
   const pending = queue;
   queue = [];
-  for (const cb of pending) {
+  let i = 0;
+  const drainNext = () => {
+    if (i >= pending.length) return;
+    const cb = pending[i++];
     try { cb(); } catch { /* non-fatal */ }
-  }
+    if (i < pending.length) {
+      setTimeout(drainNext, MIN_GAP_MS);
+    }
+  };
+  drainNext();
 }
 
 function scheduleDrain(): void {

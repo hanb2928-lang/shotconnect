@@ -27,6 +27,7 @@ import { withBridgeThrottle } from '@/lib/bridgeRateLimiter';
 
 let installed = false;
 let socketDisconnected = false;
+let lastDispatchedStateWasBg = false;
 
 /**
  * Access the underlying RealtimeClient. The Supabase JS client exposes
@@ -78,6 +79,7 @@ export function installRealtimeReconnectGuard(): () => void {
     // triggers a full reconnect stampede when 'active' follows seconds
     // later, overloading the native bridge and crashing the app.
     if (nextState === 'background') {
+      lastDispatchedStateWasBg = true;
       // rt.disconnect() is a WebSocket bridge call. On Android, the JS
       // thread suspends faster than iOS — calling it synchronously in
       // the immediate phase blocks the JS thread waiting for a bridge
@@ -93,8 +95,16 @@ export function installRealtimeReconnectGuard(): () => void {
 
   const unsubFg = registerAppStateHandler('deferred', (nextState: string) => {
     if (nextState !== 'active') return;
-    if (!socketDisconnected) return;
+    // Always reconnect on foreground return — even if our explicit
+    // disconnect didn't fire (OS suspended before the setTimeout(0)
+    // ran). The socket may have died from OS suspension alone, in
+    // which case socketDisconnected is still false but the socket is
+    // stale. rt.connect() is idempotent: if the socket is already
+    // live, it's a no-op.
+    const needsReconnect = socketDisconnected || lastDispatchedStateWasBg;
+    if (!needsReconnect) return;
     socketDisconnected = false;
+    lastDispatchedStateWasBg = false;
     const doReconnect = () => {
       try { rt.connect(); } catch { /* non-fatal */ }
     };
