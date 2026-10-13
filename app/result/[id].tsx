@@ -539,6 +539,7 @@ function ResultScreenInner() {
   const nativeMuxInFlightRef = useRef(false);
   const muxAbortRef = useRef<AbortController | null>(null);
   const muxProgressRef = useRef(0);
+  const muxFailedRef = useRef(false);
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
   const { supported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribePush } = useWebPush();
   const autoSavedVideoRef = useRef<string | null>(null);
@@ -561,13 +562,13 @@ function ResultScreenInner() {
   // killer because the OS has no signal that the work is important.
   useEffect(() => {
     const tag = 'result-mux-gen';
-    if (isGeneratingVideo || isMuxing) {
+    if (isGeneratingVideo || isMuxing || isGeneratingImage || isRegenerating) {
       activateKeepAwakeAsync(tag).catch(() => {}).finally(() => { /* release ref */ });
     } else {
       deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ });
     }
     return () => { deactivateKeepAwake(tag).catch(() => {}).finally(() => { /* release ref */ }); };
-  }, [isGeneratingVideo, isMuxing]);
+  }, [isGeneratingVideo, isMuxing, isGeneratingImage, isRegenerating]);
 
   useEffect(() => {
     generatedVideoUrlRef.current = generatedVideoUrl;
@@ -900,6 +901,10 @@ function ResultScreenInner() {
       return false;
     }
   }, [scan, activePlatform]);
+
+  const detectedProducts: DetectedProduct[] = useMemo(() => scan?.detected_products ?? [], [scan?.detected_products]);
+  const selectedProduct = useMemo(() => detectedProducts[selectedProductIndex] ?? null, [detectedProducts, selectedProductIndex]);
+  const activeProductName = useMemo(() => sanitizeVideoProductName(selectedProduct?.productName || scan?.product_name || '프리미엄 추천 상품'), [selectedProduct, scan?.product_name]);
 
   const handleAiVideoGenerate = useCallback(async () => {
     if (videoGenLockRef.current) return;
@@ -1241,7 +1246,7 @@ function ResultScreenInner() {
             memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || '시선 집중! 지금 바로 확인하세요'),
           }).then(({ hdJobId }) => {
             if (!mountedRef.current) return;
-            hdUnsubRef.current = subscribeHdUpgrade(scan.id, submitResult.taskId, (hdResult) => {
+            hdUnsubRef.current = subscribeHdUpgrade(scan.id, hdJobId, (hdResult) => {
               if (!mountedRef.current) return;
               try {
               if (hdResult.status === 'SUCCESS' && hdResult.videoUrl) {
@@ -1317,7 +1322,7 @@ function ResultScreenInner() {
     } finally {
       videoGenLockRef.current = false;
     }
-  }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage, contentPurpose]);
+  }, [scan, isGeneratingVideo, inlineEdit.aiPrompt, inlineEdit.bgmMood, inlineEdit.captionText, inlineEdit.hookEffect, narrativeVariation, productVision, targetPlatform, videoGenMode, manualHook, manualKeywords, isCleanVideoMode, promptStrength, negativePrompt, bgStyle, outfitIntensity, zoomSpeed, cameraRotation, transitionEffect, targetMediaType, imageAspectRatio, stylePreset, detailRestoration, hdUpscale, selectedDurationMs, triggerTtsGeneration, ttsUrl, videoStage, contentPurpose, activeProductName]);
 
   const imageGenLockRef = useRef(false);
   const handleAiImageGenerate = useCallback(async () => {
@@ -1615,6 +1620,14 @@ function ResultScreenInner() {
       if (draftProgressTimerRef.current) {
         clearInterval(draftProgressTimerRef.current);
         draftProgressTimerRef.current = null;
+      }
+      if (stepAdvanceTimerRef.current) {
+        clearInterval(stepAdvanceTimerRef.current);
+        stepAdvanceTimerRef.current = null;
+      }
+      if (localPollTimerRef.current) {
+        clearInterval(localPollTimerRef.current);
+        localPollTimerRef.current = null;
       }
       if (muxedBlobUrlRef.current) {
         URL.revokeObjectURL(muxedBlobUrlRef.current);
@@ -2034,7 +2047,7 @@ function ResultScreenInner() {
       unsubResume();
       unsubRecovery();
     };
-  }, [scan, activePlatform, loading]);
+  }, [scan?.id, loading]);
 
   // Mux TTS narration audio into the AI-generated video.
   // Triggers when both generatedVideoUrl and ttsUrl are available
@@ -2110,6 +2123,7 @@ function ResultScreenInner() {
       muxProgressRef.current = 0;
       setMuxProgress(0);
       setMuxError(null);
+      muxFailedRef.current = false;
       const muxAbortController = new AbortController();
       muxAbortRef.current = muxAbortController;
 
@@ -2123,6 +2137,11 @@ function ResultScreenInner() {
         if (!videoReady || !audioReady) {
           if (!cancelled) {
             setMuxError(audioReady ? '비디오 파일에 접근할 수 없습니다.' : '나레이션 음성 파일이 아직 준비되지 않았습니다. 잠시 후 자동으로 재시도합니다.');
+            muxFailedRef.current = true;
+            setIsMuxing(false);
+            setMuxProgress(0);
+            muxDoneRef.current = null;
+            nativeMuxInFlightRef.current = false;
           }
           return;
         }
@@ -2171,6 +2190,7 @@ function ResultScreenInner() {
 
           if (invokeError) {
             setMuxError(invokeError.message || '나레이션 합성에 실패했습니다.');
+            muxFailedRef.current = true;
             return;
           }
 
@@ -2181,14 +2201,12 @@ function ResultScreenInner() {
         } catch {
           if (!cancelled) {
             setMuxError('나레이션 합성에 실패했습니다. 무음 비디오로 재생됩니다.');
+            muxFailedRef.current = true;
           }
         } finally {
           nativeMuxInFlightRef.current = false;
           muxAbortRef.current = null;
-          // Don't reset muxProgress here — the polling/Realtime path
-          // will set it to 1 when the muxed URL appears. Only reset
-          // if we actually failed.
-          if (!cancelled && muxError) {
+          if (!cancelled && muxFailedRef.current) {
             setIsMuxing(false);
             setMuxProgress(0);
           }
@@ -2205,7 +2223,7 @@ function ResultScreenInner() {
       }
       unsubMuxHandler();
     };
-  }, [generatedVideoUrl, ttsUrl, isMuxing, scan?.id, selectedDurationMs]);
+  }, [generatedVideoUrl, ttsUrl, scan?.id, selectedDurationMs]);
 
   // Polling fallback for muxed_video_url: if the Realtime subscription
   // misses the DB PATCH event (network blip, channel reconnect), this
@@ -2635,9 +2653,6 @@ function ResultScreenInner() {
     }
   };
 
-  const detectedProducts: DetectedProduct[] = useMemo(() => scan?.detected_products ?? [], [scan?.detected_products]);
-  const selectedProduct = useMemo(() => detectedProducts[selectedProductIndex] ?? null, [detectedProducts, selectedProductIndex]);
-  const activeProductName = useMemo(() => sanitizeVideoProductName(selectedProduct?.productName || scan?.product_name || '프리미엄 추천 상품'), [selectedProduct, scan?.product_name]);
   const activePriceEstimate = useMemo(() => priceOverride !== null ? priceOverride : (selectedProduct?.priceEstimate || scan?.price_estimate || ''), [priceOverride, selectedProduct, scan?.price_estimate]);
   const activeShoppingMatches = useMemo(() => selectedProduct?.shoppingMatches ?? scan?.shopping_matches ?? [], [selectedProduct, scan?.shopping_matches]);
   const activeTemplateData = useMemo(() => selectedProduct?.templateData ?? scan?.template_data, [selectedProduct, scan?.template_data]);

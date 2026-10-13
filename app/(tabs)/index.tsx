@@ -2338,10 +2338,9 @@ function CoverChoiceOverlay({
 }) {
   if (!visible || coverUrls.length === 0) return null;
 
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onSkip}>
-      <View style={styles.coverChoiceOverlay}>
-        <View style={styles.coverChoiceCard}>
+  const content = (
+    <View style={styles.coverChoiceOverlay}>
+      <View style={styles.coverChoiceCard}>
           <Text style={styles.coverChoiceTitle}>가장 시선을 끄는 썸네일 커버를 선택하세요</Text>
           <Text style={styles.coverChoiceSub}>AI가 추출한 임팩트 컷 3개 중 마케팅에 활용할 대표 커버를 골라주세요</Text>
 
@@ -2377,6 +2376,19 @@ function CoverChoiceOverlay({
           </View>
         </View>
       </View>
+  );
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        {content}
+      </View>
+    );
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onSkip}>
+      {content}
     </Modal>
   );
 }
@@ -3021,6 +3033,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: theme.spacing.lg,
+    ...(Platform.OS === 'web' ? { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 } : {}),
   },
   coverChoiceCard: {
     backgroundColor: theme.colors.dark.surface,

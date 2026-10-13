@@ -89,6 +89,7 @@ export function DirectShareBridge({
           throw new Error(`영상 다운로드 실패 (${downloadResult.status})`);
         }
         await MediaLibrary.createAssetAsync(downloadResult.uri);
+        await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {});
       }
       setSavedState('saved');
       onSavedToGallery?.();

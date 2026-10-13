@@ -360,7 +360,7 @@ export function PostCaptureWorkflow({
 
   const saveGalleryLockRef = useRef(false);
   const handleSaveToGallery = useCallback(async () => {
-    const uri = videoUri || (imageUri || null);
+    const uri = videoUri || captureUri || (imageUri || null);
     if (!uri || saveGalleryLockRef.current) return;
     saveGalleryLockRef.current = true;
     setSavingToGallery(true);
