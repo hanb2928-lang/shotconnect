@@ -714,6 +714,10 @@ function ResultScreenInner() {
           setIsGeneratingVideo(false);
           setVideoGenProgress(null);
           if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
+          // Refund credits for failed generation
+          import('@/lib/credits').then(({ refundCredits }) => {
+            refundCredits(hdUpscale ? 'video_hd' : 'video_draft').catch(() => {});
+          }).catch(() => {});
           return;
         }
         const sp = stepToProgress(row.step);
@@ -1270,6 +1274,10 @@ function ResultScreenInner() {
           setIsGeneratingVideo(false);
           setVideoGenProgress(null);
           setBgJobNotice(null);
+          // Refund credits for the failed video generation
+          import('@/lib/credits').then(({ refundCredits }) => {
+            refundCredits(hdUpscale ? 'video_hd' : 'video_draft').catch(() => {});
+          }).catch(() => {});
         }
         } catch {
           if (mountedRef.current) {
@@ -1286,6 +1294,13 @@ function ResultScreenInner() {
         setVideoStage('failed');
         setIsGeneratingVideo(false);
         setVideoGenProgress(null);
+      }
+      // Refund credits if the submit failed after deduction
+      if (err instanceof Error && !err.message.includes('크레딧이 부족')) {
+        try {
+          const { refundCredits } = await import('@/lib/credits');
+          await refundCredits(hdUpscale ? 'video_hd' : 'video_draft');
+        } catch { /* best-effort */ }
       }
       if (draftProgressTimerRef.current) {
         clearInterval(draftProgressTimerRef.current);
@@ -1677,12 +1692,13 @@ function ResultScreenInner() {
     };
   }, [scan, ttsUrl]);
 
-  // Resume polling for in-progress video generation jobs on mount
+  // Resume polling for in-progress video generation jobs on mount.
+  // Only activate if there's a pending job AND the user hasn't already
+  // been navigated away (Fire & Forget). The BackgroundJobIndicator on
+  // the videos tab handles status display for navigated-away users.
   useEffect(() => {
     if (!scan || generatedVideoUrl || isGeneratingVideo) return;
     let cancelled = false;
-    let intervalId: ReturnType<typeof setTimeout> | null = null;
-    let pollAbort: AbortController | null = null;
 
     (async () => {
       try {
@@ -1704,7 +1720,9 @@ function ResultScreenInner() {
           return;
         }
 
-        // No completed job found — check for pending jobs and resume polling
+        // No completed job found — check for pending jobs and resume polling.
+        // Don't re-trap the user: only show a non-blocking notice instead of
+        // setting isGeneratingVideo(true) which locks the UI.
         const { data: jobRow } = await supabase
           .from('video_jobs')
           .select('task_id, status, is_draft')
@@ -1716,9 +1734,12 @@ function ResultScreenInner() {
         if (cancelled || !jobRow) return;
 
         if (jobRow.status === 'PENDING' || jobRow.status === 'RUNNING' || jobRow.status === 'THROTTLED') {
-          const taskId = jobRow.task_id as string;
+          // Show a non-blocking background notice instead of trapping the UI
+          if (mountedRef.current) {
+            setBgJobNotice('이전 영상 생성 작업이 진행 중입니다. 완료되면 자동으로 표시됩니다.');
+          }
 
-          // Zombie job guard: if the job has been stuck for over 5 minutes, don't resume
+          // Zombie job guard: if the job has been stuck for over 30 minutes, don't resume
           const { data: fullJob } = await supabase
             .from('video_jobs')
             .select('created_at')
@@ -1737,106 +1758,9 @@ function ResultScreenInner() {
               return;
             }
           }
-
-          if (!mountedRef.current) return;
-          setIsGeneratingVideo(true);
-          setVideoGenProgress({ phase: 'generating', progress: 0.1, message: '이전 영상 생성 작업을 이어받는 중...', elapsedSec: 0 });
-
-          const startTime = Date.now();
-          let consecutiveErrors = 0;
-          const MAX_CONSECUTIVE_ERRORS = 8;
-          const POLL_TIMEOUT_MS = 360000;
-
-          const pollOnce = async () => {
-            if (cancelled) return;
-            pollAbort?.abort();
-            pollAbort = new AbortController();
-            if (Date.now() - startTime > POLL_TIMEOUT_MS) {
-              if (mountedRef.current) {
-                setVideoGenError('영상 생성 시간이 초과되었습니다. 다시 시도해주세요.');
-                setIsGeneratingVideo(false);
-                setVideoGenProgress(null);
-              }
-              return;
-            }
-            try {
-              const { data: pollData, error: pollError } = await supabase.functions.invoke('generate-video', {
-                body: { mode: 'poll', taskId, scanId: scan.id },
-              });
-
-              if (pollAbort.signal.aborted || cancelled) return;
-              if (pollError) {
-                const errStatus = (pollError as { status?: number }).status;
-                if (errStatus === 401 || errStatus === 403) {
-                  if (mountedRef.current) {
-                    setVideoGenError('인증 세션이 만료되었습니다. 앱을 새로고침하고 다시 시도해주세요.');
-                    setIsGeneratingVideo(false);
-                    setVideoGenProgress(null);
-                  }
-                  return;
-                }
-                consecutiveErrors++;
-                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                  if (mountedRef.current) {
-                    setVideoGenError('영상 생성 서버와 통신할 수 없습니다. 다시 시도해주세요.');
-                    setIsGeneratingVideo(false);
-                    setVideoGenProgress(null);
-                  }
-                  return;
-                }
-              } else if (!pollData || typeof pollData !== 'object') return;
-
-              const status = pollData.status as string;
-              const elapsed = Math.round((Date.now() - startTime) / 1000);
-
-              if (status === 'SUCCESS' && pollData.videoUrl) {
-                if (mountedRef.current && !videoJobSettledRef.current) {
-                  videoJobSettledRef.current = true;
-                  setGeneratedVideoUrl(pollData.videoUrl as string);
-                  setIsGeneratingVideo(false);
-                  setVideoGenProgress(null);
-                }
-                return; // stop polling
-              } else if (status === 'FAILED') {
-                if (mountedRef.current) {
-                  setVideoGenError(pollData.error as string ?? '영상 생성에 실패했습니다.');
-                  setIsGeneratingVideo(false);
-                  setVideoGenProgress(null);
-                }
-                return; // stop polling
-              } else {
-                consecutiveErrors = 0;
-                const rawProgress = pollData.progress ? parseFloat(pollData.progress) : NaN;
-                const numericProgress = !isNaN(rawProgress) ? 0.1 + rawProgress * 0.85 : 0.1;
-                const pctLabel = !isNaN(rawProgress) ? ` (${Math.round(rawProgress * 100)}%)` : '';
-                if (mountedRef.current) {
-                  setVideoGenProgress({
-                    phase: 'generating',
-                    progress: Math.min(numericProgress, 0.98),
-                    message: `AI가 영상을 렌더링하고 있어요${pctLabel}`,
-                    elapsedSec: elapsed,
-                  });
-                }
-              }
-            } catch {
-              consecutiveErrors++;
-              if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                if (mountedRef.current) {
-                  setVideoGenError('네트워크 연결이 불안정하여 영상 생성 상태를 확인할 수 없습니다. 다시 시도해주세요.');
-                  setIsGeneratingVideo(false);
-                  setVideoGenProgress(null);
-                }
-                return;
-              }
-            }
-            // Schedule next poll with adaptive interval
-            const elapsedMs = Date.now() - startTime;
-            const baseInterval = elapsedMs < 5000 ? 500 : 1000;
-            const backoffMultiplier = consecutiveErrors > 0 ? Math.min(Math.pow(2, consecutiveErrors), 8) : 1;
-            intervalId = setTimeout(pollOnce, Math.round(baseInterval * backoffMultiplier));
-          };
-
-          intervalId = setTimeout(pollOnce, 500);
+          // Let the Realtime subscription and local poll handle the result.
+          // No need to set isGeneratingVideo(true) — that would re-trap the user.
+          return;
         }
       } catch {
         // video_jobs table read failed — non-fatal
@@ -1845,8 +1769,6 @@ function ResultScreenInner() {
 
     return () => {
       cancelled = true;
-      pollAbort?.abort();
-      if (intervalId) clearTimeout(intervalId);
     };
   }, [scan, generatedVideoUrl]);
 
@@ -1924,6 +1846,10 @@ function ResultScreenInner() {
         setBgJobNotice(null);
         setVideoGenError('영상 생성에 실패했습니다. 다시 시도해주세요.');
         setVideoStage('failed');
+        // Refund credits for failed generation
+        import('@/lib/credits').then(({ refundCredits }) => {
+          refundCredits(hdUpscale ? 'video_hd' : 'video_draft').catch(() => {});
+        }).catch(() => {});
       }
     };
 
