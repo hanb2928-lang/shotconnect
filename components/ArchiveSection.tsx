@@ -575,8 +575,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyContainer: {
+    flex: 1,
     alignItems: 'center',
-    paddingTop: 60,
+    justifyContent: 'flex-end',
+    paddingBottom: 80,
     gap: 8,
   },
   emptyText: {
