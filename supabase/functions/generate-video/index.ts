@@ -342,7 +342,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
 
   let effectivePrompt = body.prompt ?? "";
   if (effectivePrompt.trim().length === 0) {
-    effectivePrompt = buildAutoPrompt(sanitizedProductName, body.productVision, sanitizedCaptionText, body.isCleanVideoMode === true, requestedDuration, body.enableOrbit360 === true, typeof body.orbitSpeed === 'number' ? body.orbitSpeed : undefined, body.enableFabricPhysics === true, body.memeFormat, body.memeText);
+    effectivePrompt = buildAutoPrompt(sanitizedProductName, body.productVision, sanitizedCaptionText, body.isCleanVideoMode === true, requestedDuration, body.enableOrbit360 === true, typeof body.orbitSpeed === 'number' ? body.orbitSpeed : undefined, body.enableFabricPhysics === true, body.memeFormat, body.memeText, body.selectedMode, body.enableVirtualFitting === true);
   }
   const aspectRatio = body.aspectRatio ?? "9:16";
   const variationSeed = body.variationSeed ?? 0;
@@ -1845,6 +1845,8 @@ function buildAutoPrompt(
   enableFabricPhysics?: boolean,
   memeFormat?: string,
   memeText?: string,
+  selectedMode?: 'auto_3d' | 'universal_synthesis' | 'manual',
+  enableVirtualFitting?: boolean,
 ): string {
   const parts: string[] = [];
 
@@ -1857,9 +1859,19 @@ function buildAutoPrompt(
   const safeCopy = vision ? sanitizeCopyLayers(vision.suggestedCopyLayers) : VIDEO_FALLBACK_COPY_LAYERS;
 
   if (isCleanVideoMode) {
-    parts.push(`Top-tier luxury commercial for ${name}, ultra-premium 3D product showcase, cinematic quality rivaling high-end brand films`);
+    const isVirtualFittingMode = selectedMode === 'universal_synthesis' && enableVirtualFitting;
+    if (isVirtualFittingMode) {
+      parts.push(`Top-tier luxury fashion commercial for ${name}, ultra-premium 3D virtual fitting showcase, cinematic quality rivaling high-end brand films`);
+      parts.push("volumetric body mapping and 3D draping simulation, skeletal mesh alignment for natural garment fit, body-aware cloth wrapping with anatomically correct tension distribution, realistic garment-to-body contact zones with pressure-based deformation");
+    } else {
+      parts.push(`Top-tier luxury commercial for ${name}, ultra-premium 3D product showcase, cinematic quality rivaling high-end brand films`);
+    }
     if (enableOrbit360) {
-      parts.push(`${speedLabel} 360-degree orbit rotation around product core, continuous circular camera path maintaining focal lock on product centroid, parallax depth shift across orbit arc`);
+      if (isVirtualFittingMode) {
+        parts.push(`${speedLabel} 360-degree orbit rotation around model and garment, continuous circular camera path revealing front-side-back silhouette, parallax depth shift across orbit arc capturing fabric drape from all angles`);
+      } else {
+        parts.push(`${speedLabel} 360-degree orbit rotation around product core, continuous circular camera path maintaining focal lock on product centroid, parallax depth shift across orbit arc`);
+      }
     } else {
       parts.push("smooth gimbal dolly + gentle macro push-in");
     }

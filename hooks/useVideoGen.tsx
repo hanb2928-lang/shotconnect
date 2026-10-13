@@ -938,7 +938,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         platform: params.platform,
         contentTone: params.contentTone,
         bgmMood: params.bgmMood,
-        isCleanVideoMode: params.genMode === 'auto_3d',
+        isCleanVideoMode: params.genMode === 'auto_3d' || params.genMode === 'universal_synthesis',
         selectedMode: params.genMode as 'auto_3d' | 'universal_synthesis' | 'manual',
         enableOrbit360: params.enableOrbit360,
         enableCaustics: params.genMode === 'auto_3d' ? params.enableCaustics : undefined,
