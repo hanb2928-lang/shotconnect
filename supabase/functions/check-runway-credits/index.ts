@@ -1,5 +1,3 @@
-import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -55,54 +53,77 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const endpoints = [
+      "https://api.dev.runwayml.com/v1/credits",
+      "https://api.dev.runwayml.com/v1/account/credits",
+      "https://api.dev.runwayml.com/v1/user",
+      "https://api.dev.runwayml.com/v1/organization/credits",
+    ];
 
-    try {
-      const resp = await fetch("https://api.dev.runwayml.com/v1/credits", {
-        headers: {
-          "Authorization": `Bearer ${runwayKey}`,
-          "X-Runway-Version": "2024-11-06",
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+    let lastError = "";
+    for (const url of endpoints) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      try {
+        const resp = await fetch(url, {
+          headers: {
+            "Authorization": `Bearer ${runwayKey}`,
+            "X-Runway-Version": "2024-11-06",
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => "");
-        return new Response(
-          JSON.stringify({
-            error: `Runway 크레딧 조회 실패 (${resp.status})`,
-            credits: null,
-            detail: errText.slice(0, 200),
-          }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+        if (resp.ok) {
+          const data = await resp.json();
+          const credits = typeof data.credits === "number"
+            ? data.credits
+            : typeof data.balance === "number"
+              ? data.balance
+              : typeof data.remaining === "number"
+                ? data.remaining
+                : typeof data.available_credits === "number"
+                  ? data.available_credits
+                  : null;
+          if (credits !== null) {
+            return new Response(
+              JSON.stringify({ credits, raw: data }),
+              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+          lastError = `${url}: 응답에서 크레딧 필드를 찾을 수 없음`;
+        } else {
+          const errText = await resp.text().catch(() => "");
+          lastError = `${url}: ${resp.status}`;
+          if (resp.status !== 404) {
+            return new Response(
+              JSON.stringify({
+                error: `Runway 크레딧 조회 실패 (${resp.status})`,
+                credits: null,
+                detail: errText.slice(0, 200),
+              }),
+              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+        }
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+          lastError = `${url}: 시간 초과`;
+        } else {
+          lastError = `${url}: ${String(fetchErr)}`;
+        }
       }
-
-      const data = await resp.json();
-      const credits = typeof data.credits === "number"
-        ? data.credits
-        : typeof data.balance === "number"
-          ? data.balance
-          : typeof data.remaining === "number"
-            ? data.remaining
-            : null;
-
-      return new Response(
-        JSON.stringify({ credits, raw: data }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    } catch (fetchErr) {
-      clearTimeout(timeoutId);
-      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
-        return new Response(
-          JSON.stringify({ error: "Runway 크레딧 조회 시간 초과", credits: null }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      throw fetchErr;
     }
+
+    return new Response(
+      JSON.stringify({
+        error: "Runway 크레딧 조회 엔드포인트를 찾을 수 없습니다.",
+        credits: null,
+        detail: lastError,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (err) {
     return new Response(
       JSON.stringify({ error: "크레딧 조회 중 오류가 발생했습니다.", credits: null }),
