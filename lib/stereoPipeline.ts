@@ -132,7 +132,19 @@ async function uploadWithRetry(base64: string, mimeType: string, signal?: AbortS
   // skipping base64 entirely. The native networking module streams
   // the file without loading it into JS memory.
   if (uri && Platform.OS !== 'web') {
-    return uploadCompressedUri(uri, signal);
+    let lastNativeErr: unknown = null;
+    for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+      if (signal?.aborted) throw new Error('업로드가 취소되었습니다.');
+      try {
+        return await uploadCompressedUri(uri, signal);
+      } catch (err) {
+        lastNativeErr = err;
+        if (attempt < UPLOAD_MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, UPLOAD_RETRY_DELAY_MS * (attempt + 1) + Math.floor(Math.random() * 500)));
+        }
+      }
+    }
+    throw lastNativeErr instanceof Error ? lastNativeErr : new Error('Native URI 업로드 실패');
   }
   if (base64.length > UPLOAD_MAX_BASE64_BYTES) {
     throw new Error('이미지가 너무 커서 업로드할 수 없습니다. 더 낮은 해상도로 다시 촬영해주세요.');
@@ -357,16 +369,17 @@ async function invokeStereoCutAuto(
   // images and send only the keyframe URL + deltas to the server. This cuts
   // the GPU inference payload by ~40-50% since the server no longer needs to
   // decode and align all multi-angle images at full resolution.
-  const proxyPayload = await buildKeyframeProxyPayload(
-    payloads.filter((p): p is AngleImagePayload & { url: string } => typeof p.url === 'string')
-      .map((p) => ({ url: p.url, angleKey: p.key, orderIndex: p.orderIndex, label: p.label })),
-  ).catch(() => null);
-
   try {
     const { data } = await aiCachedCall<CloudPipelineResult | null>(
       'stereo-cut-auto',
       cacheInput,
       async () => {
+        // Build keyframe proxy inside the factory so it only runs on
+        // cache misses — not on every call.
+        const proxyPayload = await buildKeyframeProxyPayload(
+          payloads.filter((p): p is AngleImagePayload & { url: string } => typeof p.url === 'string')
+            .map((p) => ({ url: p.url, angleKey: p.key, orderIndex: p.orderIndex, label: p.label })),
+        ).catch(() => null);
         const body: Record<string, unknown> = {
           scanId,
           angles: payloads,
@@ -605,14 +618,14 @@ export async function runStereoPipeline(
   // Run local synthesis and cloud stereo analysis in parallel — local synthesis
   // is CPU-only and doesn't depend on the upload, so it can overlap with the
   // cloud call to cut total latency to max(local, cloud) instead of local + cloud.
-  steps[1].status = 'active';
-  steps[1].detail = '로컬 3D 분석 + 클라우드 GPU 볼륨 복원 동시 처리 중...';
-  report(1, 0.18);
-  if (aborted()) return createAbortedResult(scanId);
+  steps[2].status = 'active';
+  steps[2].detail = '로컬 3D 분석 + 클라우드 GPU 볼륨 복원 동시 처리 중...';
+  report(2, 0.18);
+  if (aborted()) return createAbortedResult(scanId, uploadedPaths);
   // Yield to the render thread before the CPU-heavy synchronous synthesis
   // call so the navigation animation can complete without frame drops.
   await new Promise((r) => setTimeout(r, 0));
-  if (aborted()) return createAbortedResult(scanId);
+  if (aborted()) return createAbortedResult(scanId, uploadedPaths);
   const tonePrompt = contentTone === 'studio'
     ? `스튜디오 프리미엄 고급스러운 디테일 영화적 조명${studioSliders ? ` — 광채 강화 ${studioSliders.facetSparkle}% · 텍스처 디테일 ${studioSliders.fabricDetail}% · 블렌딩 ${studioSliders.blendStrength}%${studioSliders.smartFit === false ? ' · 스마트 핏 비활성' : ''}` : ''}`
     : contentTone === 'raw'
@@ -655,9 +668,9 @@ export async function runStereoPipeline(
     ? (cloudResult.synthesis.contextMatch.context as import('./aiSynthesisEngine').UsageContext)
     : localSynthesis.contextMatch.context;
 
-  steps[1].status = 'done';
-  steps[1].detail = synthesisSummary;
-  report(1, 0.28);
+  steps[2].status = 'done';
+  steps[2].detail = synthesisSummary;
+  report(2, 0.28);
 
   const cloudLabel = cloudResult?.synthesis?.contextMatch?.label?.trim();
   const productName = cloudLabel
@@ -676,7 +689,7 @@ export async function runStereoPipeline(
     steps[2].detail = '클린 모드 — 훅/자막 생성 건너뜀 (순수 비주얼 추출)';
     report(2, 0.53);
   } else {
-    if (aborted()) return createAbortedResult(scanId);
+    if (aborted()) return createAbortedResult(scanId, uploadedPaths);
     await new Promise((r) => setTimeout(r, 0));
     steps[2].status = 'active';
     steps[2].detail = '초반 3초 패러독스 훅 + 비트 싱크 설계 중...';
@@ -702,11 +715,11 @@ export async function runStereoPipeline(
 
   if (!cleanMode && directingPlan) {
     await new Promise((r) => setTimeout(r, 600));
-    if (aborted()) return createAbortedResult(scanId);
+    if (aborted()) return createAbortedResult(scanId, uploadedPaths);
     steps[2].detail = `훅: ${directingPlan.hookTransition.description} | SFX ${directingPlan.sfxPlans.length}건 | 킬링포인트 자막 ${directingPlan.killPointCaptions.length}건`;
   }
 
-  if (aborted()) return createAbortedResult(scanId);
+  if (aborted()) return createAbortedResult(scanId, uploadedPaths);
   await new Promise((r) => setTimeout(r, 0));
 
   steps[3].status = 'active';
@@ -723,7 +736,7 @@ export async function runStereoPipeline(
   });
 
   await new Promise((r) => setTimeout(r, 600));
-  if (aborted()) return createAbortedResult(scanId);
+  if (aborted()) return createAbortedResult(scanId, uploadedPaths);
   if (cleanMode) {
     steps[3].detail = '클린 모드 렌더링 준비 완료 (텍스트 메타데이터 없음)';
   } else {
@@ -783,7 +796,7 @@ export async function runStereoPipeline(
   };
 
   try {
-    if (aborted()) return createAbortedResult(scanId);
+    if (aborted()) return createAbortedResult(scanId, uploadedPaths);
     await supabase.from('scans').update({
       product_name: productName,
       summary: synthesisSummary,
@@ -805,7 +818,10 @@ export async function runStereoPipeline(
   return result;
 }
 
-function createAbortedResult(scanId: string): StereoPipelineResult {
+function createAbortedResult(scanId: string, uploadedPaths?: string[]): StereoPipelineResult {
+  if (uploadedPaths && uploadedPaths.length > 0) {
+    rollbackUploads(uploadedPaths).catch(() => {});
+  }
   return {
     scanId,
     cloudResult: null,

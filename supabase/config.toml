@@ -68,7 +68,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.virtual-fitting]
-verify_jwt = false
+verify_jwt = true
 
 [functions.weather-check]
 verify_jwt = false

@@ -42,6 +42,12 @@ export function buildFittingPromptWithRules(
   mood?: string,
   sceneStyle?: string,
   customPrompt?: string,
+  studioOptions?: {
+    facetSparkle?: number;
+    fabricDetail?: number;
+    blendStrength?: number;
+    smartFit?: boolean;
+  },
 ): string {
   const bodyDesc: Record<string, string> = {
     slim: "slim body type (size 44-55)",
@@ -109,6 +115,18 @@ Composition requirements:
 - Leave clean negative space around the subject for downstream text overlay
 - Frame the model with approximately 15-20% breathing room on each side
 - Maintain sharp focus on the garment; background should be softly blurred`;
+
+  if (studioOptions) {
+    const sparkLevel = studioOptions.facetSparkle ?? 50;
+    const fabricLevel = studioOptions.fabricDetail ?? 50;
+    const blendLevel = studioOptions.blendStrength ?? 50;
+    const smartFitLabel = studioOptions.smartFit === false ? "disabled" : "enabled";
+    prompt += `\n\nStudio quality parameters:
+- Facet sparkle/shimmer intensity: ${sparkLevel}% (${sparkLevel < 33 ? 'subtle' : sparkLevel < 66 ? 'moderate' : 'pronounced'})
+- Fabric texture detail level: ${fabricLevel}% (${fabricLevel < 33 ? 'soft focus' : fabricLevel < 66 ? 'balanced' : 'high-fidelity micro-detail'})
+- Blending strength between garment and model: ${blendLevel}% (${blendLevel < 33 ? 'natural loose' : blendLevel < 66 ? 'seamless' : 'tight form-fitting'})
+- Smart fit adjustment: ${smartFitLabel}`;
+  }
 
   if (customPrompt && customPrompt.trim()) {
     prompt += `\n\nAdditional user instructions: ${customPrompt.trim()}`;

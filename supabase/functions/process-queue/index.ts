@@ -34,8 +34,8 @@ const ALLOWED_JOB_TYPES = new Set([
 ]);
 
 const JOB_TYPE_TO_FUNCTION_SLUG: Record<string, string> = {
-  "virtual-cuts": "generate-virtual-cuts",
-  "virtual-fitting": "generate-virtual-fitting",
+  "virtual-cuts": "stereo-cut-auto",
+  "virtual-fitting": "virtual-fitting",
 };
 
 interface RenderJob {

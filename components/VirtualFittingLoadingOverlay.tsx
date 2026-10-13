@@ -45,6 +45,7 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
   const pulseSV = useSharedValue(0);
   const scanLineSV = useSharedValue(0);
   const registerPause = usePauseAnimationsOnBackground();
+  const [progressPercent, setProgressPercent] = useState(0);
 
   useEffect(() => {
     if (!visible) return;
@@ -96,7 +97,17 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
 
   if (!visible) return null;
 
-  const progressPercent = Math.round(interpolate(progressSV.value, [0, 1], [0, 100]));
+  const progressFillStyle = useAnimatedStyle(() => ({
+    width: `${Math.round(interpolate(progressSV.value, [0, 1], [0, 100]))}%`,
+  }));
+
+  useEffect(() => {
+    if (!visible) return;
+    const interval = setInterval(() => {
+      setProgressPercent(Math.round(interpolate(progressSV.value, [0, 1], [0, 100])));
+    }, 250);
+    return () => clearInterval(interval);
+  }, [visible, progressSV]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
@@ -147,7 +158,7 @@ export function VirtualFittingLoadingOverlay({ visible }: VirtualFittingLoadingO
           {/* Progress bar */}
           <View style={styles.progressTrack}>
             <Animated.View
-              style={[styles.progressFill, { width: `${progressPercent}%` }]}
+              style={[styles.progressFill, progressFillStyle]}
             />
           </View>
           <Text style={styles.progressPercent}>{progressPercent}%</Text>

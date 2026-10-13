@@ -1,11 +1,19 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { buildFittingPromptWithRules } from "../_shared/rendering-engine.ts";
 
+const ALLOWED_ORIGINS = [
+  "https://shotconnect.app",
+  "https://www.shotconnect.app",
+];
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
+
+const MAX_BODY_BYTES = 20 * 1024 * 1024;
+const ALLOWED_URL_HOSTS = ["supabase.co", "supabase.in", "supabase.net"];
 
 interface VirtualFittingRequest {
   productImage: string;
@@ -16,35 +24,107 @@ interface VirtualFittingRequest {
   sceneStyle?: string;
   customPrompt?: string;
   idempotencyKey?: string;
+  userId?: string;
+  facetSparkle?: number;
+  fabricDetail?: number;
+  blendStrength?: number;
+  smartFit?: boolean;
+}
+
+function getRequestOrigin(req: Request): string {
+  const origin = req.headers.get("Origin") ?? req.headers.get("Referer") ?? "";
+  return origin;
+}
+
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return false;
+  return ALLOWED_ORIGINS.some((allowed) => origin.startsWith(allowed));
+}
+
+function getCorsHeadersForRequest(req: Request): Record<string, string> {
+  const origin = getRequestOrigin(req);
+  if (isAllowedOrigin(origin)) {
+    return { ...corsHeaders, "Access-Control-Allow-Origin": origin };
+  }
+  return { ...corsHeaders, "Access-Control-Allow-Origin": "null" };
+}
+
+function isUrlAllowed(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") return false;
+    if (parsed.hostname.endsWith(".169.254.169.254")) return false;
+    if (parsed.hostname.startsWith("169.254.")) return false;
+    if (parsed.hostname.startsWith("10.")) return false;
+    if (parsed.hostname.startsWith("172.16.") || parsed.hostname.startsWith("172.17.") || parsed.hostname.startsWith("172.18.") || parsed.hostname.startsWith("172.19.") || parsed.hostname.startsWith("172.20.") || parsed.hostname.startsWith("172.21.") || parsed.hostname.startsWith("172.22.") || parsed.hostname.startsWith("172.23.") || parsed.hostname.startsWith("172.24.") || parsed.hostname.startsWith("172.25.") || parsed.hostname.startsWith("172.26.") || parsed.hostname.startsWith("172.27.") || parsed.hostname.startsWith("172.28.") || parsed.hostname.startsWith("172.29.") || parsed.hostname.startsWith("172.30.") || parsed.hostname.startsWith("172.31.")) return false;
+    if (parsed.hostname.startsWith("192.168.")) return false;
+    return ALLOWED_URL_HOSTS.some((h) => parsed.hostname.endsWith(h));
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeCustomPrompt(prompt: string): string {
+  const MAX_PROMPT_LEN = 500;
+  let trimmed = prompt.trim().slice(0, MAX_PROMPT_LEN);
+  trimmed = trimmed.replace(/```/g, " ").replace(/\bignore\b/gi, " ").replace(/\bsystem\b/gi, " ");
+  return trimmed;
 }
 
 Deno.serve(async (req: Request) => {
+  const respCors = getCorsHeadersForRequest(req);
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, { status: 200, headers: respCors });
   }
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 405, headers: { ...respCors, "Content-Type": "application/json" },
     });
   }
 
   try {
-    const body: VirtualFittingRequest = await req.json();
+    const authHeader = req.headers.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "인증이 필요합니다." }),
+        { status: 401, headers: { ...respCors, "Content-Type": "application/json" } },
+      );
+    }
+
+    const contentLength = req.headers.get("Content-Length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_BODY_BYTES) {
+      return new Response(
+        JSON.stringify({ error: "요청 크기가 너무 큽니다. 이미지를 압축 후 다시 시도해주세요." }),
+        { status: 413, headers: { ...respCors, "Content-Type": "application/json" } },
+      );
+    }
+
+    const rawText = await req.text();
+    if (rawText.length > MAX_BODY_BYTES) {
+      return new Response(
+        JSON.stringify({ error: "요청 크기가 너무 큽니다. 이미지를 압축 후 다시 시도해주세요." }),
+        { status: 413, headers: { ...respCors, "Content-Type": "application/json" } },
+      );
+    }
+
+    const body: VirtualFittingRequest = JSON.parse(rawText);
 
     if (!body.productImage || !body.modelImage) {
       return new Response(
         JSON.stringify({ error: "제품 사진과 모델 사진이 모두 필요합니다." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 400, headers: { ...respCors, "Content-Type": "application/json" } },
       );
     }
 
-    // ─── Idempotency: check for cached result before making paid API call ──
+    const userNamespace = body.userId ?? "anonymous";
+
     if (body.idempotencyKey?.trim()) {
-      const cached = await checkFittingCache(body.idempotencyKey.trim());
+      const cacheKey = `virtual-fitting:${userNamespace}:${encodeURIComponent(body.idempotencyKey.trim())}`;
+      const cached = await checkFittingCache(cacheKey);
       if (cached) {
         return new Response(
           JSON.stringify({ ...cached, cached: true }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          { status: 200, headers: { ...respCors, "Content-Type": "application/json" } },
         );
       }
     }
@@ -52,12 +132,22 @@ Deno.serve(async (req: Request) => {
     const openaiKey = await resolveOpenAIKey();
     if (!openaiKey) {
       return new Response(
-        JSON.stringify({ error: "AI 가상 피팅을 위한 API 키가 설정되지 않았습니다. 설정에서 OpenAI API 키를 등록해주세요." }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ error: "AI 가상 피팅을 위한 API 키가 설정되지 않았습니다. 관리자에게 문의해주세요." }),
+        { status: 503, headers: { ...respCors, "Content-Type": "application/json" } },
       );
     }
 
-    const prompt = buildFittingPromptWithRules("", body.bodyType, body.pose, body.mood, body.sceneStyle, body.customPrompt);
+    const sanitizedCustomPrompt = body.customPrompt ? sanitizeCustomPrompt(body.customPrompt) : undefined;
+
+    const prompt = buildFittingPromptWithRules(
+      "",
+      body.bodyType,
+      body.pose,
+      body.mood,
+      body.sceneStyle,
+      sanitizedCustomPrompt,
+      { facetSparkle: body.facetSparkle, fabricDetail: body.fabricDetail, blendStrength: body.blendStrength, smartFit: body.smartFit },
+    );
 
     const productDataUrl = await resolveImageDataUrl(body.productImage, "image/jpeg");
     const modelDataUrl = await resolveImageDataUrl(body.modelImage, "image/jpeg");
@@ -66,19 +156,19 @@ Deno.serve(async (req: Request) => {
 
     const fittingResult = { image: resultBase64, mimeType: "image/png" };
 
-    // Persist to idempotency cache so network-drop retries don't fire a second paid call
     if (body.idempotencyKey?.trim()) {
-      storeFittingCache(body.idempotencyKey.trim(), fittingResult).catch(() => {});
+      const cacheKey = `virtual-fitting:${userNamespace}:${encodeURIComponent(body.idempotencyKey.trim())}`;
+      storeFittingCache(cacheKey, fittingResult).catch(() => {});
     }
 
     return new Response(
       JSON.stringify(fittingResult),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 200, headers: { ...respCors, "Content-Type": "application/json" } },
     );
   } catch (err) {
     return new Response(
       JSON.stringify({ error: err instanceof Error ? err.message : "가상 피팅 생성 중 오류가 발생했습니다." }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 500, headers: { ...respCors, "Content-Type": "application/json" } },
     );
   }
 });
@@ -151,6 +241,9 @@ async function resolveImageDataUrl(image: string, mimeType: string): Promise<str
   const trimmed = image.trim();
   if (trimmed.startsWith("data:")) return trimmed.replace(/\s/g, "");
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    if (!isUrlAllowed(trimmed)) {
+      throw new Error("지원하지 않는 이미지 URL입니다.");
+    }
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
@@ -180,8 +273,7 @@ async function resolveOpenAIKey(): Promise<string | null> {
   return null;
 }
 
-// ─── Idempotency cache helpers (uses ai_content_cache table) ────────────
-async function checkFittingCache(idempotencyKey: string): Promise<Record<string, unknown> | null> {
+async function checkFittingCache(cacheKey: string): Promise<Record<string, unknown> | null> {
   const sUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!sUrl || !sKey) return null;
@@ -189,7 +281,7 @@ async function checkFittingCache(idempotencyKey: string): Promise<Record<string,
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${sUrl}/rest/v1/ai_content_cache?select=result&cache_key=eq.virtual-fitting:${encodeURIComponent(idempotencyKey)}`,
+      `${sUrl}/rest/v1/ai_content_cache?select=result&cache_key=eq.${encodeURIComponent(cacheKey)}`,
       {
         headers: { apikey: sKey, Authorization: `Bearer ${sKey}` },
         signal: controller.signal,
@@ -205,7 +297,7 @@ async function checkFittingCache(idempotencyKey: string): Promise<Record<string,
   }
 }
 
-async function storeFittingCache(idempotencyKey: string, result: Record<string, unknown>): Promise<void> {
+async function storeFittingCache(cacheKey: string, result: Record<string, unknown>): Promise<void> {
   const sUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!sUrl || !sKey) return;
@@ -220,9 +312,9 @@ async function storeFittingCache(idempotencyKey: string, result: Record<string, 
         Prefer: "resolution=merge-duplicates",
       },
       body: JSON.stringify({
-        cache_key: `virtual-fitting:${idempotencyKey}`,
+        cache_key: cacheKey,
         task_type: "virtual-fitting",
-        input_hash: idempotencyKey,
+        input_hash: cacheKey,
         result,
         model_used: "gpt-image-1",
         expires_at: expiresAt,
