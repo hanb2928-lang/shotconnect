@@ -84,14 +84,14 @@ const RETRY_INITIAL_DELAY_MS = 1500; // Base delay for first retry, doubled each
 const RUNWAY_SUBMIT_TIMEOUT_MS = 45000;
 const RUNWAY_POLL_TIMEOUT_MS = 10000;
 const EDGE_WALL_CLOCK_BUDGET_MS = 120000;
-const ZOMBIE_JOB_TIMEOUT_MS = 240000; // 4 min — aligned with client circuit breaker, not 15 min
-const SERVER_POLL_MAX_ATTEMPTS = 48; // ~4 min of polling with jitter — aligned with 240s circuit breaker
-const SERVER_POLL_INITIAL_DELAY_MS = 2000;
-const SERVER_POLL_MAX_DELAY_MS = 5000;
-const SERVER_POLL_SELF_INVOKE_TIMEOUT_MS = 15000; // AbortController timeout for self-reinvocation fetch
-const JITTER_MAX_MS = 2000; // Random jitter added to each backoff delay to desynchronize concurrent polls
-const FIRST_POLL_BUFFER_MS = 1000; // Grace period before first Runway poll — runway_task_id propagates within ~1s
-const DRAFT_POLL_INITIAL_DELAY_MS = 1500; // Drafts render faster — poll more aggressively in pre-rendering phases
+const ZOMBIE_JOB_TIMEOUT_MS = 300000; // 5 min — give HD videos enough room to finish
+const SERVER_POLL_MAX_ATTEMPTS = 60; // ~5 min of polling at 5s avg — aligned with 300s zombie timeout
+const SERVER_POLL_INITIAL_DELAY_MS = 1500;
+const SERVER_POLL_MAX_DELAY_MS = 4000;
+const SERVER_POLL_SELF_INVOKE_TIMEOUT_MS = 10000; // AbortController timeout for self-reinvocation fetch
+const JITTER_MAX_MS = 1000; // Random jitter added to each backoff delay to desynchronize concurrent polls
+const FIRST_POLL_BUFFER_MS = 500; // Grace period before first Runway poll — runway_task_id propagates within ~0.5s
+const DRAFT_POLL_INITIAL_DELAY_MS = 1000; // Drafts render faster — poll more aggressively in pre-rendering phases
 const VIDEO_DAILY_LIMIT = 10; // Max AI video generations per IP per day
 
 const VIDEO_UNKNOWN_PATTERNS = [
@@ -411,29 +411,56 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   });
   console.log("[generate-video] Prompt length:", runwayPrompt.length, "| tokens:", modeTokens.length);
 
-  // Fire-and-forget: self-invoke runway-submit mode to call Runway API asynchronously
+  // Directly call Runway API in the background using safeWaitUntil —
+  // eliminates the HTTP self-invoke round-trip that added 1-3s latency.
   if (supabaseUrl && serviceRoleKey) {
-    const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
-    const submitPayload = {
-      mode: "runway-submit",
-      taskId: internalJobId,
-      scanId: body.scanId,
-      runwayPrompt,
-      durationSec,
-      aspectRatio,
-      isDraft,
-      draft: isDraft,
-      hdUpscale,
-      resolution,
-      fps,
-      mainImageUrl: body.mainImageUrl,
-    };
-    safeWaitUntil(invokeRunwaySubmitWithRetry(selfUrl, submitPayload).catch(async (err) => {
-      console.error("[generate-video] Failed to self-invoke runway-submit:", err);
+    const runwayKey = await resolveRunwayKey();
+    if (runwayKey) {
+      safeWaitUntil((async () => {
+        try {
+          await updateVideoJobStep(body.scanId, internalJobId, "submitting");
+
+          const webhookSecret = Deno.env.get("RUNWAY_WEBHOOK_SECRET") ?? "";
+          const webhookBase = `${supabaseUrl}/functions/v1/generate-video?mode=webhook`;
+          const webhookParams = webhookSecret ? `&secret=${encodeURIComponent(webhookSecret)}` : ``;
+          const webhookUrl = `${webhookBase}&scanId=${encodeURIComponent(body.scanId)}${webhookParams}`;
+
+          let promptImage: string | null = body.mainImageUrl ?? null;
+          if (!promptImage) {
+            promptImage = await fetchScanImageUrl(body.scanId);
+          }
+
+          const runwayTaskId = await submitWithRetry(
+            () => submitRunwayTask(runwayPrompt, runwayKey, aspectRatio, durationSec, isDraft, webhookUrl, body.scanId, promptImage, isDraft ? false : hdUpscale, resolution, fps),
+            MAX_RETRIES,
+          );
+
+          await updateRunwayTaskId(body.scanId, internalJobId, runwayTaskId);
+          console.log(`[generate-video] inline submit: Runway task ${runwayTaskId} saved for job ${internalJobId}`);
+
+          // Kick off server-poll via self-invoke (one hop, not two)
+          const selfUrl = `${supabaseUrl}/functions/v1/generate-video`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), SERVER_POLL_SELF_INVOKE_TIMEOUT_MS);
+          await fetch(selfUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey },
+            body: JSON.stringify({ mode: "server-poll", taskId: runwayTaskId, scanId: body.scanId, variationSeed: 0, isDraft }),
+            signal: controller.signal,
+          }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
+        } catch (err) {
+          console.error("[generate-video] inline runway submit failed:", err);
+          if (body.scanId) {
+            await markVideoJobFailed(body.scanId, internalJobId, err instanceof Error ? err.message : "Runway API 호출에 실패했습니다.");
+          }
+        }
+      })());
+    } else {
+      console.error("[generate-video] No Runway API key available");
       if (body.scanId) {
-        await markVideoJobFailed(body.scanId, internalJobId, "Runway API 호출 시작에 실패했습니다.");
+        await markVideoJobFailed(body.scanId, internalJobId, "Runway API 키가 설정되지 않았습니다.");
       }
-    }));
+    }
   }
 
   // Return HTTP 202 Accepted immediately — client polls via Realtime/poll mode
@@ -547,7 +574,7 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
             clearTimeout(timeoutId);
             resolve();
           });
-        }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS + (isDraft ? 0 : 1000));
+        }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS);
       }));
     }
 
@@ -830,7 +857,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     }
     // Reschedule with buffer delay to give runway-submit time to persist the ID.
     // Includes retry-on-failure so a cold-start abort doesn't permanently break the chain.
-    const runwayIdWaitDelay = 7000;
+    const runwayIdWaitDelay = 4000;
     const rescheduleSelfInvoke = (retryNum: number, resolveOuter?: () => void) => {
       if (retryNum >= 3) {
         console.error(`[generate-video] server-poll runway-task-id wait exhausted retries for task ${taskId}`);
@@ -935,7 +962,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     // on native where Realtime events can be dropped during the foreground
     // flush window. Without this backup, a broken webhook + dropped Realtime
     // event leaves the job stuck at 97% indefinitely.
-    const RENDER_POLL_DELAY_MS = 10_000;
+    const RENDER_POLL_DELAY_MS = 5_000;
     const RENDER_POLL_ABORT_MS = RENDER_POLL_DELAY_MS + SERVER_POLL_SELF_INVOKE_TIMEOUT_MS;
     console.log(`[generate-video] server-poll: job ${taskId} reached rendering — continuing at reduced frequency (${RENDER_POLL_DELAY_MS}ms)`);
 
