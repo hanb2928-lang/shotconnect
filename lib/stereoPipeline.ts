@@ -226,7 +226,7 @@ async function uploadAngleShotsConcurrently(
           const sizeMB = (shot.base64.length / 1_000_000).toFixed(1);
           addBreadcrumb('stereoPipeline', `${shotLabel} 업로드 시작 (base64) — ${sizeMB}MB`, 'warning', { angle: shotLabel, base64Bytes: shot.base64.length });
         }
-        const url = await uploadWithRetry(shot.base64!, shot.mimeType || 'image/jpeg', signal, shot.uri);
+        const url = await uploadWithRetry(shot.base64 ?? '', shot.mimeType || 'image/jpeg', signal, shot.uri);
         if (fatalThreshold) {
           const p = extractStoragePath(url);
           if (p) await deleteStorageObjects('scans', [p]).catch(() => {});
@@ -428,7 +428,7 @@ export async function createScanFromAngleShots(
 ): Promise<{ scanId: string; uploadedUrls: string[] }> {
   const aborted = (): boolean => signal?.aborted === true;
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
-  const allShots = sorted.filter((s) => s.base64);
+  const allShots = sorted.filter((s) => s.base64 || s.uri);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
 
   const diagnostics = await preFlightDiagnose(allShots, onValidateProgress);
@@ -501,7 +501,7 @@ export async function runStereoPipeline(
   const uploadedShotCount = existingUploadUrls?.length ?? 0;
   const allShots = uploadedShotCount > 0
     ? sorted.slice(0, Math.min(uploadedShotCount, STEREO_MAX_SHOTS))
-    : sorted.filter((s) => s.base64).slice(0, STEREO_MAX_SHOTS);
+    : sorted.filter((s) => s.base64 || s.uri).slice(0, STEREO_MAX_SHOTS);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
   if (allShots.length < STEREO_MIN_SHOTS) {
     throw new Error(`입체컷 오토는 최소 ${STEREO_MIN_SHOTS}컷이 필요합니다. 정면, 좌측, 우측을 촬영해주세요.`);
