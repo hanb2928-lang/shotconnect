@@ -86,8 +86,8 @@ const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 12000;
 const RUNWAY_POLL_FALLBACK_START_MS = 20_000;
 const FIRST_POLL_DELAY_MS = 3000;
 const POLL_MIN_INTERVAL_MS = 2000;
-const POLL_MAX_INTERVAL_MS = 15000;
-const POLL_BACKOFF_FACTOR = 1.6;
+const POLL_MAX_INTERVAL_MS = 8000;
+const POLL_BACKOFF_FACTOR = 1.3;
 const POLL_FAST_PHASE_MS = 15_000;
 const POLL_NORMAL_PHASE_MS = 30_000;
 const CHANNEL_RECONNECT_DELAY_MS = 3000;
@@ -318,7 +318,7 @@ async function invokeWithNetworkRetry(
 }
 
 
-const DRAFT_PROGRESS_K = 35;
+const DRAFT_PROGRESS_K = 25;
 const FULL_PROGRESS_K = 120;
 
 function computeTimeProgress(elapsedSec: number, isDraft: boolean): number {
@@ -1665,11 +1665,22 @@ export function subscribeVideoJob(
   let runwayFallbackStarted = false;
 
   const startRunwayPollFallback = () => {
-    if (settled || isPaused || runwayFallbackStarted || isSoftTaskId) return;
+    if (settled || isPaused || runwayFallbackStarted) return;
     runwayFallbackStarted = true;
-    _dbg('startRunwayPollFallback');
+    _dbg('startRunwayPollFallback', { isSoftTaskId });
     const runwayPoll = async () => {
       if (settled) return;
+      // For soft-task IDs (submit timed out), there's no real Runway task to
+      // poll directly. Use checkAndNotify (DB poll by scanId) instead so we
+      // still detect completion via the video_jobs row or scans.video_url.
+      if (isSoftTaskId) {
+        await checkAndNotify();
+        if (settled) return;
+        if (!settled && !isPaused) {
+          runwayPollTimer = setTimeout(runwayPoll, RUNWAY_POLL_FALLBACK_INTERVAL_MS);
+        }
+        return;
+      }
       try {
         const pollController = new AbortController();
         const pollTimeoutId = setTimeout(() => pollController.abort(), INVOKE_TIMEOUT_MS);

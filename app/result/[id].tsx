@@ -1133,7 +1133,7 @@ function ResultScreenInner() {
         // progress while waiting for the server-side webhook/poll to deliver the result.
         // Was 0.97 which caused the visible "stuck at 97%" symptom. 0.95 gives the
         // creep timer room to advance visually while the server delivers the result.
-        const simulated = Math.min(0.08 + 0.87 * (1 - Math.exp(-elapsed / 30)), 0.95);
+        const simulated = Math.min(0.08 + 0.90 * (1 - Math.exp(-elapsed / 30)), 0.98);
         setVideoGenProgress((prev) => {
           if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
           // Never regress progress — the server/poll/Realtime may have set it higher
@@ -1766,7 +1766,7 @@ function ResultScreenInner() {
           const startTime = Date.now();
           let consecutiveErrors = 0;
           const MAX_CONSECUTIVE_ERRORS = 8;
-          const POLL_TIMEOUT_MS = 1800000;
+          const POLL_TIMEOUT_MS = 360000;
 
           const pollOnce = async () => {
             if (cancelled) return;
@@ -1833,7 +1833,7 @@ function ResultScreenInner() {
                 if (mountedRef.current) {
                   setVideoGenProgress({
                     phase: 'generating',
-                    progress: Math.min(numericProgress, 0.95),
+                    progress: Math.min(numericProgress, 0.98),
                     message: `AI가 영상을 렌더링하고 있어요${pctLabel}`,
                     elapsedSec: elapsed,
                   });

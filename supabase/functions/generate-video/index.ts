@@ -1151,7 +1151,7 @@ async function checkVideoJobStatus(scanId: string, taskId: string): Promise<{ st
         const isZombie = (row.status === 'PENDING' || row.status === 'PROCESSING' || row.status === 'RUNNING' || row.status === 'THROTTLED')
           && Date.now() - new Date(row.created_at).getTime() > ZOMBIE_JOB_TIMEOUT_MS;
         if (isZombie) {
-          await markVideoJobFailed(scanId, taskId, '영상 생성이 6분 이상 진행 중 상태로 멈춰 있어 좀비 작업으로 분류되었습니다. 다시 시도해주세요.');
+          await markVideoJobFailed(scanId, taskId, '영상 생성이 4분 이상 진행 중 상태로 멈춰 있어 좀비 작업으로 분류되었습니다. 다시 시도해주세요.');
           return { status: 'FAILED', error: '영상 생성 작업이 시간 초과로 실패했습니다. 다시 시도해주세요.' };
         }
         return {
@@ -1333,7 +1333,7 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
         const isZombie = (row.status === 'PENDING' || row.status === 'PROCESSING' || row.status === 'RUNNING' || row.status === 'THROTTLED')
           && Date.now() - new Date(row.created_at).getTime() > ZOMBIE_JOB_TIMEOUT_MS;
         if (isZombie) {
-          await markVideoJobFailed(scanId, row.task_id, '영상 생성이 6분 이상 진행 중 상태로 멈춰 있어 좀비 작업으로 분류되었습니다. 다시 시도해주세요.');
+          await markVideoJobFailed(scanId, row.task_id, '영상 생성이 4분 이상 진행 중 상태로 멈춰 있어 좀비 작업으로 분류되었습니다. 다시 시도해주세요.');
           return { status: 'FAILED', error: '영상 생성 작업이 시간 초과로 실패했습니다. 다시 시도해주세요.' };
         }
         return {
