@@ -702,7 +702,7 @@ function waitForVideoCompletion(
       if (channel) {
         const ch = channel;
         channel = null;
-        safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+        try { safeRemoveChannel(ch); } catch { /* non-fatal */ }
       }
       if (pollTimer) clearTimeout(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -1557,7 +1557,7 @@ export function subscribeVideoJob(
     if (channel) {
       const ch = channel;
       channel = null;
-      safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+      try { safeRemoveChannel(ch); } catch { /* non-fatal */ }
     }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -2086,7 +2086,7 @@ export function subscribeHdUpgrade(
     if (channel) {
       const ch = channel;
       channel = null;
-      safeSetTimeout(pendingRemovals, () => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+      try { safeRemoveChannel(ch); } catch { /* non-fatal */ }
     }
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);

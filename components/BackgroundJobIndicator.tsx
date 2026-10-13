@@ -79,18 +79,32 @@ export function BackgroundJobIndicator() {
     loadJobs();
     const interval = setInterval(loadJobs, 5000);
 
+    // Debounce Realtime-triggered reloads: multiple job rows can update in
+    // rapid succession, and without coalescing each event fires a separate
+    // query pair, causing a thundering herd. Wait 800ms after the last
+    // event before reloading, so a burst of N events results in 1 reload.
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedReload = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        loadJobs();
+      }, 800);
+    };
+
     const channel = supabase
       .channel('bg-jobs-indicator')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'video_jobs' },
-        () => loadJobs(),
+        debouncedReload,
       )
       .subscribe();
 
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
   }, [loadJobs]);

@@ -486,7 +486,7 @@ function ResultScreenInner() {
   const videoUnsubRef = useRef<(() => void) | null>(null);
   const currentVideoTaskIdRef = useRef<string | null>(null);
   const videoGenLockRef = useRef(false);
-  const draftProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const navTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoJobSettledRef = useRef(false);
   const isFetchingRef = useRef(false);
   const [showAdvancedCamera, setShowAdvancedCamera] = useState(false);
@@ -1128,10 +1128,11 @@ function ResultScreenInner() {
       setVideoGenProgress(null);
 
       // Navigate to videos tab after a brief toast
-      setTimeout(() => {
+      navTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
           router.push('/(tabs)/videos');
         }
+        navTimeoutRef.current = null;
       }, 1500);
 
       // Progress simulator is no longer needed — the user is navigated away
@@ -1143,13 +1144,6 @@ function ResultScreenInner() {
         setPushPromptVisible(true);
       }
 
-      const clearDraftProgress = () => {
-        if (draftProgressTimerRef.current) {
-          clearInterval(draftProgressTimerRef.current);
-          draftProgressTimerRef.current = null;
-        }
-      };
-
       // Subscribe to the video job via Realtime — non-blocking.
       // When the draft completes, show it immediately. If HD was requested,
       // kick off the HD upgrade in the background after the draft is ready.
@@ -1157,7 +1151,6 @@ function ResultScreenInner() {
       videoUnsubRef.current = subscribeVideoJob(scan.id, submitResult.taskId, (result) => {
         if (!mountedRef.current) return;
         try {
-        clearDraftProgress();
         if (result.status !== 'SUCCESS' && result.status !== 'FAILED') {
           if (result.step || result.progress != null) {
             setVideoGenProgress((prev) => {
@@ -1185,7 +1178,6 @@ function ResultScreenInner() {
         }
         if (result.status === 'SUCCESS' && result.videoUrl) {
           videoJobSettledRef.current = true;
-          clearDraftProgress();
           setDraftVideoUrl(result.videoUrl);
           setGeneratedVideoUrl(result.videoUrl);
           setVideoStage('draft_ready');
@@ -1267,7 +1259,6 @@ function ResultScreenInner() {
           });
         } else if (result.status === 'FAILED') {
           videoJobSettledRef.current = true;
-          clearDraftProgress();
           const msg = result.error ?? 'AI 영상 생성에 실패했습니다.';
           setVideoGenError(msg);
           setVideoStage('failed');
@@ -1301,10 +1292,6 @@ function ResultScreenInner() {
           const { refundCredits } = await import('@/lib/credits');
           await refundCredits(hdUpscale ? 'video_hd' : 'video_draft');
         } catch { /* best-effort */ }
-      }
-      if (draftProgressTimerRef.current) {
-        clearInterval(draftProgressTimerRef.current);
-        draftProgressTimerRef.current = null;
       }
     }
     } catch {
@@ -1611,10 +1598,6 @@ function ResultScreenInner() {
       videoUnsubRef.current = null;
       setTimeout(() => { try { hdUnsub?.(); } catch { /* non-fatal */ } }, 0);
       setTimeout(() => { try { videoUnsub?.(); } catch { /* non-fatal */ } }, 0);
-      if (draftProgressTimerRef.current) {
-        clearInterval(draftProgressTimerRef.current);
-        draftProgressTimerRef.current = null;
-      }
       if (stepAdvanceTimerRef.current) {
         clearInterval(stepAdvanceTimerRef.current);
         stepAdvanceTimerRef.current = null;
@@ -1622,6 +1605,10 @@ function ResultScreenInner() {
       if (localPollTimerRef.current) {
         clearInterval(localPollTimerRef.current);
         localPollTimerRef.current = null;
+      }
+      if (navTimeoutRef.current) {
+        clearTimeout(navTimeoutRef.current);
+        navTimeoutRef.current = null;
       }
       if (muxedBlobUrlRef.current) {
         URL.revokeObjectURL(muxedBlobUrlRef.current);
