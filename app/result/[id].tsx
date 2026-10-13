@@ -1126,24 +1126,19 @@ function ResultScreenInner() {
         return;
       }
 
-      // Fire & Forget: job is safely queued on the server. Navigate the
-      // user to the videos tab immediately — the Realtime subscription
-      // and background polling will deliver the result when they return.
+      // Job is safely queued on the server. Keep the user on this page
+      // with live progress visible — the Realtime subscription and local
+      // DB poll will update the progress tracker in-place.
       setVideoStage('drafting');
-      setBgJobNotice('영상이 안전하게 작업 큐에 등록되었습니다! 완료되면 알림으로 알려드릴게요. 이 화면을 떠나셔도 됩니다.');
-      setIsGeneratingVideo(false);
-      setVideoGenProgress(null);
-
-      // Navigate to videos tab after a brief toast
-      navTimeoutRef.current = setTimeout(() => {
-        if (mountedRef.current) {
-          router.push('/(tabs)/videos');
-        }
-        navTimeoutRef.current = null;
-      }, 1500);
-
-      // Progress simulator is no longer needed — the user is navigated away
-      // and the videos tab shows the job status via its own indicator.
+      setVideoJobPending(true);
+      videoJobPendingRef.current = true;
+      setBgJobNotice('영상이 작업 큐에 등록되었습니다! 진행 상황을 이 화면에서 확인할 수 있어요.');
+      setVideoGenProgress((prev) => prev ?? {
+        phase: 'generating',
+        progress: 0.15,
+        message: 'AI가 영상을 렌더링하고 있어요...',
+        elapsedSec: 0,
+      });
 
       // Optimal push permission timing: ask after the user submits their first video generation.
       // This is the moment they have the highest intent to know when the result is ready.
@@ -1161,7 +1156,8 @@ function ResultScreenInner() {
         if (result.status !== 'SUCCESS' && result.status !== 'FAILED') {
           if (result.step || result.progress != null) {
             setVideoGenProgress((prev) => {
-              if (!prev || prev.phase === 'completed' || prev.phase === 'error') return prev;
+              if (!prev) return prev;
+              if (prev.phase === 'completed' || prev.phase === 'error') return prev;
               const serverProgress = typeof result.progress === 'number' && Number.isFinite(result.progress)
                 ? Math.max(0, Math.min(0.99, result.progress))
                 : prev.progress;
