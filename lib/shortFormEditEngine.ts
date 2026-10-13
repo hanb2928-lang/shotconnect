@@ -555,12 +555,23 @@ function applyToneToBenefit(benefit: string, tts: string, tone: ContentTone, ben
   return { benefit: adjustedBenefit, tts: adjustedTts };
 }
 
-const NARRATION_CUES = {
+const NARRATION_CUES_5S = {
+  gazeHook: 'VO: 0~2초 강력 후킹 — 스마트폰으로 대충 찍은 듯한 거친 비주얼로 시작, 언박싱 또는 실제 사용 환경으로 경계심 허물기. 자연스러운 구어체로 손실 회피 자극 멘트',
+  needDiscovery: 'VO: 2~3.5초 문제 제기 — 일상의 불편함 폭로, 치명적인 귀찮음 해결 시연. ASMR 요소 활용, 실용적 효용 즉시 보여주기',
+  transformation: 'VO: 3.5~4.5초 변화 제시 — before/after 비교로 압도적 시간/비용 절감 효과. 디테일 클로즈업으로 신뢰 구축',
+  ctaCall: 'VO: 4.5~5초 행동 유도 — "🛍️ 프로필 링크에서 지금 바로" 식 직접적 행동 지시. 구체적 액션 명시, CTA 자막 번인',
+};
+
+const NARRATION_CUES_DEFAULT = {
   gazeHook: 'VO: 스마트폰으로 대충 찍은 듯한 거친 비주얼로 시작 — 0~3초, 언박싱 또는 실제 사용 환경으로 경계심 허물기. 자연스러운 구어체로 손실 회피 자극 멘트',
   needDiscovery: 'VO: 일상의 불편함 폭로 — 3~7초, 치명적인 귀찮음 해결 시연. ASMR 요소 활용, 실용적 효용 1초 만에 보여주기',
   transformation: 'VO: 사용 후 변화 — 7~11초, before/after 비교로 압도적 시간/비용 절감 효과. 디테일 클로즈업, 구매자 리액션 삽입',
   ctaCall: 'VO: 행동 지향 CTA — 11~15초, "🛍️ 프로필 링크에서 오늘만 이 가격으로 만나보세요" 식 직접적 행동 지시. 구체적 액션(지금 바로, 프로필 링크, 오늘만) 명시, CTA 자막 번인',
 };
+
+function getNarrationCuesForDuration(durationSec: number) {
+  return durationSec <= 5 ? NARRATION_CUES_5S : NARRATION_CUES_DEFAULT;
+}
 
 function pickStoryText(pool: string[], productHint: string): string {
   const idx = Math.floor(Math.random() * pool.length);
@@ -580,7 +591,7 @@ function buildStoryNarrative(
     needDiscovery: pickStoryText(STORY_NEED_DISCOVERY, productHint),
     transformation: pickStoryText(STORY_TRANSFORMATION, productHint),
     ctaCall: pickStoryText(STORY_CTA, productHint),
-    narrationCues: NARRATION_CUES,
+    narrationCues: NARRATION_CUES_DEFAULT,
   };
 }
 
@@ -696,6 +707,7 @@ function computeEditPlan(
   const matchedHook = hookOptions.find((h) => h.text === hook);
   const emotion: EmotionPhase = matchedHook?.emotion ?? 'curiosity';
   const story = applyToneToStory(buildStoryNarrative(hook, emotion, productName), contentTone);
+  story.narrationCues = getNarrationCuesForDuration(totalDurationSec);
   const segmentTexts = buildSegmentTexts(hook, hookOptions, customPrompt, productName);
 
   const productCategory = productVision?.productCategory ?? '';
@@ -710,7 +722,9 @@ function computeEditPlan(
   const totalMs = secToMs(d);
   // Ratios for the 4 story phases: hook 20%, need 27%, transform 26%, cta 14%.
   // The remaining ~13% goes to the disclosure overlay tail.
-  const phaseRatios = [0.20, 0.27, 0.26, 0.14];
+  const phaseRatios = totalDurationSec <= 5
+    ? [0.35, 0.30, 0.20, 0.10]
+    : [0.20, 0.27, 0.26, 0.14];
   const boundaries = distributeProportionalMs(totalMs, phaseRatios);
 
   // Invariant check: boundaries must sum exactly to totalMs.
@@ -721,7 +735,9 @@ function computeEditPlan(
 
   const segLabels = ['시선 포착', '서사 전개', '변화·몰입', 'CTA'] as const;
   const segPurposes = [
-    '상위 1% 후킹: 0~3초 시선 강탈, 화면 전환 없음, 오디오 빌드업으로 이탈 방지',
+    totalDurationSec <= 5
+      ? '상위 1% 후킹: 0~2초 시선 강탈, 화면 전환 없음, 오디오 빌드업으로 이탈 방지'
+      : '상위 1% 후킹: 0~3초 시선 강탈, 화면 전환 없음, 오디오 빌드업으로 이탈 방지',
     '왜 이 제품이 필요한지 리얼리티 서사로 연결, 다각도 입체 컷 전환',
     '사용 후 일상적 변화를 감성적으로 전달, 디테일 클로즈업 전환',
     '시청자를 향한 직접적 행동 유도, 감정 최고점에서 클로징',
@@ -888,8 +904,8 @@ export function getRetentionFormula(platform: ShortFormPlatform | string): Reten
   const isTikTok = platform === 'tiktok';
   const isYouTube = platform === 'youtube';
   return {
-    hookDurationSec: 3,
-    cutIntervalSec: isTikTok ? 1.5 : isYouTube ? 2.5 : 2,
+    hookDurationSec: 2,
+    cutIntervalSec: isTikTok ? 1.0 : isYouTube ? 1.5 : 1.2,
     rhythmPattern: isTikTok ? 'rapid' : isYouTube ? 'medium' : 'medium',
     techniques: [
       '초반 3초 훅: 시청자 이탈 방지',

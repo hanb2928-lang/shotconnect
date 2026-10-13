@@ -3957,10 +3957,10 @@ function ResultScreenInner() {
           onDismissImageError={() => setImageGenError(null)}
           previewEditPlan={previewEditPlan}
           narrativePlan={narrativePlan}
-          bgmVolume={bgmVolume}
-          copyOverlays={copyOverlaysForPreview}
-          narrationActive={narrationPlaying}
-          ttsUrl={ttsUrl ?? scan?.tts_url ?? null}
+          bgmVolume={isCleanVideoMode ? 0 : bgmVolume}
+          copyOverlays={isCleanVideoMode ? null : copyOverlaysForPreview}
+          narrationActive={!isCleanVideoMode && narrationPlaying}
+          ttsUrl={isCleanVideoMode ? null : (ttsUrl ?? scan?.tts_url ?? null)}
           onDownload={handleSaveVideo}
         />
 

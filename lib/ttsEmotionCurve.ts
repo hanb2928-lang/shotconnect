@@ -86,10 +86,15 @@ export function generateEmotionCurve(
   totalDurationSec: number,
   prosodyProfile?: ProsodyProfile,
 ): EmotionCurve {
-  const phases: EmotionPhase[] = ['attention', 'interest', 'desire', 'conviction', 'action'];
-  const ratios = phases.map((p) => PHASE_RATIOS[p]);
+  const allPhases: EmotionPhase[] = ['attention', 'interest', 'desire', 'conviction', 'action'];
+  const phases = totalDurationSec <= 5
+    ? (['attention', 'desire', 'action'] as EmotionPhase[])
+    : allPhases;
+  const activeRatios = totalDurationSec <= 5
+    ? [0.35, 0.40, 0.25]
+    : phases.map((p) => PHASE_RATIOS[p]);
   const totalMs = secToMs(totalDurationSec);
-  const boundaries = distributeProportionalMs(totalMs, ratios);
+  const boundaries = distributeProportionalMs(totalMs, activeRatios);
 
   // Invariant check: boundaries must sum exactly to totalMs.
   const invariantError = validateTimelineInvariant(boundaries, totalMs);

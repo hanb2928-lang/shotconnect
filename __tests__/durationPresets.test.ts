@@ -9,8 +9,8 @@ import {
 } from '@/lib/durationPresets';
 
 describe('DURATION_PRESETS', () => {
-  it('6개의 프리셋이 있다', () => {
-    expect(DURATION_PRESETS).toHaveLength(6);
+  it('7개의 프리셋이 있다', () => {
+    expect(DURATION_PRESETS).toHaveLength(7);
   });
 
   it('모든 프리셋이 필수 필드를 가진다', () => {
@@ -30,8 +30,8 @@ describe('DURATION_PRESETS', () => {
 });
 
 describe('DEFAULT_DURATION', () => {
-  it('20000ms (20초)이다', () => {
-    expect(DEFAULT_DURATION).toBe(15000);
+  it('5000ms (5초)이다', () => {
+    expect(DEFAULT_DURATION).toBe(5000);
   });
 });
 

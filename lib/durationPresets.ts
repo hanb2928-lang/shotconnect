@@ -9,6 +9,12 @@ export interface DurationPreset {
 
 export const DURATION_PRESETS: DurationPreset[] = [
   {
+    value: 5000,
+    label: '5초',
+    tier: 'viral',
+    desc: '초안 최적 · 빠른 렌더링 + 즉각 시선 집중',
+  },
+  {
     value: 12000,
     label: '12초',
     tier: 'viral',
@@ -46,7 +52,8 @@ export const DURATION_PRESETS: DurationPreset[] = [
   },
 ];
 
-export const DEFAULT_DURATION = 15000;
+export const DEFAULT_DURATION = 5000;
+export const DRAFT_DEFAULT_DURATION = 5000;
 
 export function tierLabel(tier: DurationTier): string {
   switch (tier) {
