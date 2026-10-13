@@ -75,7 +75,7 @@ Deno.serve(async (req: Request) => {
     if (body.targetDurationSec) {
       const estimatedDurationSec = estimateDuration(rawText, baseSpeed);
       if (estimatedDurationSec > 0) {
-        const speedAdjustment = body.targetDurationSec / estimatedDurationSec;
+        const speedAdjustment = estimatedDurationSec / body.targetDurationSec;
         // If the text is too long for the target duration, speed up (max 2x).
         // If the text is too short, slow down (min 0.5x) to fill the duration.
         effectiveSpeed = Math.min(Math.max(baseSpeed * speedAdjustment, 0.5), 2.0);
@@ -199,7 +199,7 @@ Deno.serve(async (req: Request) => {
     // Include audio post-processing metadata in response for client-side rendering
     const audioMeta = body.audioPostProcessing || undefined;
     const effectiveSpeedForDuration = body.targetDurationSec
-      ? Math.min(Math.max(baseSpeed * (body.targetDurationSec / Math.max(estimateDuration(rawText, baseSpeed), 1)), 0.5), 2.0)
+      ? Math.min(Math.max(baseSpeed * (Math.max(estimateDuration(rawText, baseSpeed), 1) / body.targetDurationSec), 0.5), 2.0)
       : baseSpeed;
     return new Response(
       JSON.stringify({

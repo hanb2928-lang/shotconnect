@@ -95,7 +95,7 @@ export function sampleVideoLuminance(
   video: HTMLVideoElement,
   region: 'top' | 'center' | 'bottom',
 ): number {
-  if (Platform.OS !== 'web') return 0.3;
+  if (Platform.OS !== 'web') return 0.5;
   const canvas = document.createElement('canvas');
   const sampleW = 64;
   const sampleH = 48;

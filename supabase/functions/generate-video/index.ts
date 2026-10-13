@@ -340,9 +340,11 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   const sanitizedProductName = sanitizeVideoProductName(body.productName);
   const sanitizedCaptionText = sanitizeVideoText(body.captionText);
 
+  const sanitizedMemeText = sanitizeVideoText(body.memeText);
+
   let effectivePrompt = body.prompt ?? "";
   if (effectivePrompt.trim().length === 0) {
-    effectivePrompt = buildAutoPrompt(sanitizedProductName, body.productVision, sanitizedCaptionText, body.isCleanVideoMode === true, requestedDuration, body.enableOrbit360 === true, typeof body.orbitSpeed === 'number' ? body.orbitSpeed : undefined, body.enableFabricPhysics === true, body.memeFormat, body.memeText, body.selectedMode, body.enableVirtualFitting === true);
+    effectivePrompt = buildAutoPrompt(sanitizedProductName, body.productVision, sanitizedCaptionText, body.isCleanVideoMode === true, requestedDuration, body.enableOrbit360 === true, typeof body.orbitSpeed === 'number' ? body.orbitSpeed : undefined, body.enableFabricPhysics === true, body.memeFormat, sanitizedMemeText, body.selectedMode, body.enableVirtualFitting === true);
   }
   const aspectRatio = body.aspectRatio ?? "9:16";
   const variationSeed = body.variationSeed ?? 0;
@@ -405,7 +407,7 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
     enableFabricPhysics: body.enableFabricPhysics,
     isDraft,
     memeFormat: body.memeFormat,
-    memeText: body.memeText,
+    memeText: sanitizedMemeText,
   });
   console.log("[generate-video] Prompt length:", runwayPrompt.length, "| tokens:", modeTokens.length);
 
@@ -1899,7 +1901,8 @@ function buildAutoPrompt(
 
   parts.push(buildOpeningHookSequenceTag(false, vision));
   if (memeFormat && memeText) {
-    parts.push(`meme_overlay: format=${memeFormat}, text="${safeSlice(memeText, 80)}", burn-in meme caption with B-grade energy, ironic Korean colloquial speech`);
+    const sanitizedMemeText = sanitizeVideoText(memeText).replace(/"/g, '\"');
+    parts.push(`meme_overlay: format=${memeFormat}, text="${safeSlice(sanitizedMemeText, 80)}", burn-in meme caption with B-grade energy, ironic Korean colloquial speech`);
   } else if (memeFormat) {
     parts.push(`meme_overlay: format=${memeFormat}, B-grade meme energy, ironic Korean colloquial speech`);
   }
@@ -2501,7 +2504,8 @@ function buildCompactRunwayPrompt(p: CompactPromptParams): string {
   if (negTag) tokens.push(negTag);
 
   if (p.memeFormat && p.memeText) {
-    tokens.push(`meme_overlay=format:${p.memeFormat}, text:"${safeSlice(p.memeText, 60)}", burn-in meme caption, B-grade meme energy, ironic colloquial Korean speech`);
+    const sanitizedMemeText = sanitizeVideoText(p.memeText).replace(/"/g, '\"');
+    tokens.push(`meme_overlay=format:${p.memeFormat}, text:"${safeSlice(sanitizedMemeText, 60)}", burn-in meme caption, B-grade meme energy, ironic colloquial Korean speech`);
   } else if (p.memeFormat) {
     tokens.push(`meme_overlay=format:${p.memeFormat}, B-grade meme energy, ironic colloquial Korean speech`);
   }

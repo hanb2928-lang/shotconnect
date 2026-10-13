@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ViewStyle } from 'react-native';
 import { Volume2, Play, Pause, Loader2, AlertCircle, VolumeX } from 'lucide-react-native';
+import { useVideoPlayer } from 'expo-video';
 import { theme } from '@/lib/theme';
 
 interface NarrationPlayerProps {
@@ -24,6 +25,37 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
   const fallbackUtterRef = useRef<SpeechSynthesisUtterance | null>(null);
   const onEndedCallbackRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(true);
+  const nativePlayStateRef = useRef(false);
+
+  const nativePlayer = useVideoPlayer(ttsUrl ?? '', (p) => {
+    p.loop = false;
+    p.muted = false;
+  });
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = nativePlayer.addListener('statusChange', (event: { status: string }) => {
+      if (!mountedRef.current) return;
+      if (event.status === 'readyToPlay') {
+        setIsLoading(false);
+      } else if (event.status === 'error') {
+        setIsLoading(false);
+        notifyPlayState(false);
+        setPlayError('오디오 재생에 실패했습니다');
+      }
+    }) as any;
+    return () => { sub?.remove?.(); };
+  }, [nativePlayer]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = nativePlayer.addListener('playToEnd', () => {
+      if (!mountedRef.current) return;
+      nativePlayStateRef.current = false;
+      notifyPlayState(false);
+    }) as any;
+    return () => { sub?.remove?.(); };
+  }, [nativePlayer]);
 
   const notifyPlayState = useCallback((playing: boolean) => {
     setIsPlaying(playing);
@@ -131,11 +163,36 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
     });
   }, []);
 
-  const handlePlayPause = useCallback(async () => {
+  const handleNativePlayPause = useCallback(() => {
     if (!ttsUrl) return;
     setPlayError(null);
+    if (nativePlayStateRef.current) {
+      try { nativePlayer.pause(); } catch { /* ignore */ }
+      nativePlayStateRef.current = false;
+      notifyPlayState(false);
+      return;
+    }
+    setIsLoading(true);
+    try {
+      nativePlayer.play();
+      nativePlayStateRef.current = true;
+      setIsLoading(false);
+      notifyPlayState(true);
+    } catch {
+      setIsLoading(false);
+      notifyPlayState(false);
+      setPlayError('오디오 재생에 실패했습니다');
+    }
+  }, [ttsUrl, nativePlayer, notifyPlayState]);
+
+  const handlePlayPause = useCallback(async () => {
+    if (!ttsUrl) return;
+    if (Platform.OS !== 'web') {
+      handleNativePlayPause();
+      return;
+    }
+    setPlayError(null);
     setNeedsTouchRetry(false);
-    if (Platform.OS !== 'web') { setIsLoading(false); return; }
     if (isPlaying) {
       if (audioRef.current) audioRef.current.pause();
       if (usingFallback && typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
@@ -209,21 +266,27 @@ export function NarrationPlayer({ ttsUrl, ttsLoading, narrationText, onRegenerat
         setPlayError('재생을 시작할 수 없습니다');
       }
     }
-  }, [ttsUrl, isPlaying, usingFallback, narrationText, notifyPlayState, unlockAudioContext, playWhenReady, speakWithWebSpeech]);
+  }, [ttsUrl, isPlaying, usingFallback, narrationText, notifyPlayState, unlockAudioContext, playWhenReady, speakWithWebSpeech, handleNativePlayPause]);
 
   const handleTouchRetry = useCallback(async () => {
-    if (!audioRef.current) return;
-    setNeedsTouchRetry(false);
-    setPlayError(null);
-    const ctx = unlockAudioContext();
-    if (ctx && ctx.state === 'suspended') await ctx.resume().catch(() => {});
-    audioRef.current.muted = false;
-    audioRef.current.volume = 1.0;
-    if (audioRef.current.paused) {
-      try { await audioRef.current.play(); notifyPlayState(true); }
+    if (audioRef.current) {
+      setNeedsTouchRetry(false);
+      setPlayError(null);
+      const ctx = unlockAudioContext();
+      if (ctx && ctx.state === 'suspended') await ctx.resume().catch(() => {});
+      audioRef.current.muted = false;
+      audioRef.current.volume = 1.0;
+      if (audioRef.current.paused) {
+        try { await audioRef.current.play(); notifyPlayState(true); }
+        catch { setPlayError('재생을 시작할 수 없습니다'); }
+      } else { notifyPlayState(true); }
+    } else if (Platform.OS !== 'web') {
+      setNeedsTouchRetry(false);
+      setPlayError(null);
+      try { nativePlayer.play(); nativePlayStateRef.current = true; notifyPlayState(true); }
       catch { setPlayError('재생을 시작할 수 없습니다'); }
-    } else { notifyPlayState(true); }
-  }, [unlockAudioContext, notifyPlayState]);
+    }
+  }, [unlockAudioContext, notifyPlayState, nativePlayer]);
 
   const handlePlayPress = useCallback(() => {
     if (needsTouchRetry) handleTouchRetry();

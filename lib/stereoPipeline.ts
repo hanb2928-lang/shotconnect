@@ -779,7 +779,7 @@ export async function runStereoPipeline(
   // can display them. In clean mode, all text fields are empty and cleanMode
   // flag is set so the result page auto-enables clean video mode.
   const hookText = cleanMode ? '' : (editPlan.selectedHook || '이거 보면 무조건 클릭');
-  const captionText = cleanMode ? '' : (editPlan.segments.map((s) => s.textOverlay).filter(Boolean).join('\n') || editPlan.selectedHook || '지금 확인하세요');
+  const captionText = cleanMode ? '' : (editPlan.segments.map((s) => s.textOverlay).filter(Boolean).join(' / ') || editPlan.selectedHook || '지금 확인하세요');
   const templateData = {
     priceLabel: '',
     oneLiner: hookText,

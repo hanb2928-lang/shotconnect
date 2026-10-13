@@ -1082,7 +1082,7 @@ function ResultScreenInner() {
           bgmMood: inlineEdit.bgmMood,
           captionText: sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || (visionData?.suggestedCopyLayers ? `${visionData.suggestedCopyLayers.primary ?? ''} ${visionData.suggestedCopyLayers.secondary ?? ''}` : '') || '시선 집중! 지금 바로 확인하세요'),
           platform: targetPlatform,
-          hookCategory: inlineEdit.hookEffect || 'curiosity',
+          hookCategory: contentPurpose === 'monetization' ? 'social_proof' : 'curiosity',
           productVision: visionData,
           isCleanVideoMode,
           promptStrength,
@@ -1101,7 +1101,7 @@ function ResultScreenInner() {
           orbitSpeed: 1.0,
           enableFabricPhysics: isCleanVideoMode,
           memeFormat: isCleanVideoMode ? undefined : (contentPurpose === 'monetization' ? 'relatable-agony' : 'reverse-psychology'),
-          memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || ''),
+          memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || '시선 집중! 지금 바로 확인하세요'),
         },
       );
 
@@ -1220,7 +1220,7 @@ function ResultScreenInner() {
             bgmMood: inlineEdit.bgmMood,
             captionText: sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || (visionData?.suggestedCopyLayers ? `${visionData.suggestedCopyLayers.primary ?? ''} ${visionData.suggestedCopyLayers.secondary ?? ''}` : '') || '시선 집중! 지금 바로 확인하세요'),
             platform: targetPlatform,
-            hookCategory: inlineEdit.hookEffect || 'curiosity',
+            hookCategory: contentPurpose === 'monetization' ? 'social_proof' : 'curiosity',
             productVision: visionData,
             isCleanVideoMode,
             promptStrength,
@@ -1238,7 +1238,7 @@ function ResultScreenInner() {
             orbitSpeed: 1.0,
             enableFabricPhysics: isCleanVideoMode,
             memeFormat: isCleanVideoMode ? undefined : (contentPurpose === 'monetization' ? 'relatable-agony' : 'reverse-psychology'),
-            memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || ''),
+            memeText: isCleanVideoMode ? undefined : sanitizeVideoText(inlineEdit.captionText || activeHookRef.current || scan.summary || '시선 집중! 지금 바로 확인하세요'),
           }).then(({ hdJobId }) => {
             if (!mountedRef.current) return;
             hdUnsubRef.current = subscribeHdUpgrade(scan.id, submitResult.taskId, (hdResult) => {
@@ -3134,7 +3134,7 @@ function ResultScreenInner() {
   }, [shareText, targetPlatform]);
 
   const handleOtherSnsShare = useCallback(async () => {
-    const fullShareText = `${shareText}${shortUrl ? `\n\n${shortUrl}` : ''}`;
+    const fullShareText = shareText;
     try {
       if (Platform.OS === 'web' && navigator.share) {
         await navigator.share({ title: activeProductName || scan?.title || 'ShotConnect', text: fullShareText, url: shortUrl || undefined });
