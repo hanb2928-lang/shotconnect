@@ -1784,7 +1784,7 @@ export function subscribeVideoJob(
       removeBgPause();
       const msg = '비디오 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.';
       if (scanId) {
-        void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).eq('task_id', taskId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
+        void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).eq('task_id', taskId).neq('status', 'SUCCESS').neq('status', 'FAILED').then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
       }
       callback({ status: 'FAILED', error: msg });
     }).catch(() => {}).finally(() => { /* release promise ref */ });
@@ -1832,7 +1832,7 @@ export function subscribeVideoJob(
           removeBgPause();
           const msg = '비디오 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.';
           if (scanId) {
-            void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).eq('task_id', taskId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
+            void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).eq('task_id', taskId).neq('status', 'SUCCESS').neq('status', 'FAILED').then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
           }
           callback({ status: 'FAILED', error: msg });
         }).catch(() => {}).finally(() => { /* release promise ref */ });

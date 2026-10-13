@@ -18,7 +18,7 @@ import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
 import { recordSuccessfulGeneration, recordDiagnostic, type DiagnosticEvent } from '@/lib/aiSelfDiagnostic';
-import { stepToProgress } from '@/lib/videoGenSteps';
+import { stepToProgress, computeRenderingSubProgress } from '@/lib/videoGenSteps';
 import { autoSelectHook } from '@/lib/autoHookEngine';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
@@ -488,6 +488,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
           const timeBasedProgress = Math.min(0.90, 0.15 + elapsed * 0.006);
           let next = Math.max(prev.progress, timeBasedProgress);
           if (safeServer !== null) next = Math.max(next, Math.min(safeServer, clampMax));
+          next = computeRenderingSubProgress(next, elapsed);
           if (isCreepTick) {
             const creepCeiling = 0.92;
             if (next < creepCeiling) {

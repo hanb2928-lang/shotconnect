@@ -1344,16 +1344,16 @@ async function persistVideoInBackground(originalUrl: string, scanId: string, tas
       // Attempt upload with one retry. Runway URLs expire after ~24h,
       // so a single retry significantly improves persistence success rate.
       let persistedUrl: string | null = null;
-      for (let uploadAttempt = 0; uploadAttempt <= 1; uploadAttempt++) {
+      for (let uploadAttempt = 0; uploadAttempt <= 2; uploadAttempt++) {
         persistedUrl = await uploadToStorage(originalUrl, scanId);
         if (persistedUrl && persistedUrl !== originalUrl) break;
-        if (uploadAttempt === 0) {
-          console.log(`[generate-video] Storage upload failed, retrying in 5s for ${scanId}`);
+        if (uploadAttempt < 2) {
+          console.log(`[generate-video] Storage upload failed, retry ${uploadAttempt + 1}/2 in 5s for ${scanId}`);
           await delay(5000);
         }
       }
       if (!persistedUrl || persistedUrl === originalUrl) {
-        console.warn(`[generate-video] Storage upload failed after retry for ${scanId} — original Runway URL remains`);
+        console.warn(`[generate-video] Storage upload failed after 3 attempts for ${scanId} — original Runway URL remains`);
         return;
       }
       await updateScanWithVideo(scanId, persistedUrl);
@@ -1402,8 +1402,8 @@ async function markVideoJobFailed(scanId: string, taskId: string, errMsg: string
       const rows = await resp.json() as Array<{ is_draft: boolean; is_hd: boolean }>;
       if (rows.length > 0) {
         const row = rows[0];
-        const amount = row.is_hd ? 10 : (row.is_draft ? 3 : 10);
-        const feature = row.is_hd ? 'video_hd' : (row.is_draft ? 'video_draft' : 'video_hd');
+        const amount = row.is_hd ? 10 : (row.is_draft ? 3 : 3);
+        const feature = row.is_hd ? 'video_hd' : (row.is_draft ? 'video_draft' : 'video_draft');
         await refundCreditsServer(amount, feature);
       }
     }
@@ -1457,7 +1457,7 @@ async function autoSubmitHdIfNeeded(scanId: string, internalJobId: string): Prom
     // Only auto-submit HD if: the job was marked as HD, the draft actually
     // completed (is_draft = true means this was the draft pass), and no HD
     // task has been started yet.
-    if (!job.is_hd || job.hd_task_id || !job.runway_prompt) return;
+    if (!job.is_draft || !job.is_hd || job.hd_task_id || !job.runway_prompt) return;
 
     console.log(`[generate-video] Auto-submitting HD upgrade for scan ${scanId}`);
     const runwayKey = await resolveRunwayKey();
@@ -1706,8 +1706,8 @@ async function submitRunwayTask(
     // Drafts: force 480p and cap fps at 12 regardless of seedance clamping.
     // This roughly halves the inference step count on Runway's side.
     if (isDraft) {
-      payload.resolution = "480p";
-      payload.fps = 12;
+      payload.resolution = "720p";
+      payload.fps = 24;
     } else if (resolution) {
       payload.resolution = isSeedance ? "720p" : resolution;
       if (fps != null) payload.fps = isSeedance ? Math.min(fps, 24) : fps;

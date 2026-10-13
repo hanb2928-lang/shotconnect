@@ -115,10 +115,11 @@ export function resolveVideoGenSteps(progress: VideoGenProgress | null): VideoGe
     // stage while the progress bar creeps ahead. The time-based creep and DB
     // poll can still advance the icons even when the server step is stale.
     const effectiveProgress = Math.max(serverStepProgress, p);
+    const renderedProgress = computeRenderingSubProgress(effectiveProgress, progress.elapsedSec ?? 0);
     let activeFound = false;
 
     return VIDEO_GEN_STEPS.map((s) => {
-      if (effectiveProgress >= s.threshold) {
+      if (renderedProgress >= s.threshold) {
         return { ...s, status: 'done' as VideoGenStepStatus };
       }
       if (!activeFound) {
@@ -142,6 +143,26 @@ export function resolveVideoGenSteps(progress: VideoGenProgress | null): VideoGe
     }
     return { ...s, status: 'pending' as VideoGenStepStatus };
   });
+}
+
+/**
+ * When the server is on the "rendering" step (85%), interpolate progress
+ * upward toward 95% based on elapsed time. This fills the 85%→100% gap
+ * so users see steady progress during the longest phase instead of a
+ * frozen bar at 85%. The final 95%→100% jump still happens on completion.
+ */
+export function computeRenderingSubProgress(
+  baseProgress: number,
+  elapsedSec: number,
+): number {
+  if (baseProgress < 0.85) return baseProgress;
+  if (baseProgress >= 1.0) return baseProgress;
+  // Interpolate from 0.85 to 0.95 over ~120s with ease-out.
+  const RENDER_INTERP_MS = 120_000;
+  const t = Math.min(1, (elapsedSec * 1000) / RENDER_INTERP_MS);
+  const eased = 1 - Math.pow(1 - t, 3);
+  const subProgress = 0.85 + eased * 0.10;
+  return Math.max(baseProgress, Math.min(0.95, subProgress));
 }
 
 export function getCurrentStepIndex(progress: VideoGenProgress | null): number {
