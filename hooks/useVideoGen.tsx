@@ -17,6 +17,7 @@ import { getActiveVideoJob, clearActiveVideoJob, saveActiveVideoJob, updateActiv
 import { notifyVideoCompleted } from '@/lib/pushNotify';
 import { friendlyError } from '@/lib/errors';
 import { logError } from '@/lib/errorLogger';
+import { recordSuccessfulGeneration, recordDiagnostic, type DiagnosticEvent } from '@/lib/aiSelfDiagnostic';
 import { stepToProgress } from '@/lib/videoGenSteps';
 import { autoSelectHook } from '@/lib/autoHookEngine';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -97,6 +98,8 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   const appStateActiveRef = useRef(true);
   const foregroundSyncRef = useRef<Promise<void> | null>(null);
   const serverProgRef = useRef<number | null>(null);
+  const sessionIdRef = useRef<string>(`sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+  const genContextRef = useRef<{ scanId?: string; jobId?: string; selectedMode?: string; enableVirtualFitting?: boolean; hadModelImage?: boolean; isDraft?: boolean }>({});
   const simTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const nudgeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const generationTokenRef = useRef(0);
@@ -161,6 +164,10 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     if (terminalLockRef.current) return;
     terminalLockRef.current = true;
     generationTokenRef.current++;
+    const completedJobId = jobIdRef.current;
+    const completedScanId = scanIdRef.current;
+    const renderDurationMs = genStartRef.current ? Date.now() - genStartRef.current : undefined;
+    const ctx = { ...genContextRef.current };
     clearActiveVideoJob();
     jobIdRef.current = null;
     setJobId(null);
@@ -174,6 +181,20 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     }
     setVideoProgress({ phase: 'completed', progress: 1.0, message: '영상 생성 완료', elapsedSec: 0 });
     notifyVideoCompleted();
+    genContextRef.current = {};
+    // Fire-and-forget: record successful generation for AI self-learning
+    if (completedScanId) {
+      recordSuccessfulGeneration({
+        sessionId: sessionIdRef.current,
+        scanId: completedScanId,
+        jobId: completedJobId ?? undefined,
+        renderDurationMs,
+        isDraft: ctx.isDraft,
+        selectedMode: ctx.selectedMode,
+        enableVirtualFitting: ctx.enableVirtualFitting,
+        hadModelImage: ctx.hadModelImage,
+      }).catch(() => {});
+    }
   }, []);
 
   // Single guarded entry point for error/failure transitions.
@@ -182,6 +203,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     if (terminalLockRef.current) return;
     terminalLockRef.current = true;
     generationTokenRef.current++;
+    const failedScanId = scanIdRef.current;
+    const failedJobId = jobIdRef.current;
+    const ctx = { ...genContextRef.current };
     clearActiveVideoJob();
     jobIdRef.current = null;
     setJobId(null);
@@ -191,6 +215,23 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
     setError(errMsg);
     if (opts?.backgroundTransition) {
       setBackgroundTransition(true);
+    }
+    genContextRef.current = {};
+    // Fire-and-forget: record failure for AI self-diagnostic
+    if (failedScanId || failedJobId) {
+      const event: DiagnosticEvent = {
+        sessionId: sessionIdRef.current,
+        scanId: failedScanId ?? undefined,
+        jobId: failedJobId ?? undefined,
+        pipelineStage: failedJobId ? 'poll' : 'submit',
+        failureDetail: errMsg,
+        isDraft: ctx.isDraft,
+        selectedMode: ctx.selectedMode,
+        enableVirtualFitting: ctx.enableVirtualFitting,
+        hadModelImage: ctx.hadModelImage,
+        outcome: 'failed',
+      };
+      recordDiagnostic(event).catch(() => {});
     }
   }, []);
 
@@ -929,6 +970,14 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       await hookPrefetchPromise;
       await sessionRefreshPromise;
 
+      genContextRef.current = {
+        scanId: scanData.id,
+        selectedMode: params.genMode,
+        enableVirtualFitting: params.genMode === 'universal_synthesis' ? params.enableVirtualFitting : undefined,
+        hadModelImage: !!params.modelUrl,
+        isDraft: true,
+      };
+
       const submitResult = await submitVideoJobAsync(params.promptText, {
         durationSec: 5,
         aspectRatio: params.aspectRatio,
@@ -960,6 +1009,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
       nudgeTimerRef.current = null;
       simTimerRef.current = null;
       jobIdRef.current = submitResult.taskId;
+      genContextRef.current.jobId = submitResult.taskId;
       setJobId(submitResult.taskId);
       saveActiveVideoJob(submitResult.taskId, 'submitting', scanIdRef.current).catch(() => {
         // Persistence failed — job is still submitted and polling works

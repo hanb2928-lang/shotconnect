@@ -33,6 +33,7 @@ import { CreditBalanceBadge } from '@/components/CreditBalanceBadge';
 import { CreditPurchaseModal } from '@/components/CreditPurchaseModal';
 import { GpuAutoscaleCard } from '@/components/GpuAutoscaleCard';
 import { StorageLifecycleCard } from '@/components/StorageLifecycleCard';
+import { AiDiagnosticCard } from '@/components/AiDiagnosticCard';
 import { getCreditBalance, getCreditHistory, type CreditBalance, type CreditTransaction } from '@/lib/credits';
 import { restorePurchases, isRevenueCatAvailable } from '@/lib/purchases';
 import type { UserSettings, RevenueRecord } from '@/types/database';
@@ -2253,6 +2254,7 @@ function SettingsScreenInner() {
 
         <GpuAutoscaleCard />
         <StorageLifecycleCard />
+        <AiDiagnosticCard />
       </View>
 
       <View style={styles.section}>

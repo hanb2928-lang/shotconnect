@@ -109,3 +109,6 @@ verify_jwt = false
 [functions.texture-synthesis]
 verify_jwt = false
 
+[functions.ai-diagnostic]
+verify_jwt = false
+
