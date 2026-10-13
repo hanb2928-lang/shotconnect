@@ -61,6 +61,7 @@ interface GenerateVideoRequest {
   stylePreset?: string;
   detailRestoration?: boolean;
   durationSec?: number;
+  isDraft?: boolean;
   selectedMode?: 'auto_3d' | 'universal_synthesis' | 'manual';
   enableOrbit360?: boolean;
   enableCaustics?: boolean;
@@ -89,7 +90,8 @@ const SERVER_POLL_INITIAL_DELAY_MS = 2000;
 const SERVER_POLL_MAX_DELAY_MS = 5000;
 const SERVER_POLL_SELF_INVOKE_TIMEOUT_MS = 15000; // AbortController timeout for self-reinvocation fetch
 const JITTER_MAX_MS = 2000; // Random jitter added to each backoff delay to desynchronize concurrent polls
-const FIRST_POLL_BUFFER_MS = 2000; // Grace period before first Runway poll — runway_task_id propagates within ~2s
+const FIRST_POLL_BUFFER_MS = 1000; // Grace period before first Runway poll — runway_task_id propagates within ~1s
+const DRAFT_POLL_INITIAL_DELAY_MS = 1500; // Drafts render faster — poll more aggressively in pre-rendering phases
 const VIDEO_DAILY_LIMIT = 10; // Max AI video generations per IP per day
 
 const VIDEO_UNKNOWN_PATTERNS = [
@@ -536,13 +538,14 @@ async function handleRunwaySubmit(body: GenerateVideoRequest, runwayKey: string)
               taskId: runwayTaskId,
               scanId,
               variationSeed: 0,
+              isDraft,
             }),
             signal: controller.signal,
           }).then(() => { clearTimeout(timeoutId); resolve(); }).catch(() => {
             clearTimeout(timeoutId);
             resolve();
           });
-        }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS);
+        }, SERVER_POLL_INITIAL_DELAY_MS + FIRST_POLL_BUFFER_MS + (isDraft ? 0 : 1000));
       }));
     }
 
@@ -571,10 +574,12 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
   }
 
   if (body.scanId) {
-    const [cached, jobStatus] = await Promise.all([
-      checkWebhookResult(body.scanId),
-      checkVideoJobStatus(body.scanId, taskId),
-    ]);
+    // Skip the scans-table lookup in early phases — the webhook cannot
+    // have fired before the job reaches at least "rendering". This saves
+    // one DB round-trip per poll cycle during submitting/queued.
+    const jobStatus = await checkVideoJobStatus(body.scanId, taskId);
+    const earlyPhase = !jobStatus || jobStatus.step === "planning" || jobStatus.step === "submitting" || jobStatus.step === "pending";
+    const cached = earlyPhase ? null : await checkWebhookResult(body.scanId);
     if (cached) {
       return new Response(
         JSON.stringify({
@@ -801,8 +806,12 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     );
   }
 
-  // Check if the job was already completed by a webhook
-  const cached = await checkWebhookResult(scanId);
+  // Check if the job was already completed by a webhook.
+  // Skip this lookup in early phases — the webhook cannot have fired
+  // before the job reaches at least "rendering".
+  const earlyJobInfo = await findJobByRunwayTaskId(scanId, taskId);
+  const earlyPhase = !earlyJobInfo || earlyJobInfo.status === "PENDING";
+  const cached = earlyPhase ? null : await checkWebhookResult(scanId);
   if (cached) {
     return new Response(
       JSON.stringify({ mode: "server-poll", status: "SUCCESS", videoUrl: cached, taskId, persisted: true }),
@@ -810,10 +819,9 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     );
   }
 
-  // Check if the job was already marked FAILED or SUCCESS — look up by runway_task_id.
+  // Reuse the earlyJobInfo lookup from above to avoid a redundant DB query.
   // If that column was not persisted, recover the internal ID by scan_id.
-  const jobInfo = await findJobByRunwayTaskId(scanId, taskId);
-  const resolvedJob = jobInfo ?? await findLatestJobByScanId(scanId);
+  const resolvedJob = earlyJobInfo ?? await findLatestJobByScanId(scanId);
   if (resolvedJob?.status === "FAILED") {
     return new Response(
       JSON.stringify({ mode: "server-poll", status: "FAILED", error: resolvedJob.error, taskId }),
@@ -989,7 +997,12 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
 
   // Pre-rendering phases (submitting, queued, throttled): continue the
   // self-reinvocation chain to push the job through to rendering.
-  const baseDelay = Math.min(SERVER_POLL_INITIAL_DELAY_MS * Math.pow(1.5, attempt), SERVER_POLL_MAX_DELAY_MS);
+  // Drafts render at 480p/12fps — use a shorter base delay to detect
+  // completion faster.
+  const draftBase = body.isDraft === true;
+  const pollBaseDelay = draftBase ? DRAFT_POLL_INITIAL_DELAY_MS : SERVER_POLL_INITIAL_DELAY_MS;
+  const pollMaxDelay = draftBase ? Math.min(SERVER_POLL_MAX_DELAY_MS, 3000) : SERVER_POLL_MAX_DELAY_MS;
+  const baseDelay = Math.min(pollBaseDelay * Math.pow(1.5, attempt), pollMaxDelay);
   const jitter = Math.random() * JITTER_MAX_MS;
   const nextDelay = Math.round(baseDelay + jitter);
   const nextAttempt = attempt + 1;
@@ -1015,6 +1028,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
         taskId,
         scanId,
         variationSeed: attemptNum,
+        isDraft: draftBase,
       }),
       signal: controller.signal,
     }).then(() => {
@@ -1384,23 +1398,62 @@ async function persistVideoInBackground(originalUrl: string, scanId: string, tas
     // Background: upload to storage and replace the URL. If this fails,
     // the original Runway URL remains playable — the user sees no delay.
     safeWaitUntil((async () => {
+      // Atomically claim the upload slot: transition step to "uploading"
+      // only if the job is in non-terminal state. If another caller
+      // (webhook or server-poll) already claimed it, skip to avoid
+      // redundant download/upload bandwidth.
+      const claimController = new AbortController();
+      const claimTimeout = setTimeout(() => claimController.abort(), 5000);
+      let claimed = false;
       try {
-        const persistedUrl = await uploadToStorage(originalUrl, scanId);
-        if (!persistedUrl || persistedUrl === originalUrl) return;
-        await updateScanWithVideo(scanId, persistedUrl);
-        const c = new AbortController();
-        const t = setTimeout(() => c.abort(), 10000);
-        try {
-          await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+        const claimResp = await fetch(
+          `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS&step=neq.uploading`,
+          {
             method: "PATCH",
-            headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json", Prefer: "return=minimal" },
-            body: JSON.stringify({ video_url: persistedUrl }),
-            signal: c.signal,
-          });
-        } finally { clearTimeout(t); }
+            headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json", Prefer: "return=representation" },
+            body: JSON.stringify({ step: "uploading" }),
+            signal: claimController.signal,
+          },
+        );
+        clearTimeout(claimTimeout);
+        if (claimResp.ok) {
+          const rows = await claimResp.json() as Array<unknown>;
+          claimed = rows.length > 0;
+        }
       } catch {
-        // Storage upload failed — original URL is still playable
+        clearTimeout(claimTimeout);
       }
+      if (!claimed) {
+        console.log(`[generate-video] persistVideoInBackground: upload already claimed by another caller for ${scanId}`);
+        return;
+      }
+
+      // Attempt upload with one retry. Runway URLs expire after ~24h,
+      // so a single retry significantly improves persistence success rate.
+      let persistedUrl: string | null = null;
+      for (let uploadAttempt = 0; uploadAttempt <= 1; uploadAttempt++) {
+        persistedUrl = await uploadToStorage(originalUrl, scanId);
+        if (persistedUrl && persistedUrl !== originalUrl) break;
+        if (uploadAttempt === 0) {
+          console.log(`[generate-video] Storage upload failed, retrying in 5s for ${scanId}`);
+          await delay(5000);
+        }
+      }
+      if (!persistedUrl || persistedUrl === originalUrl) {
+        console.warn(`[generate-video] Storage upload failed after retry for ${scanId} — original Runway URL remains`);
+        return;
+      }
+      await updateScanWithVideo(scanId, persistedUrl);
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 10000);
+      try {
+        await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+          method: "PATCH",
+          headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+          body: JSON.stringify({ video_url: persistedUrl, step: "completed" }),
+          signal: c.signal,
+        });
+      } finally { clearTimeout(t); }
     })());
 
     return originalUrl;
