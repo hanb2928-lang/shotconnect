@@ -428,12 +428,12 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
       fps,
       mainImageUrl: body.mainImageUrl,
     };
-    void invokeRunwaySubmitWithRetry(selfUrl, submitPayload).catch(async (err) => {
+    safeWaitUntil(invokeRunwaySubmitWithRetry(selfUrl, submitPayload).catch(async (err) => {
       console.error("[generate-video] Failed to self-invoke runway-submit:", err);
       if (body.scanId) {
         await markVideoJobFailed(body.scanId, internalJobId, "Runway API 호출 시작에 실패했습니다.");
       }
-    });
+    }));
   }
 
   // Return HTTP 202 Accepted immediately — client polls via Realtime/poll mode
