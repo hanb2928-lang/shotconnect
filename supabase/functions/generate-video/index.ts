@@ -2519,36 +2519,52 @@ async function submitWithRetry(fn: () => Promise<string>, maxRetries: number): P
   throw lastErr ?? new Error("비디오 생성 요청 실패");
 }
 
+const STORAGE_DOWNLOAD_TIMEOUT_MS = 60_000;
+const STORAGE_UPLOAD_TIMEOUT_MS = 120_000;
+
 async function uploadToStorage(videoUrl: string, scanId: string): Promise<string | null> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-    const resp = await fetch(videoUrl, { signal: controller.signal });
-    if (!resp.ok) {
-      clearTimeout(timeoutId);
+    const downloadController = new AbortController();
+    const downloadTimeoutId = setTimeout(() => downloadController.abort(), STORAGE_DOWNLOAD_TIMEOUT_MS);
+    const resp = await fetch(videoUrl, { signal: downloadController.signal });
+    if (!resp.ok || !resp.body) {
+      clearTimeout(downloadTimeoutId);
       return null;
     }
+    clearTimeout(downloadTimeoutId);
 
-    const videoBlob = await resp.blob();
-    clearTimeout(timeoutId);
     const fileName = `${scanId}/${Date.now()}_ai_video.mp4`;
     const uploadUrl = `${supabaseUrl}/storage/v1/object/videos/${fileName}`;
 
+    const contentLength = resp.headers.get("content-length");
+    const uploadHeaders: Record<string, string> = {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: serviceRoleKey,
+      "Content-Type": "video/mp4",
+      "x-upsert": "true",
+      "Cache-Control": "max-age=360000",
+    };
+    if (contentLength) {
+      uploadHeaders["Content-Length"] = contentLength;
+    }
+
     const uploadController = new AbortController();
-    const uploadTimeoutId = setTimeout(() => uploadController.abort(), 20000);
+    const uploadTimeoutId = setTimeout(() => uploadController.abort(), STORAGE_UPLOAD_TIMEOUT_MS);
+
+    // Pipe the download stream directly into the upload — no in-memory blob.
+    // This halves memory usage and avoids the 20s timeout that killed HD uploads.
     const uploadResp = await fetch(uploadUrl, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-        apikey: serviceRoleKey,
-        "Content-Type": "video/mp4",
-        "x-upsert": "true",
-        "Cache-Control": "max-age=360000",
-      },
-      body: videoBlob,
+      headers: uploadHeaders,
+      body: resp.body,
       signal: uploadController.signal,
+      // @ts-expect-error -- duplex is required for streaming bodies in Deno
+      duplex: "half",
     });
     clearTimeout(uploadTimeoutId);
+
+    // Drain and discard the upload response body to free the connection.
+    try { await uploadResp.text(); } catch { /* non-fatal */ }
 
     if (!uploadResp.ok) return null;
     return `${supabaseUrl}/storage/v1/object/public/videos/${fileName}`;
