@@ -1904,6 +1904,8 @@ function ResultScreenInner() {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
     const MAX_RETRIES = 5;
+    let connecting = false;
+    let disposed = false;
 
     const onPayload = (payload: { new: Record<string, unknown> | null }) => {
       if (!mountedRef.current || !payload.new) return;
@@ -1934,10 +1936,12 @@ function ResultScreenInner() {
     };
 
     const connectChannel = async () => {
-      if (!mountedRef.current) return;
-      const ch = await createChannel(`bg-video-watch:${scan.id}`);
-      if (!mountedRef.current) { safeRemoveChannel(ch); return; }
-      channel = ch
+      if (!mountedRef.current || disposed || channel || connecting) return;
+      connecting = true;
+      try {
+        const ch = await createChannel(`bg-video-watch:${scan.id}`);
+        if (!mountedRef.current || disposed || channel) { safeRemoveChannel(ch); return; }
+        channel = ch
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'video_jobs', filter: `scan_id=eq.${scan.id}` },
@@ -1975,7 +1979,10 @@ function ResultScreenInner() {
             }
           }
         });
-      bgVideoChannelRef.current = channel;
+        bgVideoChannelRef.current = channel;
+      } finally {
+        connecting = false;
+      }
     };
 
     connectChannel().catch(() => { /* non-fatal */ });
@@ -1993,41 +2000,38 @@ function ResultScreenInner() {
       connectChannel().catch(() => { /* non-fatal */ });
     });
 
-    const handleAppState = (nextState: string) => {
-      if (nextState === 'active') {
-        if (mountedRef.current && !channel) {
-          retryCount = 0;
-          onFlushComplete(() => {
-            if (mountedRef.current && !channel) connectChannel().catch(() => { /* non-fatal */ });
-          });
-        }
-      } else if (nextState === 'background') {
-        // Don't treat iOS 'inactive' as background — only full background.
-        // Virtual disconnect: null the reference synchronously (no bridge I/O)
-        // and defer the actual socket removal to setTimeout(0) so the JS
-        // thread is free before the OS freezes the network bridge. Calling
-        // removeChannel synchronously here deadlocks the JS thread and
-        // triggers an OS watchdog SIGKILL.
-        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-        if (channel) {
-          const ch = channel;
-          channel = null;
-          bgVideoChannelRef.current = null;
-          setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
-        }
-      }
-    };
-    const unsubHandler = registerAppStateHandler('deferred', handleAppState);
-
-    return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+    const unsubscribeChannel = () => {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (channel) {
         const ch = channel;
         channel = null;
         bgVideoChannelRef.current = null;
         setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
       }
-      unsubHandler();
+    };
+    const unsubPause = registerAppStateHandler('immediate', (nextState) => {
+      if (nextState === 'background') unsubscribeChannel();
+    });
+    const unsubResume = registerAppStateHandler('deferred', (nextState) => {
+      if (nextState === 'active' && mountedRef.current && !channel && !connecting) {
+        retryCount = 0;
+        onFlushComplete(() => {
+          if (mountedRef.current && !disposed && !channel && !connecting) connectChannel().catch(() => { /* non-fatal */ });
+        });
+      }
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribeChannel();
+      if (channel) {
+        const ch = channel;
+        channel = null;
+        bgVideoChannelRef.current = null;
+        setTimeout(() => { try { safeRemoveChannel(ch); } catch { /* non-fatal */ } }, 0);
+      }
+      unsubPause();
+      unsubResume();
       unsubRecovery();
     };
   }, [scan, activePlatform, loading]);
