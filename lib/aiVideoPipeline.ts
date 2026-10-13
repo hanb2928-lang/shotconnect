@@ -958,7 +958,7 @@ function waitForVideoCompletion(
         await Promise.all([checkDb(), checkScanVideoUrl()]);
         if (!settled) {
           const elapsedSec = monotonicElapsedSec(startTime);
-          const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.99);
+          const timeProgress = Math.min(0.15 + (elapsedSec / 300) * 0.82, 0.99);
           const healthHint = channelHealth === ChannelHealth.HEALTHY
             ? ''
             : ' (실시간 연결 불안정 — 폴링으로 대체 중)';
@@ -1495,7 +1495,7 @@ export function subscribeVideoJob(
       // time-based creep, so the UI never freezes at a stale percentage.
       const stepProgress = stepToProgress(row.step);
       const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-      const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.99);
+      const timeProgress = Math.min(0.15 + (elapsedSec / 300) * 0.82, 0.99);
       const effectiveProgress = stepProgress != null
         ? Math.max(stepProgress, timeProgress)
         : timeProgress;
@@ -1600,7 +1600,7 @@ export function subscribeVideoJob(
             } else {
               const stepProgress = stepToProgress(row.step);
               const elapsedSec = Math.round((Date.now() - pollStartTime) / 1000);
-              const timeProgress = Math.min(0.15 + (elapsedSec / 120) * 0.82, 0.99);
+              const timeProgress = Math.min(0.15 + (elapsedSec / 300) * 0.82, 0.99);
               const effectiveProgress = stepProgress != null
                 ? Math.max(stepProgress, timeProgress)
                 : timeProgress;

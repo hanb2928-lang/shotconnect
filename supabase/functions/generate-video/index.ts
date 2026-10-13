@@ -711,27 +711,6 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
 
     const runwayTaskId = jobStatus.runwayTaskId;
 
-    // Fast path: if the DB step is already "rendering" (85%+), return the
-    // DB status directly without calling the Runway API. The client's DB
-    // poll is the primary completion detector at this stage — calling
-    // Runway on every client poll adds ~200-500ms of latency per cycle
-    // and consumes API quota for no benefit. The webhook or server-poll
-    // will catch the terminal transition and update the DB.
-    if (jobStatus.step === "rendering") {
-      return new Response(
-        JSON.stringify({
-          mode: "poll",
-          status: jobStatus.status ?? "PROCESSING",
-          step: "rendering",
-          progress: "0.85",
-          taskId,
-          provider: "runway",
-          fromCache: true,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
     const pollStatus = await pollRunwayTask(runwayTaskId, runwayKey);
 
     if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
@@ -954,7 +933,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
     // on native where Realtime events can be dropped during the foreground
     // flush window. Without this backup, a broken webhook + dropped Realtime
     // event leaves the job stuck at 97% indefinitely.
-    const RENDER_POLL_DELAY_MS = 15_000;
+    const RENDER_POLL_DELAY_MS = 10_000;
     const RENDER_POLL_ABORT_MS = RENDER_POLL_DELAY_MS + SERVER_POLL_SELF_INVOKE_TIMEOUT_MS;
     console.log(`[generate-video] server-poll: job ${taskId} reached rendering — continuing at reduced frequency (${RENDER_POLL_DELAY_MS}ms)`);
 
