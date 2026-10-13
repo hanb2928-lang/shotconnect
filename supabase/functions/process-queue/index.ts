@@ -266,7 +266,7 @@ async function fetchActiveWorkerCount(): Promise<number> {
 async function fetchAutoscaleConfig(): Promise<{ worker_concurrency: number } | null> {
   try {
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/gpu_autoscale_config?select=worker_concurrency&id=eq.1`,
+      `${supabaseUrl}/rest/v1/gpu_autoscale_config?select=min_workers,max_workers,scale_up_threshold,scale_down_threshold,is_enabled&limit=1`,
       { headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` } },
     );
     if (!resp.ok) return null;
@@ -279,7 +279,6 @@ async function fetchAutoscaleConfig(): Promise<{ worker_concurrency: number } | 
 
 async function registerWorker(): Promise<void> {
   try {
-    const queueDepth = await checkQueuedJobsRaw();
     await fetch(`${supabaseUrl}/rest/v1/gpu_worker_heartbeats`, {
       method: "POST",
       headers: {
@@ -291,7 +290,7 @@ async function registerWorker(): Promise<void> {
       body: JSON.stringify({
         worker_id: WORKER_ID,
         status: 'ACTIVE',
-        queue_depth_at_start: queueDepth,
+        started_at: new Date().toISOString(),
       }),
     });
   } catch {
@@ -311,7 +310,6 @@ async function updateWorkerHeartbeat(jobsProcessed: number): Promise<void> {
       },
       body: JSON.stringify({
         last_heartbeat_at: new Date().toISOString(),
-        jobs_processed: jobsProcessed,
       }),
     });
   } catch {
@@ -539,7 +537,7 @@ async function recoverStaleJobs(): Promise<void> {
       const staleJobs = await staleJobsResp.json() as Array<{ id: string; attempts: number }>;
       for (const job of staleJobs) {
         await fetch(
-          `${supabaseUrl}/rest/v1/render_jobs?id=eq.${job.id}`,
+          `${supabaseUrl}/rest/v1/render_jobs?id=eq.${job.id}&status=eq.processing`,
           {
             method: "PATCH",
             headers: {

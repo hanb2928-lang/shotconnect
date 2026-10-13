@@ -889,7 +889,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
             mode: "server-poll",
             taskId,
             scanId,
-            variationSeed: attempt,
+            variationSeed: attempt + 1,
           }),
           signal: controller.signal,
         }).then(() => { clearTimeout(timeoutId); resolve(); }).catch(() => { clearTimeout(timeoutId); resolve(); });
@@ -1084,12 +1084,6 @@ async function checkVideoJobStatus(scanId: string, taskId: string): Promise<{ st
       const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; created_at: string; runway_task_id: string | null }>;
       if (rows.length > 0) {
         const row = rows[0];
-        const isZombie = (row.status === 'PENDING' || row.status === 'PROCESSING' || row.status === 'RUNNING' || row.status === 'THROTTLED')
-          && Date.now() - new Date(row.created_at).getTime() > ZOMBIE_JOB_TIMEOUT_MS;
-        if (isZombie) {
-          await markVideoJobFailed(scanId, taskId, '영상 생성이 4분 이상 진행 중 상태로 멈춰 있어 좀비 작업으로 분류되었습니다. 다시 시도해주세요.');
-          return { status: 'FAILED', error: '영상 생성 작업이 시간 초과로 실패했습니다. 다시 시도해주세요.' };
-        }
         return {
           status: row.status,
           step: (row as { step?: string }).step ?? undefined,
@@ -1260,7 +1254,7 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&runway_task_id=eq.${encodeURIComponent(runwayTaskId)}&select=status,error_message,video_url,task_id,runway_task_id,created_at`,
+      `${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&or=(runway_task_id.eq.${encodeURIComponent(runwayTaskId)},hd_task_id.eq.${encodeURIComponent(runwayTaskId)})&select=status,error_message,video_url,task_id,runway_task_id,hd_task_id,hd_video_url,hd_status,created_at`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -1271,15 +1265,9 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
     );
     clearTimeout(timeoutId);
     if (resp.ok) {
-      const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string; runway_task_id: string | null; created_at: string }>;
+      const rows = await resp.json() as Array<{ status: string; error_message: string | null; video_url: string | null; task_id: string; runway_task_id: string | null; hd_task_id: string | null; hd_video_url: string | null; hd_status: string | null; created_at: string }>;
       if (rows.length > 0) {
         const row = rows[0];
-        const isZombie = (row.status === 'PENDING' || row.status === 'PROCESSING' || row.status === 'RUNNING' || row.status === 'THROTTLED')
-          && Date.now() - new Date(row.created_at).getTime() > ZOMBIE_JOB_TIMEOUT_MS;
-        if (isZombie) {
-          await markVideoJobFailed(scanId, row.task_id, '영상 생성이 4분 이상 진행 중 상태로 멈춰 있어 좀비 작업으로 분류되었습니다. 다시 시도해주세요.');
-          return { status: 'FAILED', error: '영상 생성 작업이 시간 초과로 실패했습니다. 다시 시도해주세요.' };
-        }
         return {
           status: row.status,
           error: row.error_message ?? undefined,

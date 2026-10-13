@@ -23,7 +23,7 @@ export interface ResultPollingOptions {
 
 const POLL_FIRST_DELAY_MS = 2000;
 const SOFT_WARN_MS = 120_000;
-const HARD_TIMEOUT_MS = 360_000; // 6 min — aligned with server ZOMBIE_JOB_TIMEOUT_MS
+const HARD_TIMEOUT_MS = 600_000; // 10 min — aligned with server-side generation timeout
 const POLL_ERROR_WINDOW_MS = 60_000;
 const MAX_POLL_ERRORS_IN_WINDOW = 8;
 
@@ -181,7 +181,7 @@ export function useResultPolling(
     // When the task ID is a soft-fallback placeholder (server didn't respond
     // within 10s), filter by scan_id instead of task_id so we still receive
     // updates for the real job row the server created asynchronously.
-    const isSoftTaskId = jobId.startsWith('soft-');
+    const isSoftTaskId = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
     const realtimeFilter = isSoftTaskId && scanId
       ? `scan_id=eq.${scanId}`
       : `task_id=eq.${jobId}`;
@@ -444,7 +444,7 @@ export function useResultPolling(
 
       const elapsed = Date.now() - startTime;
       if (elapsed > HARD_TIMEOUT_MS) {
-        settle('timeout', '영상 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.');
+        settle('timeout', '영상 생성이 10분(600초)을 초과했습니다. 다시 시도해주세요.');
         return;
       }
 
@@ -491,7 +491,8 @@ export function useResultPolling(
           const status = pollData.status as string;
 
           if (status === 'SUCCESS') {
-            const pollVideoUrl = (pollData as { videoUrl?: string }).videoUrl;
+            const pollVideoUrl = (pollData as { videoUrl?: string; video_url?: string }).videoUrl
+              ?? (pollData as { video_url?: string }).video_url;
             if (pollVideoUrl) {
               handleResult('SUCCESS', pollVideoUrl);
               return;
@@ -507,7 +508,7 @@ export function useResultPolling(
             settle('timeout', '서버가 영상 생성 완료를 보고했지만 주소를 가져오지 못했습니다. 다시 시도해주세요.');
             return;
           } else if (status === 'FAILED') {
-            const errStr = (pollData.error as string) ?? '';
+            const errStr = (pollData.error as string) ?? (pollData.error_message as string) ?? '';
             if (errStr.includes('404') && notFoundRetries < MAX_404_RETRIES) {
               notFoundRetries++;
               const notFoundDelay = 3000 * notFoundRetries;
@@ -581,7 +582,7 @@ export function useResultPolling(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       timeoutTimer = setTimeout(() => {
         if (!cancelled && !settledRef.current) {
-          settle('timeout', '영상 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.');
+          settle('timeout', '영상 생성이 10분(600초)을 초과했습니다. 다시 시도해주세요.');
         }
       }, delayMs);
     };

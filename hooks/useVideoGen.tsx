@@ -371,7 +371,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         const sync = (async () => {
           try {
             await ensureFreshSession();
-            const isSoft = jobId.startsWith('soft-');
+            const isSoft = jobId.startsWith('soft-') || jobId.startsWith('hd-soft-');
             let query = supabase
               .from('video_jobs')
               .select('status, video_url, error_message, step');
@@ -555,7 +555,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
               }
             }
             if (generationTokenRef.current !== token) return;
-            const isSoft = currentJobId.startsWith('soft-');
+            const isSoft = currentJobId.startsWith('soft-') || currentJobId.startsWith('hd-soft-');
             let q = supabase.from('video_jobs').select('status, video_url, error_message');
             const { data, error: dbErr } = isSoft && currentScanId
               ? await q.eq('scan_id', currentScanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
@@ -833,7 +833,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
                   }
                 }
                 if (generationTokenRef.current !== stallToken) return;
-                const isSoft = currentJobId.startsWith('soft-');
+                const isSoft = currentJobId.startsWith('soft-') || currentJobId.startsWith('hd-soft-');
                 let q = supabase.from('video_jobs').select('status, video_url, error_message');
                 const { data, error: dbErr } = isSoft && currentScanId
                   ? await q.eq('scan_id', currentScanId).order('created_at', { ascending: false }).limit(1).maybeSingle()
