@@ -79,7 +79,7 @@ interface GenerateAiVideoOptions {
 
 const SUBMIT_MAX_RETRIES = 2;
 const SUBMIT_RETRY_DELAY_MS = 500;
-const HARD_CIRCUIT_BREAKER_MS = 240_000; // 4 min — no job may exceed this wall-clock
+const HARD_CIRCUIT_BREAKER_MS = 360_000; // 6 min — aligned with server ZOMBIE_JOB_TIMEOUT_MS
 const REALTIME_TIMEOUT_MS = HARD_CIRCUIT_BREAKER_MS;
 const REALTIME_SOFT_WARN_MS = 120_000;
 const RUNWAY_POLL_FALLBACK_INTERVAL_MS = 12000;
@@ -94,7 +94,7 @@ const CHANNEL_RECONNECT_DELAY_MS = 3000;
 const JITTER = () => 0.8 + Math.random() * 0.4;
 const CHANNEL_MAX_RECONNECT_ATTEMPTS = 5;
 
-const BG_MAX_WAIT_MS = 240_000; // aligned with circuit breaker
+const BG_MAX_WAIT_MS = 360_000; // aligned with circuit breaker
 const MAX_CONSECUTIVE_POLL_FAILURES = 10;
 const POLL_FAIL_MESSAGE = '서버 응답이 지연되고 있습니다. 작업 목록에서 나중에 결과를 확인해 주세요.';
 
@@ -1072,7 +1072,7 @@ function waitForVideoCompletion(
     // Overall timeout — 10 minutes. Don't orphan the job; inform the user.
     timeoutTimer = setTimeout(() => {
       _dbg('HARD_TIMEOUT', { elapsedSec: monotonicElapsedSec(startTime) });
-      const msg = `비디오 생성이 4분(240초)을 초과했습니다. 서버 오류일 수 있습니다. 다시 시도해주세요.`;
+      const msg = `비디오 생성이 6분(360초)을 초과했습니다. 서버 오류일 수 있습니다. 다시 시도해주세요.`;
       report('error', 0, msg);
       // Do NOT write FAILED to the DB here — the server may still complete the
       // job successfully. Writing FAILED would overwrite the eventual SUCCESS
@@ -1745,13 +1745,13 @@ export function subscribeVideoJob(
       settled = true;
       cleanup();
       removeBgPause();
-      const msg = '비디오 생성이 4분(240초)을 초과했습니다. 다시 시도해주세요.';
+      const msg = '비디오 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.';
       if (scanId) {
         void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
       }
       callback({ status: 'FAILED', error: msg });
     }).catch(() => {}).finally(() => { /* release promise ref */ });
-  }, 240_000);
+  }, HARD_CIRCUIT_BREAKER_MS);
 
   _dbg('initial-setup');
   setupChannel().catch(() => { /* non-fatal */ });
@@ -1793,13 +1793,13 @@ export function subscribeVideoJob(
           settled = true;
           cleanup();
           removeBgPause();
-          const msg = '비디오 생성이 4분(240초)을 초과했습니다. 다시 시도해주세요.';
+          const msg = '비디오 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.';
           if (scanId) {
             void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
           }
           callback({ status: 'FAILED', error: msg });
         }).catch(() => {}).finally(() => { /* release promise ref */ });
-      }, 240_000);
+      }, HARD_CIRCUIT_BREAKER_MS);
       // Clear stale timers before re-arming — rapid inactive↔active
       // oscillations on iOS can stack timers if resume fires before
       // the previous cycle's timers were cleared.
@@ -2152,7 +2152,7 @@ export function subscribeHdUpgrade(
     }, interval);
   };
 
-  // Overall timeout — 4 minutes (240000ms). Force a final check, then FAILED if still
+  // Overall timeout — 6 minutes (360000ms). Force a final check, then FAILED if still
   // not complete, instead of polling forever.
   let hdOverallTimeoutTimer = setTimeout(() => {
     if (settled) return;
@@ -2161,9 +2161,9 @@ export function subscribeHdUpgrade(
       settled = true;
       cleanup();
       removeBgPause();
-      callback({ status: 'FAILED', error: '고화질 업그레이드가 4분(240초)을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
+      callback({ status: 'FAILED', error: '고화질 업그레이드가 6분(360초)을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
     }).catch(() => {}).finally(() => { /* release promise ref */ });
-  }, 240_000);
+  }, HARD_CIRCUIT_BREAKER_MS);
 
   setupChannel().catch(() => { /* non-fatal */ });
   scheduleNextPoll();
@@ -2196,9 +2196,9 @@ export function subscribeHdUpgrade(
           settled = true;
           cleanup();
           removeBgPause();
-          callback({ status: 'FAILED', error: '고화질 업그레이드가 4분(240초)을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
+          callback({ status: 'FAILED', error: '고화질 업그레이드가 6분(360초)을 초과했습니다. 초안 영상은 그대로 이용할 수 있습니다.' });
         }).catch(() => {}).finally(() => { /* release promise ref */ });
-      }, 240_000);
+      }, HARD_CIRCUIT_BREAKER_MS);
       // Clear stale timers before re-arming to prevent timer stacking.
       if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }

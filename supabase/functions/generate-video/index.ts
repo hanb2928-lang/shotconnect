@@ -634,9 +634,6 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
         if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
           const originalUrl = pollStatus.videoUrl;
           const finalUrl = await persistVideoInBackground(originalUrl, body.scanId, fallbackJob.internalJobId ?? taskId);
-          if (supabaseUrl && serviceRoleKey) {
-            await markVideoJobComplete(body.scanId, fallbackJob.internalJobId ?? taskId, finalUrl);
-          }
           return new Response(
             JSON.stringify({
               mode: "poll",
@@ -735,9 +732,6 @@ async function handlePoll(body: GenerateVideoRequest, runwayKey: string): Promis
     if (pollStatus.status === "SUCCESS" && pollStatus.videoUrl) {
       const originalUrl = pollStatus.videoUrl;
       const finalUrl = await persistVideoInBackground(originalUrl, body.scanId, taskId);
-      if (supabaseUrl && serviceRoleKey) {
-        await markVideoJobComplete(body.scanId, taskId, finalUrl);
-      }
       return new Response(
         JSON.stringify({
           mode: "poll",
@@ -904,9 +898,6 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
 
     const originalUrl = status.videoUrl;
     const finalUrl = await persistVideoInBackground(originalUrl, scanId, internalJobId);
-    if (supabaseUrl && serviceRoleKey) {
-      await markVideoJobComplete(scanId, internalJobId, finalUrl);
-    }
     await sendVideoCompletePush(scanId);
     return new Response(
       JSON.stringify({
@@ -1113,12 +1104,7 @@ async function handleWebhook(body: GenerateVideoRequest): Promise<Response> {
     const internalJobId = fallbackJob?.internalJobId ?? taskId;
 
     const finalUrl = await persistVideoInBackground(videoUrl, scanId, internalJobId);
-    if (supabaseUrl && serviceRoleKey) {
-      await Promise.all([
-        markVideoJobComplete(scanId, internalJobId, finalUrl),
-        sendVideoCompletePush(scanId),
-      ]);
-    }
+    await sendVideoCompletePush(scanId);
 
     console.log("[generate-video] Webhook: video persisted for scan", scanId);
     return new Response(
@@ -1373,24 +1359,22 @@ async function findJobByRunwayTaskId(scanId: string, runwayTaskId: string): Prom
 async function persistVideoInBackground(originalUrl: string, scanId: string, taskId: string): Promise<string> {
   if (!supabaseUrl || !serviceRoleKey) return originalUrl;
   try {
-    // Emit "uploading" step (93%) so the client sees progress past 85%
-    // before the video URL is even available — this fills the 85→100 gap.
-    await updateVideoJobStep(scanId, taskId, "uploading");
-
-    // Write the original Runway URL to scans + video_jobs immediately so
-    // the client's DB poll detects completion without waiting for the
-    // storage upload. The storage upload + URL replacement happens in the
-    // background — the client already has a playable URL.
+    // Write the original Runway URL to scans + mark the job SUCCESS
+    // atomically. The video_jobs PATCH uses status=not.in.(SUCCESS,FAILED)
+    // so it transitions the job from PROCESSING → SUCCESS in one shot —
+    // the client's DB poll detects completion immediately. Previously the
+    // job was left in PROCESSING with a separate markVideoJobComplete call
+    // later, creating a 93→100% gap where the client sat at 95% waiting.
     await Promise.all([
       updateScanWithVideo(scanId, originalUrl),
       (async () => {
         const c = new AbortController();
         const t = setTimeout(() => c.abort(), 5000);
         try {
-          await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=eq.SUCCESS`, {
+          await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=not.in.(SUCCESS,FAILED)`, {
             method: "PATCH",
             headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json", Prefer: "return=minimal" },
-            body: JSON.stringify({ video_url: originalUrl }),
+            body: JSON.stringify({ status: "SUCCESS", step: "completed", video_url: originalUrl, progress: 1.0, completed_at: new Date().toISOString() }),
             signal: c.signal,
           });
         } finally { clearTimeout(t); }
@@ -1399,14 +1383,11 @@ async function persistVideoInBackground(originalUrl: string, scanId: string, tas
 
     // Background: upload to storage and replace the URL. If this fails,
     // the original Runway URL remains playable — the user sees no delay.
-    // Emit "muxing" (97%) when the storage upload completes to give the
-    // client a final intermediate progress update before completion.
     safeWaitUntil((async () => {
       try {
         const persistedUrl = await uploadToStorage(originalUrl, scanId);
         if (!persistedUrl || persistedUrl === originalUrl) return;
         await updateScanWithVideo(scanId, persistedUrl);
-        await updateVideoJobStep(scanId, taskId, "muxing");
         const c = new AbortController();
         const t = setTimeout(() => c.abort(), 10000);
         try {
@@ -1426,30 +1407,6 @@ async function persistVideoInBackground(originalUrl: string, scanId: string, tas
   } catch (err) {
     console.error('[generate-video] persistVideoInBackground error:', err);
     return originalUrl;
-  }
-}
-
-async function markVideoJobComplete(scanId: string, taskId: string, videoUrl: string): Promise<void> {
-  if (!supabaseUrl || !serviceRoleKey) return;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    // Atomic transition: only PATCH if the job is NOT already in a terminal state.
-    // This prevents webhook and server-poll from racing to overwrite each other.
-    await fetch(`${supabaseUrl}/rest/v1/video_jobs?scan_id=eq.${encodeURIComponent(scanId)}&task_id=eq.${encodeURIComponent(taskId)}&status=not.in.(SUCCESS,FAILED)`, {
-      method: "PATCH",
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({ status: "SUCCESS", step: "completed", video_url: videoUrl, completed_at: new Date().toISOString() }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-  } catch (err) {
-    console.error('[generate-video] markVideoJobComplete error:', err);
   }
 }
 

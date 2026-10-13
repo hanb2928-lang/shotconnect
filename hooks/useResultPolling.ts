@@ -23,7 +23,7 @@ export interface ResultPollingOptions {
 
 const POLL_FIRST_DELAY_MS = 2000;
 const SOFT_WARN_MS = 120_000;
-const HARD_TIMEOUT_MS = 240_000; // 4 min circuit breaker — no job may exceed this
+const HARD_TIMEOUT_MS = 360_000; // 6 min — aligned with server ZOMBIE_JOB_TIMEOUT_MS
 const POLL_ERROR_WINDOW_MS = 60_000;
 const MAX_POLL_ERRORS_IN_WINDOW = 8;
 
@@ -345,7 +345,12 @@ export function useResultPolling(
         const dbError = jobsResult.error;
         if (signal.aborted || dbError || !data) return null;
         const row = data as { status: string; video_url: string | null; step: string | null; progress: number | null };
-        if (row.status === 'SUCCESS' && row.video_url) {
+        // If the URL is already written to video_jobs, treat it as complete
+        // regardless of the status field — the server writes the URL and
+        // transitions to SUCCESS atomically, but a race or partial write
+        // could leave status stale for one poll cycle. The URL is the
+        // authoritative completion signal.
+        if (row.video_url) {
           return { status: 'SUCCESS', videoUrl: row.video_url, step: 'completed', progress: 1.0 };
         }
         if (row.status === 'FAILED') {
@@ -439,7 +444,7 @@ export function useResultPolling(
 
       const elapsed = Date.now() - startTime;
       if (elapsed > HARD_TIMEOUT_MS) {
-        settle('timeout', '영상 생성이 4분(240초)을 초과했습니다. 다시 시도해주세요.');
+        settle('timeout', '영상 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.');
         return;
       }
 
@@ -575,7 +580,7 @@ export function useResultPolling(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       timeoutTimer = setTimeout(() => {
         if (!cancelled && !settledRef.current) {
-          settle('timeout', '영상 생성이 4분(240초)을 초과했습니다. 다시 시도해주세요.');
+          settle('timeout', '영상 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.');
         }
       }, delayMs);
     };
