@@ -20,8 +20,6 @@ module.exports = function withGradleJvmArgs(config) {
     set('org.gradle.configuration-cache', 'false');
     set('org.gradle.caching', 'false');
     set('android.suppressUnsupportedCompileSdk', '36');
-    set('android.builder.sdkDownload', 'true');
-    set('android.packagingOptions.pickFirsts', '**/libc++_shared.so,**/libfbjni.so,**/libreactnativejni.so');
 
     return config;
   });

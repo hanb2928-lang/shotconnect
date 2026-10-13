@@ -52,7 +52,11 @@ const UploadDebugOverlay = lazy(() =>
   import('@/components/UploadDebugOverlay').then((m) => ({ default: m.UploadDebugOverlay })),
 );
 
-installGlobalErrorHandlers();
+try {
+  installGlobalErrorHandlers();
+} catch {
+  // Error handler installation must not crash boot.
+}
 
 // Defer all heavy init to after first render so the splash → app
 // transition is not blocked by IndexedDB warmup, pressure monitoring
@@ -68,11 +72,15 @@ function scheduleIdle(fn: () => void): void {
 }
 
 scheduleIdle(() => {
-  installMediaCacheLifecycleHook();
-  startPressureMonitoring();
-  registerDefaultFlushHandlers();
-  installProactiveMemoryFlush();
-  setDeferredThrottle(withBridgeThrottle);
+  try {
+    installMediaCacheLifecycleHook();
+    startPressureMonitoring();
+    registerDefaultFlushHandlers();
+    installProactiveMemoryFlush();
+    setDeferredThrottle(withBridgeThrottle);
+  } catch {
+    // Deferred init failures must not crash the boot sequence.
+  }
 });
 
 // GC sweeps run after the app is fully interactive. They clean up
@@ -88,7 +96,7 @@ SplashScreen.preventAutoHideAsync();
 // Kick off storage init at module scope so it runs in parallel with
 // font loading and React's first render, rather than waiting for the
 // first useEffect to fire.
-const earlyStoragePromise = initStorage();
+const earlyStoragePromise = initStorage().catch(() => { /* non-fatal */ });
 
 // Disable font scaling globally to prevent layout overflow when users
 // increase system font size (Accessibility > Large Text). This ensures

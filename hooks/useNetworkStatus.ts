@@ -9,6 +9,7 @@ type RecoveryListener = () => void;
 
 let currentStatus: NetworkStatus = 'unknown';
 let initialized = false;
+let registeredListeners = false;
 const listeners = new Set<(status: NetworkStatus) => void>();
 const recoveryListeners = new Set<RecoveryListener>();
 let probeTimer: ReturnType<typeof setInterval> | null = null;
@@ -264,8 +265,6 @@ export function onNetworkRecovery(listener: RecoveryListener): () => void {
   recoveryListeners.add(listener);
   return () => { recoveryListeners.delete(listener); };
 }
-
-let registeredListeners = false;
 
 export function _resetFlipStateForTesting(): void {
   recentFlips = [];
