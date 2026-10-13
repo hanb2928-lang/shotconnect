@@ -3,7 +3,7 @@ import { uploadImage, uploadImageBlob, uploadCompressedUri, saveManualScan } fro
 import { base64ToBlob, deleteStorageObjects } from './imageEdit';
 import { supabase } from './supabase';
 import { runSynthesis, getSynthesisSummary, type AngleInput } from './aiSynthesisEngine';
-import { buildShortFormEditPlan, type ShortFormPlatform } from './shortFormEditEngine';
+import { buildShortFormEditPlan, type ShortFormPlatform, type ContentTone } from './shortFormEditEngine';
 import { buildDirectingPlan, getDirectingSummary, type DirectingPlan } from './directingEngine';
 import { buildMultiPlatformPublishPlans, type PublishPlan } from './publishManager';
 import { getDeepLink } from './platformUpload';
@@ -696,9 +696,15 @@ export async function runStereoPipeline(
     report(2, 0.33);
   }
 
+  const editPlanContentTone: ContentTone | undefined = contentTone === 'studio'
+    ? 'studio_premium'
+    : contentTone === 'raw'
+    ? 'raw_trigger'
+    : undefined;
+
   const editPlan = cleanMode
     ? buildShortFormEditPlan('youtube', '', null, '', undefined, undefined, true, undefined, undefined)
-    : buildShortFormEditPlan('youtube', productContext, null, productName, undefined, undefined, true, undefined, undefined);
+    : buildShortFormEditPlan('youtube', productContext, null, productName, undefined, undefined, true, undefined, undefined, undefined, editPlanContentTone);
 
   const directingPlan = cleanMode
     ? null
