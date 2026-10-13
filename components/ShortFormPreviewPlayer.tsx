@@ -11,7 +11,12 @@ import {
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedReaction,
   withTiming,
+  withRepeat,
+  withSequence,
+  cancelAnimation,
+  interpolate,
   Easing,
   runOnJS,
 } from 'react-native-reanimated';
@@ -22,6 +27,7 @@ import {
   Pause,
   RotateCcw,
   Loader2,
+  Sparkles,
 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { BgmPlayer } from '@/lib/bgmEngine';
@@ -633,6 +639,79 @@ useEffect(() => {
     width: `${progressWidthShared.value}%`,
   }));
 
+  // === Rendering progress bar overlay (shown during generation) ===
+  const renderBarSV = useSharedValue(0);
+  const renderPercentSV = useSharedValue(0);
+  const shimmerSV = useSharedValue(0);
+  const [renderDisplayPct, setRenderDisplayPct] = useState(0);
+  const [renderCreepFloor, setRenderCreepFloor] = useState(0);
+
+  const rawRenderPct = Math.max(0, Math.min(100, Math.round((Number(videoGenProgress?.progress ?? 0) || 0) * 100)));
+  const isRenderActive = !!videoGenProgress && videoGenProgress.phase !== 'completed' && videoGenProgress.phase !== 'error';
+  const RENDER_CREEP_CAP = 85;
+
+  useEffect(() => {
+    if (!isRenderActive) {
+      setRenderCreepFloor(0);
+      return;
+    }
+    const t = setInterval(() => {
+      setRenderCreepFloor((p) => Math.min(p + 3, RENDER_CREEP_CAP));
+    }, 2000);
+    return () => clearInterval(t);
+  }, [isRenderActive]);
+
+  useEffect(() => {
+    const target = Math.max(rawRenderPct, renderCreepFloor);
+    const delta = Math.abs(target - renderBarSV.value);
+    const dur = Math.min(400 + delta * 8, 1200);
+    renderBarSV.value = withTiming(target, { duration: dur, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
+    renderPercentSV.value = withTiming(target, { duration: dur, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
+  }, [rawRenderPct, renderCreepFloor, renderBarSV, renderPercentSV]);
+
+  useAnimatedReaction(
+    () => Math.round(renderPercentSV.value),
+    (rounded, prev) => {
+      if (rounded !== prev) runOnJS(setRenderDisplayPct)(rounded);
+    },
+  );
+
+  useEffect(() => {
+    if (isRenderActive) {
+      shimmerSV.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.3, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+        ),
+        -1,
+        true,
+      );
+    } else {
+      cancelAnimation(shimmerSV);
+      shimmerSV.value = withTiming(0, { duration: 200 });
+    }
+  }, [isRenderActive, shimmerSV]);
+
+  const renderBarStyle = useAnimatedStyle(() => ({
+    width: `${Math.max(0, Math.min(100, renderBarSV.value))}%` as unknown as import('react-native').DimensionValue,
+  }));
+
+  const shimmerStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(shimmerSV.value, [0, 1], [0.3, 0.8]),
+  }));
+
+  const RENDER_STEP_LABELS: Record<string, string> = {
+    analyzing: '다각도 분석 중',
+    hooking: '훅 문구 추출 중',
+    planning: '편집 플랜 구성 중',
+    submitting: 'AI 렌더링 요청 중',
+    rendering: '영상 렌더링 중',
+    encoding: '인코딩 중',
+    uploading: '저장 중',
+    muxing: '오디오 합성 중',
+    pending: '대기 중',
+  };
+
   const responsiveHeight = Math.min(screenHeight * 0.45, screenWidth * 0.55 * (16 / 9));
   const responsiveWidth = responsiveHeight * (9 / 16);
   const captionStyle: CaptionStyle = useMemo(
@@ -724,6 +803,34 @@ useEffect(() => {
               <Text style={styles.videoLoadingText}>
                 {isGeneratingVideo ? 'AI 3D 비디오 생성 중...' : '영상 로딩 중...'}
               </Text>
+            </View>
+          )}
+
+          {/* === 실시간 렌더링 진행바 오버레이 — 네이티브 환경에서 미리보기 프레임 위에 표시 === */}
+          {isRenderActive && !hasGeneratedVideo && (
+            <View style={styles.renderOverlay} pointerEvents="none">
+              <Animated.View style={[styles.renderShimmerRing, shimmerStyle]} />
+              <Sparkles size={20} color={theme.colors.primary[300]} strokeWidth={2} />
+              <Text style={styles.renderPhaseText}>
+                {RENDER_STEP_LABELS[videoGenProgress?.serverStep ?? ''] ?? videoGenProgress?.message ?? 'AI 영상 생성 중'}
+              </Text>
+              <View style={styles.renderBarTrack}>
+                <Animated.View
+                  style={[
+                    styles.renderBarFill,
+                    renderBarStyle,
+                    {
+                      backgroundColor: videoGenProgress?.phase === 'error'
+                        ? theme.colors.error[400]
+                        : theme.colors.primary[400],
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.renderPercentText}>{renderDisplayPct}%</Text>
+              {videoGenProgress?.elapsedSec != null && videoGenProgress.elapsedSec > 0 && (
+                <Text style={styles.renderElapsedText}>{videoGenProgress.elapsedSec}초 경과</Text>
+              )}
             </View>
           )}
 
@@ -1132,6 +1239,54 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: theme.typography.fontFamily.semiBold,
     color: theme.colors.primary[300],
+  },
+  renderOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(5, 5, 12, 0.88)',
+    zIndex: 5,
+  },
+  renderShimmerRing: {
+    position: 'absolute',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: theme.colors.primary[400],
+  },
+  renderPhaseText: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.primary[300],
+    textAlign: 'center',
+  },
+  renderBarTrack: {
+    width: '70%',
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  renderBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  renderPercentText: {
+    fontSize: 14,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.dark.text,
+  },
+  renderElapsedText: {
+    fontSize: 8,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: 'rgba(255,255,255,0.35)',
   },
   copyOverlayBase: {
     position: 'absolute',
