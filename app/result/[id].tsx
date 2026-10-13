@@ -488,6 +488,8 @@ function ResultScreenInner() {
   const videoGenLockRef = useRef(false);
   const navTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoJobSettledRef = useRef(false);
+  const [videoJobPending, setVideoJobPending] = useState(false);
+  const videoJobPendingRef = useRef(false);
   const isFetchingRef = useRef(false);
   const [showAdvancedCamera, setShowAdvancedCamera] = useState(false);
   const [showAdvancedCaption, setShowAdvancedCaption] = useState(false);
@@ -645,12 +647,15 @@ function ResultScreenInner() {
     };
   }, [isGeneratingVideo]);
 
-  // Local DB poll fallback: every 2 seconds while generating, read the
+  // Local DB poll fallback: every 2 seconds while a job is pending, read the
   // video_jobs row directly for the current scan and update serverStep /
   // progress. This keeps the UI in sync even when the Realtime websocket
   // is dropped (common on native when backgrounded).
+  // Uses videoJobPending (not isGeneratingVideo) so the poll keeps running
+  // after Fire & Forget navigation — isGeneratingVideo is set to false
+  // immediately after submit, but the job is still running on the server.
   useEffect(() => {
-    if (!isGeneratingVideo || !scan) {
+    if (!videoJobPending || !scan) {
       if (localPollTimerRef.current) {
         clearInterval(localPollTimerRef.current);
         localPollTimerRef.current = null;
@@ -676,6 +681,8 @@ function ResultScreenInner() {
             ?? (scanData as { muxed_video_url?: string | null }).muxed_video_url;
           if (scanFinalUrl) {
             videoJobSettledRef.current = true;
+            videoJobPendingRef.current = false;
+            setVideoJobPending(false);
             setGeneratedVideoUrl(scanFinalUrl);
             setVideoStage('draft_ready');
             setIsGeneratingVideo(false);
@@ -700,6 +707,8 @@ function ResultScreenInner() {
         const row = data as { status: string; step?: string | null; video_url?: string | null; error_message?: string | null };
         if (row.status === 'SUCCESS' && row.video_url) {
           videoJobSettledRef.current = true;
+          videoJobPendingRef.current = false;
+          setVideoJobPending(false);
           setGeneratedVideoUrl(row.video_url);
           setVideoStage('draft_ready');
           setIsGeneratingVideo(false);
@@ -709,6 +718,8 @@ function ResultScreenInner() {
         }
         if (row.status === 'FAILED') {
           videoJobSettledRef.current = true;
+          videoJobPendingRef.current = false;
+          setVideoJobPending(false);
           setVideoGenError(row.error_message ?? 'AI 영상 생성에 실패했습니다.');
           setVideoStage('failed');
           setIsGeneratingVideo(false);
@@ -753,7 +764,7 @@ function ResultScreenInner() {
         localPollTimerRef.current = null;
       }
     };
-  }, [isGeneratingVideo, scan]);
+  }, [videoJobPending, scan]);
 
   const applyCombinedPreset = useCallback((platform: TargetPlatformKey, purpose: ContentPurpose) => {
     const pp = TARGET_PLATFORM_PRESETS[platform];
@@ -925,6 +936,8 @@ function ResultScreenInner() {
     setIsGeneratingVideo(true);
     setVideoGenError(null);
     videoJobSettledRef.current = false;
+    videoJobPendingRef.current = true;
+    setVideoJobPending(true);
     setVideoGenProgress({ phase: 'submitting', progress: 0.05, message: 'AI 실사 비디오 생성 요청 중...', elapsedSec: 0 });
 
     // Before submitting a new job, check if a previous one already completed
@@ -1105,6 +1118,7 @@ function ResultScreenInner() {
           detailRestoration: targetMediaType === 'image' ? detailRestoration : undefined,
           hdUpscale,
           draft: true,
+          isDraft: true,
           selectedMode: videoGenMode === 'auto' ? 'auto_3d' : 'manual',
           enableOrbit360: videoGenMode === 'auto' || isCleanVideoMode,
           orbitSpeed: 1.0,
@@ -1178,6 +1192,8 @@ function ResultScreenInner() {
         }
         if (result.status === 'SUCCESS' && result.videoUrl) {
           videoJobSettledRef.current = true;
+          videoJobPendingRef.current = false;
+          setVideoJobPending(false);
           setDraftVideoUrl(result.videoUrl);
           setGeneratedVideoUrl(result.videoUrl);
           setVideoStage('draft_ready');
@@ -1259,7 +1275,9 @@ function ResultScreenInner() {
           });
         } else if (result.status === 'FAILED') {
           videoJobSettledRef.current = true;
-          const msg = result.error ?? 'AI 영상 생성에 실패했습니다.';
+          videoJobPendingRef.current = false;
+          setVideoJobPending(false);
+          const msg = result.error ?? 'AI 영상 생성에 실패습니다.';
           setVideoGenError(msg);
           setVideoStage('failed');
           setIsGeneratingVideo(false);
@@ -1285,6 +1303,8 @@ function ResultScreenInner() {
         setVideoStage('failed');
         setIsGeneratingVideo(false);
         setVideoGenProgress(null);
+        videoJobPendingRef.current = false;
+        setVideoJobPending(false);
       }
       // Refund credits if the submit failed after deduction
       if (err instanceof Error && !err.message.includes('크레딧이 부족')) {
@@ -1696,6 +1716,8 @@ function ResultScreenInner() {
         } else if (recovered.status === 'SUCCESS' && recovered.videoUrl) {
           if (mountedRef.current && !videoJobSettledRef.current) {
             videoJobSettledRef.current = true;
+            videoJobPendingRef.current = false;
+            setVideoJobPending(false);
             setGeneratedVideoUrl(recovered.videoUrl);
             setVideoStage(recovered.isHd ? 'hd_ready' : 'draft_ready');
             setIsGeneratingVideo(false);

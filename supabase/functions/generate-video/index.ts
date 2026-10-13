@@ -69,6 +69,7 @@ interface GenerateVideoRequest {
   enableFabricPhysics?: boolean;
   orbitSpeed?: number;
   mainImageUrl?: string;
+  modelImageUrl?: string;
   memeFormat?: string;
   memeText?: string;
   idempotencyKey?: string;
@@ -433,9 +434,13 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
           if (!promptImage) {
             promptImage = await fetchScanImageUrl(body.scanId);
           }
+          // For universal_synthesis + virtual fitting, the model image is
+          // essential — Runway needs it to map the garment onto the person.
+          // Without it, the render silently produces an empty/irrelevant clip.
+          const modelImage = body.enableVirtualFitting === true ? (body.modelImageUrl ?? null) : null;
 
           const runwayTaskId = await submitWithRetry(
-            () => submitRunwayTask(runwayPrompt, runwayKey, aspectRatio, durationSec, isDraft, webhookUrl, body.scanId, promptImage, isDraft ? false : hdUpscale, resolution, fps),
+            () => submitRunwayTask(runwayPrompt, runwayKey, aspectRatio, durationSec, isDraft, webhookUrl, body.scanId, promptImage, isDraft ? false : hdUpscale, resolution, fps, modelImage),
             MAX_RETRIES,
           );
 
@@ -902,7 +907,7 @@ async function handleServerPoll(body: GenerateVideoRequest, runwayKey: string): 
   // self-reinvocation chain to push the job through to rendering.
   // Drafts render at 480p/12fps — use a shorter base delay to detect
   // completion faster.
-  const draftBase = body.isDraft === true;
+  const draftBase = body.isDraft === true || body.draft === true;
   const pollBaseDelay = draftBase ? DRAFT_POLL_INITIAL_DELAY_MS : SERVER_POLL_INITIAL_DELAY_MS;
   const pollMaxDelay = draftBase ? Math.min(SERVER_POLL_MAX_DELAY_MS, 3000) : SERVER_POLL_MAX_DELAY_MS;
   const baseDelay = Math.min(pollBaseDelay * Math.pow(1.5, attempt), pollMaxDelay);
@@ -1656,6 +1661,7 @@ async function submitRunwayTask(
   isHd?: boolean,
   resolution?: string,
   fps?: number,
+  modelImage?: string | null,
 ): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), RUNWAY_SUBMIT_TIMEOUT_MS);
@@ -1708,10 +1714,13 @@ async function submitRunwayTask(
       if (fps != null) payload.fps = isSeedance ? Math.min(fps, 24) : fps;
     }
     if (hasImage && promptImage) {
-      payload.promptImage = promptImage;
+      // For virtual fitting, the model image is the animation subject —
+      // use it as the primary prompt image. Product context is already
+      // embedded in the prompt text via buildAutoPrompt.
+      payload.promptImage = modelImage || promptImage;
     }
 
-    console.log("[generate-video] Runway request:", endpoint, "model:", payload.model, "hasImage:", hasImage, "promptLen:", prompt.length);
+    console.log("[generate-video] Runway request:", endpoint, "model:", payload.model, "hasImage:", hasImage, "hasModelImage:", !!modelImage, "promptLen:", prompt.length);
 
     const resp = await fetch(`https://api.dev.runwayml.com/v1/${endpoint}`, {
       method: "POST",

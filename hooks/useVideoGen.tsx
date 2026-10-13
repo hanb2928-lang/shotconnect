@@ -946,7 +946,9 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
         enableVirtualFitting: params.genMode === 'universal_synthesis' ? params.enableVirtualFitting : undefined,
         enableFabricPhysics: params.enableFabricPhysics,
         draft: true,
+        isDraft: true,
         mainImageUrl: params.mainUrl,
+        modelImageUrl: params.modelUrl ?? undefined,
         signal: abortRef.current?.signal,
       }, (p) => {
         queueProgressUpdate(p);

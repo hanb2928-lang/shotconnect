@@ -50,6 +50,7 @@ interface GenerateAiVideoOptions {
   cutCount?: number;
   productVision?: ProductVisionResult | null;
   draft?: boolean;
+  isDraft?: boolean;
   isCleanVideoMode?: boolean;
   promptStrength?: number;
   negativePrompt?: string;
@@ -73,6 +74,7 @@ interface GenerateAiVideoOptions {
   enableVirtualFitting?: boolean;
   enableFabricPhysics?: boolean;
   mainImageUrl?: string;
+  modelImageUrl?: string;
   signal?: AbortSignal;
 }
 
@@ -461,6 +463,7 @@ export async function generateAiVideo(
           cutCount: options.cutCount,
           productVision: options.productVision,
           draft: isDraft,
+          isDraft,
           isCleanVideoMode: options.isCleanVideoMode,
           promptStrength: options.promptStrength,
           negativePrompt: options.negativePrompt,
@@ -482,6 +485,7 @@ export async function generateAiVideo(
           enableVirtualFitting: options.enableVirtualFitting,
           enableFabricPhysics: options.enableFabricPhysics,
           mainImageUrl: options.mainImageUrl,
+          modelImageUrl: options.modelImageUrl,
         }),
         0,
         (retryAttempt) => report('submitting', 0.05 + retryAttempt * 0.02, `네트워크 복구 후 재시도 중 (${retryAttempt}/${SUBMIT_MAX_RETRIES})...`),
@@ -1263,6 +1267,7 @@ export async function submitVideoJobAsync(
     productVision: options.productVision,
     contentTone: options.contentTone,
     draft: options.draft,
+    isDraft: options.draft === true,
     isCleanVideoMode: options.isCleanVideoMode,
     promptStrength: options.promptStrength,
     negativePrompt: options.negativePrompt,
@@ -1284,6 +1289,7 @@ export async function submitVideoJobAsync(
     enableVirtualFitting: options.enableVirtualFitting,
     enableFabricPhysics: options.enableFabricPhysics,
     mainImageUrl: options.mainImageUrl,
+    modelImageUrl: options.modelImageUrl,
   });
 
   await Promise.race([
@@ -1899,6 +1905,7 @@ export async function upgradeVideoToHd(
     cutCount: options.cutCount,
     productVision: options.productVision,
     draft: false,
+    isDraft: false,
     isCleanVideoMode: options.isCleanVideoMode,
     promptStrength: options.promptStrength,
     negativePrompt: options.negativePrompt,
@@ -1920,6 +1927,7 @@ export async function upgradeVideoToHd(
     enableVirtualFitting: options.enableVirtualFitting,
     enableFabricPhysics: options.enableFabricPhysics,
     mainImageUrl: options.mainImageUrl,
+    modelImageUrl: options.modelImageUrl,
   });
 
   await ensureFreshSession();
