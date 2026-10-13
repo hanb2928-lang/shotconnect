@@ -112,3 +112,6 @@ verify_jwt = false
 [functions.ai-diagnostic]
 verify_jwt = false
 
+[functions.check-runway-credits]
+verify_jwt = false
+

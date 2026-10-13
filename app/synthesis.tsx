@@ -41,6 +41,8 @@ import {
 import { TextureUploader } from '@/components/TextureUploader';
 import { PreviewExportTray } from '@/components/PreviewExportTray';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
+import { RunwayCreditsBadge } from '@/components/RunwayCreditsBadge';
+import { useRunwayCredits } from '@/hooks/useRunwayCredits';
 import { supabase } from '@/lib/supabase';
 import { isOnline, useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { DraftHistory } from '@/components/DraftHistory';
@@ -291,6 +293,7 @@ function SynthesisScreenInner() {
   } = videoGen;
 
   const error = localError ?? genError;
+  const runwayCredits = useRunwayCredits();
   const setError = (msg: string | null) => setLocalError(msg);
   const setResultImageUrl = (url: string | null) => {
     if (url === null) clearResult();
@@ -845,6 +848,7 @@ function SynthesisScreenInner() {
         {isGenerating && videoProgress && !suppressProgressRender && (
           <VideoGenStepTracker progress={videoProgress} variant="inline" />
         )}
+        <RunwayCreditsBadge {...runwayCredits} />
 
         {isGenerating && (
           <View style={styles.navHint}>
