@@ -539,6 +539,7 @@ export function useResultPolling(
         if (pollErrorWindow.length >= MAX_POLL_ERRORS_IN_WINDOW) {
           // Unified DB force-sync as a last resort before giving up.
           const dbResult = await forceSyncUnified();
+          if (cancelled || settledRef.current) return;
           if (dbResult) {
             handleResult(dbResult.status, dbResult.videoUrl);
             return;

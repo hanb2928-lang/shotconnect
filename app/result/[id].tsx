@@ -21,26 +21,19 @@ import {
  Share as RNShare } from 'react-native';
 import {
   ArrowLeft,
-  Share2,
-  Sparkles,
-  Pencil,
-  Hash,
   Copy,
   Check,
   Flame,
-  TrendingUp,
   Plus,
   X,
-  Link2,
   MessageCircle,
-  Sun,
   MoveUp,
   MoveVertical,
   MoveDown,
   CircleAlert,
   ChevronDown,
   ChevronUp,
- BellRing, ScanText as ScanTextIcon , TrendingUp as TrendingUpIcon, Hash as HashIcon, PenLine, LayoutTemplate, ShoppingBag as ShoppingBagIcon, Wand as Wand2, Film as FilmIcon, Lightbulb, Store, BookOpen, Rocket, Users, Globe, Share2 as Share2Icon, Palette as PaletteIcon, Clock, Camera as CameraIcon, Sun as SunIcon, ShieldCheck as ShieldIcon, Link2 as Link2Icon, User as UserIcon, SlidersHorizontal as SlidersIcon, Pencil as PencilIcon, Sparkles as SparklesIcon, Zap as ZapIcon, Scissors as ScissorsIcon, Youtube, Music2, Instagram, MonitorPlay, FileText, AudioLines, Video as VideoIcon, Image as ImageIcon, AlertCircle as AlertCircleIcon, Loader2 as Loader2Icon, Download, Upload, Settings2, RotateCcw, CheckCircle2 } from 'lucide-react-native';
+ BellRing, ScanText as ScanTextIcon , TrendingUp, Hash, PenLine, LayoutTemplate, ShoppingBag as ShoppingBagIcon, Wand as Wand2, Film as FilmIcon, Lightbulb, Store, BookOpen, Rocket, Users, Globe, Share2, Palette as PaletteIcon, Clock, Camera as CameraIcon, Sun, ShieldCheck as ShieldIcon, Link2, User as UserIcon, SlidersHorizontal as SlidersIcon, Pencil, Sparkles, Zap as ZapIcon, Scissors as ScissorsIcon, Youtube, Music2, Instagram, MonitorPlay, FileText, AudioLines, Video as VideoIcon, Image as ImageIcon, AlertCircle as AlertCircleIcon, Loader2 as Loader2Icon, Download, Upload, Settings2, RotateCcw, CheckCircle2 } from 'lucide-react-native';
 import { theme } from '@/lib/theme';
 import { getThumbnailUrl } from '@/lib/imageUtils';
 import { supabase } from '@/lib/supabase';
@@ -3381,7 +3374,7 @@ function ResultScreenInner() {
           description: '제품 원본은 그대로, 배경과 조명만 AI로 다채롭게 변경',
           category: 'template',
           modes: ['single', 'multi', 'template'] as ScanMode[],
-          icon: <SunIcon size={16} color={theme.colors.accent[300]} strokeWidth={2} />,
+          icon: <Sun size={16} color={theme.colors.accent[300]} strokeWidth={2} />,
           mediaType: 'image',
           render: () => (
             <LightingContextStudio
@@ -3469,7 +3462,7 @@ function ResultScreenInner() {
           description: '여러 플랫폼 규격에 맞춰 한 번에 결과물 추출',
           category: 'export',
           modes: ['single', 'multi', 'template'] as ScanMode[],
-          icon: <Share2Icon size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
+          icon: <Share2 size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
           mediaType: 'image',
           render: () => (
             <MultiPlatformExport
@@ -3492,7 +3485,7 @@ function ResultScreenInner() {
           description: '즉시 클립보드 복사 및 SNS 공유',
           category: 'export',
           modes: ['single', 'multi', 'template'] as ScanMode[],
-          icon: <Share2Icon size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
+          icon: <Share2 size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
           mediaType: 'both',
           render: () => (
             <ShareBar
@@ -3538,7 +3531,7 @@ function ResultScreenInner() {
           description: '실시간 인기 키워드 기반 마케팅 문구 추천',
           category: 'content',
           modes: ['single', 'multi'] as ScanMode[],
-          icon: <TrendingUpIcon size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
+          icon: <TrendingUp size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
           mediaType: 'both',
           render: () => (
             <TrendCopyBar
@@ -3556,7 +3549,7 @@ function ResultScreenInner() {
           description: '최적의 해시태그 조합 추천 및 복사',
           category: 'content',
           modes: ['single', 'multi', 'template'] as ScanMode[],
-          icon: <HashIcon size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
+          icon: <Hash size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
           mediaType: 'both',
           render: () => (
             <HashtagCopyBar
@@ -3614,7 +3607,7 @@ function ResultScreenInner() {
           description: '숏폼 도입부 후킹 문구 및 마무리 멘트 생성',
           category: 'export',
           modes: ['single', 'multi'] as ScanMode[],
-          icon: <Share2Icon size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
+          icon: <Share2 size={16} color={theme.colors.primary[300]} strokeWidth={2} />,
           mediaType: 'video',
           render: () => (
             <SocialShortFormShare
@@ -3686,7 +3679,7 @@ function ResultScreenInner() {
           description: '나만의 사용 후기 1줄 추가 + 실물 촬영 컷 삽입',
           category: 'optimize',
           modes: ['single', 'multi'] as ScanMode[],
-          icon: <PencilIcon size={16} color={theme.colors.warning[400]} strokeWidth={2} />,
+          icon: <Pencil size={16} color={theme.colors.warning[400]} strokeWidth={2} />,
           mediaType: 'both',
           render: () => <MicroEditSlot />,
         },
@@ -3713,7 +3706,7 @@ function ResultScreenInner() {
           description: '현재 콘텐츠가 얼마나 중복되는지 독창성 점수 산출',
           category: 'optimize',
           modes: ['single', 'multi'] as ScanMode[],
-          icon: <SparklesIcon size={16} color={theme.colors.accent[400]} strokeWidth={2} />,
+          icon: <Sparkles size={16} color={theme.colors.accent[400]} strokeWidth={2} />,
           mediaType: 'both',
           render: () => (
             <OriginalityScoreCard
@@ -3752,7 +3745,7 @@ function ResultScreenInner() {
           description: '모든 상품을 한 페이지에 모아두는 프로필 바이오 링크',
           category: 'export',
           modes: ['single', 'multi'] as ScanMode[],
-          icon: <Link2Icon size={16} color={theme.colors.accent[400]} strokeWidth={2} />,
+          icon: <Link2 size={16} color={theme.colors.accent[400]} strokeWidth={2} />,
           mediaType: 'both',
           render: () => (
             <LinkInBioCard
@@ -3834,7 +3827,7 @@ function ResultScreenInner() {
           description: '제품과 현재 트렌드의 매칭 점검 및 해시태그 추천',
           category: 'commerce',
           modes: ['single', 'multi'] as ScanMode[],
-          icon: <TrendingUpIcon size={16} color={theme.colors.warning[400]} strokeWidth={2} />,
+          icon: <TrendingUp size={16} color={theme.colors.warning[400]} strokeWidth={2} />,
           mediaType: 'both',
           render: () => (
             <TrendMatchCard
@@ -4225,7 +4218,7 @@ function ResultScreenInner() {
           {/* Clean Video Mode Toggle */}
           <View style={styles.cleanVideoToggleRow}>
             <View style={styles.cleanVideoToggleLeft}>
-              <SparklesIcon size={14} color={theme.colors.accent[300]} strokeWidth={2} />
+              <Sparkles size={14} color={theme.colors.accent[300]} strokeWidth={2} />
               <View style={styles.cleanVideoToggleTextWrap}>
                 <Text style={styles.cleanVideoToggleLabel}>마케팅 텍스트/효과 제외 (Clean Video)</Text>
                 <Text style={styles.cleanVideoToggleDesc}>
@@ -4750,7 +4743,7 @@ function ResultScreenInner() {
             {(isGeneratingVideo || videoStage === 'drafting' || videoStage === 'hd_upgrading') ? (
               <RotatingLoader size={18} color="#fff" />
             ) : (
-              <SparklesIcon size={18} color="#fff" strokeWidth={2} />
+              <Sparkles size={18} color="#fff" strokeWidth={2} />
             )}
             <Text style={styles.promptGenBtnText} numberOfLines={1}>
               {(isGeneratingVideo || videoStage === 'drafting' || videoStage === 'hd_upgrading')
@@ -4787,7 +4780,7 @@ function ResultScreenInner() {
             {isGeneratingImage ? (
               <RotatingLoader size={18} color="#fff" />
             ) : (
-              <SparklesIcon size={18} color="#fff" strokeWidth={2} />
+              <Sparkles size={18} color="#fff" strokeWidth={2} />
             )}
             <Text style={styles.promptGenBtnText} numberOfLines={1}>
               {isGeneratingImage ? (imageGenProgress ? `${Math.round(imageGenProgress.progress * 100)}% 생성 중...` : '5장 생성 중...') : 'AI 5장 자동 생성'}
@@ -4932,7 +4925,7 @@ function ResultScreenInner() {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Share2Icon size={15} color="#fff" strokeWidth={2} />
+                  <Share2 size={15} color="#fff" strokeWidth={2} />
                   <Text style={[styles.galleryModalActionText, { color: '#fff' }]}>공유</Text>
                 </TouchableOpacity>
               </View>

@@ -268,6 +268,7 @@ function SynthesisScreenInner() {
   const scanIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const isBackgroundRef = useRef(false);
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [suppressProgressRender, setSuppressProgressRender] = useState(false);
   const preUploadCacheRef = useRef<Map<string, string>>(new Map());
   const preUploadInFlightRef = useRef<Set<string>>(new Set());
@@ -301,14 +302,17 @@ function SynthesisScreenInner() {
   // Auto-load draft from query param (navigated from home screen DraftHistory)
   useEffect(() => {
     if (!params.draftId || resumeDraftId) return;
+    let cancelled = false;
     (async () => {
       const draftId = params.draftId;
       if (!draftId) return;
       const draft = await loadDraft(draftId);
+      if (cancelled) return;
       if (draft && handleResumeDraftRef.current) {
         await handleResumeDraftRef.current(draft);
       }
     })();
+    return () => { cancelled = true; };
   }, [params.draftId, resumeDraftId, loadDraft]);
 
   useEffect(() => {
@@ -328,10 +332,11 @@ function SynthesisScreenInner() {
         // foreground return so the viewport resize layout pass doesn't
         // collide with VideoGenStepTracker re-renders (layout thrashing).
         setSuppressProgressRender(true);
-        setTimeout(() => setSuppressProgressRender(false), 1200);
+        const t = setTimeout(() => { if (mountedRef.current) setSuppressProgressRender(false); }, 1200);
+        suppressTimerRef.current = t;
       }
     });
-    return unsub;
+    return () => { unsub(); if (suppressTimerRef.current) { clearTimeout(suppressTimerRef.current); suppressTimerRef.current = null; } };
   }, []);
 
   // Warm-up the generate-video edge function on screen mount to avoid cold-start delay.
@@ -686,9 +691,7 @@ function SynthesisScreenInner() {
   }, []);
 
   const handleShare = useCallback(() => {
-    if (Platform.OS === 'web') {
-      Alert.alert('공유', 'SNS 공유 기능이 곧 제공됩니다.');
-    }
+    Alert.alert('공유', 'SNS 공유 기능이 곧 제공됩니다.');
   }, []);
 
   const autoDetectedMood: ProductMood | null = productImages.length >= 3 ? mood : null;

@@ -1020,7 +1020,7 @@ function waitForVideoCompletion(
             }
             scheduleNext(); return;
           }
-          const resp = data as { status?: string; videoUrl?: string; error?: string };
+          const resp = (data ?? {}) as { status?: string; videoUrl?: string; error?: string };
           _dbg('runwayPoll:resp', { status: resp.status, hasVideoUrl: !!resp.videoUrl });
           if (resp.status === 'SUCCESS') {
             if (resp.videoUrl) {
@@ -1712,7 +1712,7 @@ export function subscribeVideoJob(
             return;
           }
         } else {
-          const resp = data as { status?: string; videoUrl?: string; error?: string };
+          const resp = (data ?? {}) as { status?: string; videoUrl?: string; error?: string };
           _dbg('runwayPoll:resp', { status: resp.status, hasVideoUrl: !!resp.videoUrl });
           if (resp.status === 'SUCCESS') {
             if (resp.videoUrl) {
@@ -1784,7 +1784,7 @@ export function subscribeVideoJob(
       removeBgPause();
       const msg = '비디오 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.';
       if (scanId) {
-        void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
+        void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).eq('task_id', taskId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
       }
       callback({ status: 'FAILED', error: msg });
     }).catch(() => {}).finally(() => { /* release promise ref */ });
@@ -1832,7 +1832,7 @@ export function subscribeVideoJob(
           removeBgPause();
           const msg = '비디오 생성이 6분(360초)을 초과했습니다. 다시 시도해주세요.';
           if (scanId) {
-            void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
+            void supabase.from('video_jobs').update({ status: 'FAILED', step: 'failed', error_message: msg }).eq('scan_id', scanId).eq('task_id', taskId).then(() => {}, (e: unknown) => console.error('[aiVideoPipeline] circuit breaker DB update failed:', e));
           }
           callback({ status: 'FAILED', error: msg });
         }).catch(() => {}).finally(() => { /* release promise ref */ });
@@ -1979,14 +1979,13 @@ export async function upgradeVideoToHd(
   const hdTaskId = data.taskId as string;
 
   // Record the HD task on the existing video_jobs row
-  try {
-    await supabase
-      .from('video_jobs')
-      .update({ hd_task_id: hdTaskId, hd_status: 'PENDING' })
-      .eq('scan_id', scanId)
-      .eq('task_id', draftJobId);
-  } catch (err) {
-    console.error('[aiVideoPipeline] upgradeVideoToHd: failed to record HD task on video_jobs row:', err);
+  const { error: hdUpdateError } = await supabase
+    .from('video_jobs')
+    .update({ hd_task_id: hdTaskId, hd_status: 'PENDING' })
+    .eq('scan_id', scanId)
+    .eq('task_id', draftJobId);
+  if (hdUpdateError) {
+    console.error('[aiVideoPipeline] upgradeVideoToHd: DB update failed:', hdUpdateError);
   }
 
   return { hdTaskId, hdJobId: hdTaskId };
@@ -2044,26 +2043,9 @@ export function subscribeHdUpgrade(
         callback({ status: 'FAILED', error: row.error_message ?? 'HD 업그레이드에 실패했습니다.' });
         return;
       }
-      // Fallback: check scans.video_url / muxed_video_url — if the draft
-      // or HD result was written to scans but the video_jobs row hasn't
-      // updated yet.
-      try {
-        const { data: scanData } = await withQueryTimeout(
-          supabase
-            .from('scans')
-            .select('video_url, muxed_video_url')
-            .eq('id', scanId)
-            .maybeSingle(),
-          5000,
-          'subscribeHdUpgrade.checkAndNotify.scans',
-        );
-        const scanFinalUrl = scanData?.video_url || scanData?.muxed_video_url;
-        if (scanFinalUrl) {
-          settled = true;
-          cleanup();
-          callback({ status: 'SUCCESS', videoUrl: scanFinalUrl });
-        }
-      } catch (err) { console.error('[aiVideoPipeline] scans fallback lookup failed:', err); }
+      // No scans fallback here — scans.video_url holds the draft URL, not
+      // the HD URL. Using it would prematurely resolve the HD upgrade with
+      // the draft video, causing the real HD completion to be missed.
     } catch (err) {
       consecutivePollFailures++;
       logError(err, { component: 'aiVideoPipeline', action: 'subscribeHdUpgrade.checkAndNotify', extra: { consecutivePollFailures } });

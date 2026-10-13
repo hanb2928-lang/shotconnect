@@ -1109,7 +1109,7 @@ export function VideoGenProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const retryFromDB = useCallback(async (): Promise<boolean> => {
-    if (generateLockRef.current || isGenerating) return false;
+    if (generateLockRef.current || jobIdRef.current || isGenerating) return false;
     const active = await getActiveVideoJob();
     if (!active || !active.jobId || !active.scanId) return false;
     try {

@@ -27,7 +27,7 @@ export function NativeVideoPlayer({ videoUri, isPlaying, ttsUrl, onLoad, onError
     p.muted = true;
   });
 
-  const ttsPlayer = useVideoPlayer(ttsUrl ?? '', (p) => {
+  const ttsPlayer = useVideoPlayer(ttsUrl || 'about:blank', (p) => {
     p.loop = true;
     p.muted = false;
   });
