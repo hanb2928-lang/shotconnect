@@ -355,15 +355,22 @@ async function handleSubmit(body: GenerateVideoRequest): Promise<Response> {
   // a second job — the caught error triggers a re-query for the first row.
   if (body.scanId) {
     const saved = await saveVideoJob(body.scanId, internalJobId, isDraft, hdUpscale, body.idempotencyKey, undefined, aspectRatio, durationSec, fps);
-    if (!saved && body.idempotencyKey) {
-      const existing = await findJobByIdempotencyKey(body.idempotencyKey);
-      if (existing) {
-        console.log(`[generate-video] Idempotency race: INSERT failed, returning existing job ${existing.taskId}`);
-        return new Response(
-          JSON.stringify({ mode: "submit", taskId: existing.taskId, provider: "runway", status: existing.status, idempotent: true }),
-          { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+    if (!saved) {
+      if (body.idempotencyKey) {
+        const existing = await findJobByIdempotencyKey(body.idempotencyKey);
+        if (existing) {
+          console.log(`[generate-video] Idempotency race: INSERT failed, returning existing job ${existing.taskId}`);
+          return new Response(
+            JSON.stringify({ mode: "submit", taskId: existing.taskId, provider: "runway", status: existing.status, idempotent: true }),
+            { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
       }
+      console.error("[generate-video] saveVideoJob failed — cannot proceed without a DB job row");
+      return new Response(
+        JSON.stringify({ error: "영상 생성 작업 저장에 실패했습니다. 잠시 후 다시 시도해주세요.", step: "planning", provider: "runway" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
   }
 
@@ -1158,7 +1165,11 @@ async function saveVideoJob(scanId: string, taskId: string, isDraft: boolean, is
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-    if (!resp.ok) return false;
+    if (!resp.ok) {
+      const errBody = await resp.text().catch(() => "");
+      console.error('[generate-video] saveVideoJob INSERT failed:', resp.status, errBody.slice(0, 500));
+      return false;
+    }
     return true;
   } catch (err) {
     console.error('[generate-video] saveVideoJob error:', err);
@@ -1719,8 +1730,11 @@ async function submitRunwayTask(
       // embedded in the prompt text via buildAutoPrompt.
       payload.promptImage = modelImage || promptImage;
     }
+    if (webhookUrl) {
+      payload.callbackUrl = webhookUrl;
+    }
 
-    console.log("[generate-video] Runway request:", endpoint, "model:", payload.model, "hasImage:", hasImage, "hasModelImage:", !!modelImage, "promptLen:", prompt.length);
+    console.log("[generate-video] Runway request:", endpoint, "model:", payload.model, "hasImage:", hasImage, "hasModelImage:", !!modelImage, "promptLen:", prompt.length, "hasWebhook:", !!webhookUrl);
 
     const resp = await fetch(`https://api.dev.runwayml.com/v1/${endpoint}`, {
       method: "POST",
