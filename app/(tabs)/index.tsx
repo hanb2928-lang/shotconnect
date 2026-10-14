@@ -21,7 +21,7 @@ import { useCameraPermissionsSafe } from '@/hooks/useCameraPermissionsSafe';
 import { useNativeBridgeReady } from '@/hooks/useNativeBridgeReady';
 import { useSafeTop } from '@/hooks/useSafeTop';
 import { useTabBarHeight } from '@/hooks/useTabBarHeight';
-import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, Video } from 'lucide-react-native';
+import { Camera, RotateCcw, X, Check, Sparkles, Image as ImageIcon, AlertCircle, ArrowRight, Flame, Gem, Orbit, Layers, Diamond, Zap, Video, ChevronDown } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { registerAppStateHandler } from '@/lib/appStateCoordinator';
@@ -261,6 +261,7 @@ function CameraScreenInner() {
   const [workflowMountKey, setWorkflowMountKey] = useState(0);
   const [stereoProgress, setStereoProgress] = useState<StereoPipelineProgress>({ overallProgress: 0, currentStep: -1, steps: [], result: null, error: null });
   const [stereoOverlayVisible, setStereoOverlayVisible] = useState(false);
+  const [stereoMinimized, setStereoMinimized] = useState(false);
   const [bgResilienceToast, setBgResilienceToast] = useState(false);
   const wasBgDuringPipelineRef = useRef(false);
   const bgResilienceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -474,6 +475,7 @@ function CameraScreenInner() {
         setAutoSaving(false);
         autoSavingRef.current = false;
         setStereoOverlayVisible(false);
+        setStereoMinimized(false);
         stereoOverlayRef.current = false;
         setPostCaptureVisible(false);
         setPostCaptureVideoUri(null);
@@ -1778,10 +1780,17 @@ function CameraScreenInner() {
           />
 
           <StereoProgressLightweight
-            visible={stereoOverlayVisible}
+            visible={stereoOverlayVisible && !stereoMinimized}
             progress={stereoProgress}
-            onDismiss={() => setStereoOverlayVisible(false)}
+            onDismiss={() => { setStereoOverlayVisible(false); setStereoMinimized(false); }}
+            onMinimize={() => setStereoMinimized(true)}
           />
+          {stereoMinimized && stereoOverlayVisible && (
+            <MinimizedStereoBanner
+              progress={stereoProgress}
+              onExpand={() => setStereoMinimized(false)}
+            />
+          )}
 
           <CreditPurchaseModal
             visible={creditModalVisible}
@@ -1896,10 +1905,17 @@ function CameraScreenInner() {
         />
 
         <StereoProgressLightweight
-          visible={stereoOverlayVisible}
+          visible={stereoOverlayVisible && !stereoMinimized}
           progress={stereoProgress}
-          onDismiss={() => setStereoOverlayVisible(false)}
+          onDismiss={() => { setStereoOverlayVisible(false); setStereoMinimized(false); }}
+          onMinimize={() => setStereoMinimized(true)}
         />
+        {stereoMinimized && stereoOverlayVisible && (
+          <MinimizedStereoBanner
+            progress={stereoProgress}
+            onExpand={() => setStereoMinimized(false)}
+          />
+        )}
 
         <CreditPurchaseModal
           visible={creditModalVisible}
@@ -1997,10 +2013,17 @@ function CameraScreenInner() {
         />
 
         <StereoProgressLightweight
-          visible={stereoOverlayVisible}
+          visible={stereoOverlayVisible && !stereoMinimized}
           progress={stereoProgress}
-          onDismiss={() => setStereoOverlayVisible(false)}
+          onDismiss={() => { setStereoOverlayVisible(false); setStereoMinimized(false); }}
+          onMinimize={() => setStereoMinimized(true)}
         />
+        {stereoMinimized && stereoOverlayVisible && (
+          <MinimizedStereoBanner
+            progress={stereoProgress}
+            onExpand={() => setStereoMinimized(false)}
+          />
+        )}
 
         <ProcessingBarrier
           visible={processing && !autoSaving && !stereoOverlayVisible}
@@ -2195,10 +2218,17 @@ function CameraScreenInner() {
       />
 
       <StereoProgressLightweight
-        visible={stereoOverlayVisible}
+        visible={stereoOverlayVisible && !stereoMinimized}
         progress={stereoProgress}
-        onDismiss={() => setStereoOverlayVisible(false)}
+        onDismiss={() => { setStereoOverlayVisible(false); setStereoMinimized(false); }}
+        onMinimize={() => setStereoMinimized(true)}
       />
+      {stereoMinimized && stereoOverlayVisible && (
+        <MinimizedStereoBanner
+          progress={stereoProgress}
+          onExpand={() => setStereoMinimized(false)}
+        />
+      )}
 
       <CoverChoiceOverlay
         visible={coverChoiceVisible}
@@ -2258,23 +2288,79 @@ function useRotatingMicroCopy(active: boolean, intervalMs = 3000): string {
   return RENDER_MICRO_COPIES[index];
 }
 
+function MinimizedStereoBanner({
+  progress,
+  onExpand,
+}: {
+  progress: StereoPipelineProgress;
+  onExpand: () => void;
+}) {
+  const pct = Math.round(progress.overallProgress * 100);
+  const hasError = progress.error !== null;
+  const currentStep = progress.currentStep >= 0 ? progress.steps[progress.currentStep] : null;
+  return (
+    <TouchableOpacity style={styles.stereoMinimizedBanner} onPress={onExpand} activeOpacity={0.85}>
+      <Sparkles size={16} color={theme.colors.primary[400]} strokeWidth={2} />
+      <View style={styles.stereoMinimizedContent}>
+        <Text style={styles.stereoMinimizedLabel}>
+          {hasError ? '입체컷 오류' : currentStep?.label ?? 'AI 입체컷 생성 중'}
+        </Text>
+        <View style={styles.stereoMinimizedBarTrack}>
+          <View style={[styles.stereoMinimizedBarFill, { width: `${hasError ? 100 : pct}%` }]} />
+        </View>
+      </View>
+      <Text style={styles.stereoMinimizedPct}>{hasError ? '!' : `${pct}%`}</Text>
+      <ChevronDown size={18} color={theme.colors.dark.textDim} strokeWidth={2} style={{ transform: [{ rotate: '180deg' }] }} />
+    </TouchableOpacity>
+  );
+}
+
+function useElapsedSeconds(active: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!active) { setElapsed(0); return; }
+    const start = Date.now();
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return elapsed;
+}
+
+function useCreepFloor(active: boolean, realPct: number, max = 85): number {
+  const [creep, setCreep] = useState(0);
+  useEffect(() => {
+    if (!active) { setCreep(0); return; }
+    const timer = setInterval(() => {
+      setCreep((prev) => (prev < max ? prev + 1 : prev));
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [active, max]);
+  return Math.min(Math.max(creep, realPct), max);
+}
+
 function StereoProgressLightweight({
   visible,
   progress,
   onDismiss,
+  onMinimize,
 }: {
   visible: boolean;
   progress: StereoPipelineProgress;
   onDismiss: () => void;
+  onMinimize: () => void;
 }) {
   const hasError = progress.error !== null;
-  const pct = Math.round(progress.overallProgress * 100);
+  const realPct = Math.round(progress.overallProgress * 100);
+  const pct = useCreepFloor(visible && !hasError, realPct);
+  const elapsed = useElapsedSeconds(visible && !hasError);
   const currentStep = progress.currentStep >= 0 ? progress.steps[progress.currentStep] : null;
   const inRenderZone = pct >= 55 && pct < 85;
   const microCopy = useRotatingMicroCopy(visible && !hasError && inRenderZone);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onMinimize}>
       <View style={styles.stereoLightOverlay}>
         <View style={styles.stereoLightCard}>
           {hasError ? (
@@ -2288,9 +2374,15 @@ function StereoProgressLightweight({
             </>
           ) : (
             <>
-              <RNAnimated.View style={{ transform: [{ scale: 1 }] }}>
-                <Sparkles size={28} color={theme.colors.primary[400]} strokeWidth={2} />
-              </RNAnimated.View>
+              <View style={styles.stereoLightHeaderRow}>
+                <RNAnimated.View style={{ transform: [{ scale: 1 }] }}>
+                  <Sparkles size={24} color={theme.colors.primary[400]} strokeWidth={2} />
+                </RNAnimated.View>
+                <Text style={styles.stereoLightElapsed}>{elapsed}초 경과</Text>
+                <TouchableOpacity style={styles.stereoLightMinBtn} onPress={onMinimize} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7}>
+                  <ChevronDown size={20} color={theme.colors.dark.textDim} strokeWidth={2} />
+                </TouchableOpacity>
+              </View>
               <Text style={styles.stereoLightTitle}>AI 입체컷 생성 중</Text>
               {currentStep && <Text style={styles.stereoLightStep}>{currentStep.label}</Text>}
               {currentStep?.detail ? (
@@ -2307,6 +2399,7 @@ function StereoProgressLightweight({
                   {inRenderZone && (
                     <Text style={styles.stereoLightMicroCopy}>{microCopy}</Text>
                   )}
+                  <Text style={styles.stereoLightMinHint}>백그라운드에서 계속 진행됩니다 · 탭 하단 바에서 확인 가능</Text>
                 </>
               ) : (
                 <Text style={styles.stereoLightPendingText}>AI가 안전하게 작업 중입니다...</Text>
@@ -2929,6 +3022,74 @@ const styles = StyleSheet.create({
   },
   autoSavingStepDotActive: {
     backgroundColor: theme.colors.primary[400],
+  },
+  stereoLightHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 4,
+  },
+  stereoLightElapsed: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.dark.textDim,
+    textAlign: 'center',
+  },
+  stereoLightMinBtn: {
+    padding: 4,
+    borderRadius: theme.radius.sm,
+  },
+  stereoLightMinHint: {
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.dark.textFaint,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 14,
+  },
+  stereoMinimizedBanner: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 12,
+    backgroundColor: theme.colors.dark.surface,
+    borderTopWidth: 1,
+    borderColor: theme.colors.dark.border,
+    paddingBottom: 20,
+  },
+  stereoMinimizedContent: {
+    flex: 1,
+    gap: 4,
+  },
+  stereoMinimizedLabel: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.primary[300],
+  },
+  stereoMinimizedBarTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: theme.colors.dark.surfaceLight,
+    overflow: 'hidden',
+  },
+  stereoMinimizedBarFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: theme.colors.primary[500],
+  },
+  stereoMinimizedPct: {
+    fontSize: 12,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.primary[300],
+    minWidth: 32,
+    textAlign: 'right',
   },
   // Stereo progress
   stereoLightOverlay: {
