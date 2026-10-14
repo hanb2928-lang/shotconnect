@@ -2359,56 +2359,56 @@ function StereoProgressLightweight({
   const inRenderZone = pct >= 55 && pct < 85;
   const microCopy = useRotatingMicroCopy(visible && !hasError && inRenderZone);
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onMinimize}>
-      <View style={styles.stereoLightOverlay}>
-        <View style={styles.stereoLightCard}>
-          {hasError ? (
-            <>
-              <AlertCircle size={28} color={theme.colors.error[400]} strokeWidth={2} />
-              <Text style={styles.stereoLightTitle}>처리 중 오류</Text>
-              <Text style={styles.stereoLightError}>{progress.error}</Text>
-              <TouchableOpacity style={styles.stereoLightBtn} onPress={onDismiss} activeOpacity={0.7}>
-                <Text style={styles.stereoLightBtnText}>확인</Text>
+    <View style={styles.stereoLightOverlay} pointerEvents="box-none">
+      <View style={styles.stereoLightCard} pointerEvents="auto">
+        {hasError ? (
+          <>
+            <AlertCircle size={28} color={theme.colors.error[400]} strokeWidth={2} />
+            <Text style={styles.stereoLightTitle}>처리 중 오류</Text>
+            <Text style={styles.stereoLightError}>{progress.error}</Text>
+            <TouchableOpacity style={styles.stereoLightBtn} onPress={onDismiss} activeOpacity={0.7}>
+              <Text style={styles.stereoLightBtnText}>확인</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <View style={styles.stereoLightHeaderRow}>
+              <RNAnimated.View style={{ transform: [{ scale: 1 }] }}>
+                <Sparkles size={24} color={theme.colors.primary[400]} strokeWidth={2} />
+              </RNAnimated.View>
+              <Text style={styles.stereoLightElapsed}>{elapsed}초 경과</Text>
+              <TouchableOpacity style={styles.stereoLightMinBtn} onPress={onMinimize} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7}>
+                <ChevronDown size={20} color={theme.colors.dark.textDim} strokeWidth={2} />
               </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <View style={styles.stereoLightHeaderRow}>
-                <RNAnimated.View style={{ transform: [{ scale: 1 }] }}>
-                  <Sparkles size={24} color={theme.colors.primary[400]} strokeWidth={2} />
-                </RNAnimated.View>
-                <Text style={styles.stereoLightElapsed}>{elapsed}초 경과</Text>
-                <TouchableOpacity style={styles.stereoLightMinBtn} onPress={onMinimize} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7}>
-                  <ChevronDown size={20} color={theme.colors.dark.textDim} strokeWidth={2} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.stereoLightTitle}>AI 입체컷 생성 중</Text>
-              {currentStep && <Text style={styles.stereoLightStep}>{currentStep.label}</Text>}
-              {currentStep?.detail ? (
-                <Text style={styles.stereoLightDetail}>{currentStep.detail}</Text>
-              ) : null}
-              {pct > 0 ? (
-                <>
-                  <View style={styles.stereoLightBarWrap}>
-                    <View style={styles.stereoLightBarTrack}>
-                      <View style={[styles.stereoLightBarFill, { width: `${pct}%` }]} />
-                    </View>
-                    <Text style={styles.stereoLightPct}>{pct}%</Text>
+            </View>
+            <Text style={styles.stereoLightTitle}>AI 입체컷 생성 중</Text>
+            {currentStep && <Text style={styles.stereoLightStep}>{currentStep.label}</Text>}
+            {currentStep?.detail ? (
+              <Text style={styles.stereoLightDetail}>{currentStep.detail}</Text>
+            ) : null}
+            {pct > 0 ? (
+              <>
+                <View style={styles.stereoLightBarWrap}>
+                  <View style={styles.stereoLightBarTrack}>
+                    <View style={[styles.stereoLightBarFill, { width: `${pct}%` }]} />
                   </View>
-                  {inRenderZone && (
-                    <Text style={styles.stereoLightMicroCopy}>{microCopy}</Text>
-                  )}
-                  <Text style={styles.stereoLightMinHint}>백그라운드에서 계속 진행됩니다 · 탭 하단 바에서 확인 가능</Text>
-                </>
-              ) : (
-                <Text style={styles.stereoLightPendingText}>AI가 안전하게 작업 중입니다...</Text>
-              )}
-            </>
-          )}
-        </View>
+                  <Text style={styles.stereoLightPct}>{pct}%</Text>
+                </View>
+                {inRenderZone && (
+                  <Text style={styles.stereoLightMicroCopy}>{microCopy}</Text>
+                )}
+                <Text style={styles.stereoLightMinHint}>백그라운드에서 계속 진행됩니다 · 탭 하단 바에서 확인 가능</Text>
+              </>
+            ) : (
+              <Text style={styles.stereoLightPendingText}>AI가 안전하게 작업 중입니다...</Text>
+            )}
+          </>
+        )}
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -3093,10 +3093,15 @@ const styles = StyleSheet.create({
   },
   // Stereo progress
   stereoLightOverlay: {
-    flex: 1,
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(3, 5, 15, 0.88)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 9998,
   },
   stereoLightCard: {
     width: 280,
