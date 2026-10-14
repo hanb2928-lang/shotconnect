@@ -1272,10 +1272,6 @@ function ResultScreenInner() {
           setIsGeneratingVideo(false);
           setVideoGenProgress(null);
           setBgJobNotice(null);
-          // Refund credits for the failed video generation
-          import('@/lib/credits').then(({ refundCredits }) => {
-            refundCredits(hdUpscale ? 'video_hd' : 'video_draft').catch(() => {});
-          }).catch(() => {});
         }
         } catch {
           if (mountedRef.current) {
@@ -1294,13 +1290,6 @@ function ResultScreenInner() {
         setVideoGenProgress(null);
         videoJobPendingRef.current = false;
         setVideoJobPending(false);
-      }
-      // Refund credits if the submit failed after deduction
-      if (err instanceof Error && !err.message.includes('크레딧이 부족')) {
-        try {
-          const { refundCredits } = await import('@/lib/credits');
-          await refundCredits(hdUpscale ? 'video_hd' : 'video_draft');
-        } catch { /* best-effort */ }
       }
     }
     } catch {

@@ -18,7 +18,8 @@ import {
 } from 'lucide-react-native';
 import { ShortFormPreviewPlayer } from '@/components/ShortFormPreviewPlayer';
 import { VideoGenStepTracker } from '@/components/VideoGenStepTracker';
-import { CreditBalanceBadge } from '@/components/CreditBalanceBadge';
+import { RunwayCreditsBadge } from '@/components/RunwayCreditsBadge';
+import { useRunwayCredits } from '@/hooks/useRunwayCredits';
 import { theme } from '@/lib/theme';
 import { getThumbnailUrl } from '@/lib/imageUtils';
 import type { ShortFormEditPlan } from '@/lib/shortFormEditEngine';
@@ -112,6 +113,7 @@ export function ResultPreviewSection({
   narrationActive,
   ttsUrl,
 }: ResultPreviewSectionProps) {
+  const runwayCredits = useRunwayCredits();
   return (
     <View style={styles.previewSection}>
       {isRegenerating && (
@@ -123,8 +125,12 @@ export function ResultPreviewSection({
       {isGeneratingVideo && mediaType === 'video' && (
         <VideoGenStepTracker progress={videoGenProgress} variant="inline" />
       )}
-      <CreditBalanceBadge
-        unitLabel="영상 생성 크레딧"
+      <RunwayCreditsBadge
+        credits={runwayCredits.credits}
+        loading={runwayCredits.loading}
+        isLow={runwayCredits.isLow}
+        isCritical={runwayCredits.isCritical}
+        threshold={runwayCredits.threshold}
       />
       {bgJobNotice && mediaType === 'video' && (
         <View style={styles.bgJobBanner}>

@@ -1239,15 +1239,8 @@ export async function submitVideoJobAsync(
   if (existing) return existing;
 
   const submitPromise = (async (): Promise<SubmitOnlyResult> => {
-  // Deduct credits before submitting — fail fast if insufficient.
-  const creditFeature = options.hdUpscale ? 'video_hd' : 'video_draft';
-  try {
-    const { deductCredits } = await import('@/lib/credits');
-    await deductCredits(creditFeature);
-  } catch (err) {
-    throw new Error(err instanceof Error ? err.message : '크레딧이 부족합니다. 충전 후 이용해주세요.');
-  }
-
+  // Runway is the provider and billing source for video generation. Do not gate
+  // this request with the app's separate internal credit ledger.
   const submitBody = compactBody({
     mode: 'submit',
     prompt,

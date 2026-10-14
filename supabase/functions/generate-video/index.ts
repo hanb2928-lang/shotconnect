@@ -1395,47 +1395,8 @@ async function markVideoJobFailed(scanId: string, taskId: string, errMsg: string
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-    // If the PATCH affected a row, refund credits server-side.
-    // The client may have navigated away (Fire & Forget) and won't be
-    // present to issue the refund.
-    if (resp.ok) {
-      const rows = await resp.json() as Array<{ is_draft: boolean; is_hd: boolean }>;
-      if (rows.length > 0) {
-        const row = rows[0];
-        const amount = row.is_hd ? 10 : (row.is_draft ? 3 : 3);
-        const feature = row.is_hd ? 'video_hd' : (row.is_draft ? 'video_draft' : 'video_draft');
-        await refundCreditsServer(amount, feature);
-      }
-    }
   } catch (err) {
     console.error('[generate-video] markVideoJobFailed error:', err);
-  }
-}
-
-async function refundCreditsServer(amount: number, feature: string): Promise<void> {
-  if (!supabaseUrl || !serviceRoleKey) return;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    await fetch(`${supabaseUrl}/rest/v1/rpc/add_credits`, {
-      method: "POST",
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        p_amount: amount,
-        p_type: 'refund',
-        p_description: `서버 자동 환불 — ${feature} 생성 실패`,
-        p_package_id: null,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    console.log(`[generate-video] Server-side credit refund: ${amount} credits for ${feature}`);
-  } catch (err) {
-    console.error('[generate-video] refundCreditsServer error:', err);
   }
 }
 
