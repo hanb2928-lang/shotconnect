@@ -10,9 +10,10 @@ interface CreditBalanceBadgeProps {
   onPress?: () => void;
   compact?: boolean;
   layout?: 'horizontal' | 'stacked';
+  unitLabel?: string;
 }
 
-export function CreditBalanceBadge({ onPress, compact = false, layout = 'horizontal' }: CreditBalanceBadgeProps) {
+export function CreditBalanceBadge({ onPress, compact = false, layout = 'horizontal', unitLabel = '크레딧 충전' }: CreditBalanceBadgeProps) {
   const [balance, setBalance] = useState<CreditBalance | null>(null);
   const mountedRef = useRef(true);
 
@@ -77,7 +78,7 @@ export function CreditBalanceBadge({ onPress, compact = false, layout = 'horizon
         <Text style={[styles.stackedBalance, isLow && styles.balanceLow]}>
           {balance ? `${balance.balance.toLocaleString()} 크레딧` : '... 크레딧'}
         </Text>
-        <Text style={styles.stackedLabel}>크레딧 충전</Text>
+        <Text style={styles.stackedLabel}>{unitLabel}</Text>
       </TouchableOpacity>
     );
   }
@@ -92,7 +93,7 @@ export function CreditBalanceBadge({ onPress, compact = false, layout = 'horizon
       <Text style={[styles.balance, isLow && styles.balanceLow]}>
         {balance ? balance.balance.toLocaleString() : '...'}
       </Text>
-      {!compact && <Text style={styles.unit}>크레딧 충전</Text>}
+      {!compact && <Text style={styles.unit}>{unitLabel}</Text>}
       <View style={[styles.plusIcon, compact && styles.plusIconCompact]}>
         <Plus size={compact ? 10 : 12} color="#fff" strokeWidth={2.5} />
       </View>

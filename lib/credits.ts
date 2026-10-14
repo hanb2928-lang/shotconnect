@@ -100,12 +100,18 @@ export async function deductCredits(
 
   if (error) {
     if (error.message.includes('INSUFFICIENT_CREDITS')) {
-      throw new Error('크레딧이 부족합니다. 충전 후 이용해주세요.');
+      const current = await getCreditBalance().catch(() => null);
+      throw new Error(current
+        ? `영상 생성 크레딧이 부족합니다. 현재 ${current.balance}개, 필요 ${amount}개입니다.`
+        : `영상 생성 크레딧이 부족합니다. ${amount}개가 필요합니다.`);
     }
     throw new Error(`크레딧 차감 실패: ${error.message}`);
   }
   if (data === false) {
-    throw new Error('크레딧이 부족합니다. 충전 후 이용해주세요.');
+    const current = await getCreditBalance().catch(() => null);
+    throw new Error(current
+      ? `영상 생성 크레딧이 부족합니다. 현재 ${current.balance}개, 필요 ${amount}개입니다.`
+      : `영상 생성 크레딧이 부족합니다. ${amount}개가 필요합니다.`);
   }
   const { balance } = await getCreditBalance();
   return balance;
