@@ -1733,7 +1733,7 @@ function CameraScreenInner() {
               bottomInset={bottomInset}
               captureMode="single"
               onCaptureModeChange={() => {}}
-              autoSaving={stereoOverlayVisible}
+              autoSaving={false}
               autoSaveToast={null}
               autoSaveStep={1}
               onMultiAnglePress={() => setFittingGuideVisible(true)}
@@ -1752,8 +1752,7 @@ function CameraScreenInner() {
               <TouchableOpacity
                 style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, stereoOverlayVisible && styles.shutterBtnCapturing]}
                 onPress={() => handleShutterPress('fitting')}
-                disabled={stereoOverlayVisible || !cameraReady}
-                activeOpacity={0.85}
+                disabled={!cameraReady}
               >
                 <Camera size={28} color="#fff" strokeWidth={2.5} />
               </TouchableOpacity>
@@ -1877,7 +1876,7 @@ function CameraScreenInner() {
             <TouchableOpacity
               style={[styles.shutterBtn, !cameraReady && styles.shutterBtnDisabled, stereoOverlayVisible && styles.shutterBtnCapturing]}
               onPress={() => handleShutterPress('fitting')}
-              disabled={stereoOverlayVisible || !cameraReady || !bridgeReady}
+              disabled={!cameraReady || !bridgeReady}
               activeOpacity={0.85}
             >
               <Camera size={28} color="#fff" strokeWidth={2.5} />
@@ -2363,7 +2362,7 @@ function StereoProgressLightweight({
 
   return (
     <View style={styles.stereoLightOverlay} pointerEvents="box-none">
-      <View style={styles.stereoLightCard} pointerEvents="auto">
+      <View style={styles.stereoLightCard} pointerEvents="auto" accessibilityViewIsModal={false}>
         {hasError ? (
           <>
             <AlertCircle size={28} color={theme.colors.error[400]} strokeWidth={2} />
@@ -3094,18 +3093,15 @@ const styles = StyleSheet.create({
   // Stereo progress
   stereoLightOverlay: {
     position: 'absolute' as const,
-    top: 0,
+    top: 60,
     left: 0,
     right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(3, 5, 15, 0.88)',
-    justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9998,
   },
   stereoLightCard: {
     width: 280,
-    backgroundColor: theme.colors.dark.surface,
+    backgroundColor: 'rgba(20, 22, 35, 0.96)',
     borderRadius: theme.radius.xl,
     padding: theme.spacing.xl,
     alignItems: 'center',
