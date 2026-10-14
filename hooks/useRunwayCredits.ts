@@ -19,6 +19,7 @@ export function useRunwayCredits() {
     lastFetchedAt: null,
   });
   const cacheRef = useRef<{ credits: number; ts: number } | null>(null);
+  const creditsRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
 
   const fetchCredits = useCallback(async (force = false): Promise<number | null> => {
@@ -35,7 +36,7 @@ export function useRunwayCredits() {
         return cacheRef.current.credits;
       }
     }
-    if (inFlightRef.current) return state.credits;
+    if (inFlightRef.current) return creditsRef.current;
     inFlightRef.current = true;
     setState((prev) => ({ ...prev, loading: true }));
 
@@ -59,6 +60,7 @@ export function useRunwayCredits() {
       const data = await resp.json();
       if (typeof data.credits === 'number') {
         cacheRef.current = { credits: data.credits, ts: Date.now() };
+        creditsRef.current = data.credits;
         setState({
           credits: data.credits,
           loading: false,
@@ -84,7 +86,7 @@ export function useRunwayCredits() {
     } finally {
       inFlightRef.current = false;
     }
-  }, [state.credits]);
+  }, []);
 
   useEffect(() => {
     fetchCredits(false);

@@ -103,12 +103,16 @@ export function buildMarketingCopy(vision: ProductVisionResult): MarketingCopySe
   const topFeature = vision.visualFeatures[0] ?? template.feature;
   const topMarketing = vision.marketingPoints[0] ?? '';
   const colorStr = vision.colorPalette.length > 0 ? vision.colorPalette.slice(0, 2).join(' · ') : '';
+  const analyzedCopy = vision.suggestedCopyLayers;
+  const analyzedPrimary = analyzedCopy?.primary?.trim() || '';
+  const analyzedSecondary = analyzedCopy?.secondary?.trim() || '';
+  const analyzedTertiary = analyzedCopy?.tertiary?.trim() || '';
 
-  const title = topMarketing || template.title;
-  const hookCopy = template.hook;
-  const featureCopy = [topFeature, colorStr, vision.materialGuess].filter(Boolean).join(' · ') || template.feature;
-  const ctaCopy = template.cta;
-  const subtitleCopy = template.subtitle;
+  const title = analyzedPrimary || topMarketing || template.title;
+  const hookCopy = analyzedPrimary || template.hook;
+  const featureCopy = analyzedSecondary || [topFeature, colorStr, vision.materialGuess].filter(Boolean).join(' · ') || template.feature;
+  const ctaCopy = analyzedTertiary || template.cta;
+  const subtitleCopy = analyzedSecondary || template.subtitle;
 
   return { title, hookCopy, featureCopy, ctaCopy, subtitleCopy };
 }

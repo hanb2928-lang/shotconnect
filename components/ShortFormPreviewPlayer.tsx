@@ -856,7 +856,7 @@ useEffect(() => {
             </View>
           ) : null}
 
-          {activeSegment && !isDisclosureActive && activeSegment.textOverlay.trim().length > 0 && (
+          {activeSegment && !activeCopyOverlay && !isDisclosureActive && activeSegment.textOverlay.trim().length > 0 && (
             <View style={[styles.captionOverlay, segmentPositionStyle, { paddingHorizontal: safeZonePadding.paddingHorizontal }]} pointerEvents="none">
               <Text
                 style={{

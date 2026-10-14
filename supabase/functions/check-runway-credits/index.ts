@@ -39,6 +39,21 @@ async function resolveRunwayKey(): Promise<string | null> {
   return null;
 }
 
+function findCreditBalance(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const keys = ["credits", "creditBalance", "credit_balance", "balance", "remaining", "availableCredits", "available_credits"];
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+    if (candidate && typeof candidate === "object") {
+      const nested = findCreditBalance(candidate);
+      if (nested !== null) return nested;
+    }
+  }
+  return null;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -54,10 +69,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const endpoints = [
+      "https://api.dev.runwayml.com/v1/organization",
+      "https://api.dev.runwayml.com/v1/organization/credits",
       "https://api.dev.runwayml.com/v1/credits",
       "https://api.dev.runwayml.com/v1/account/credits",
-      "https://api.dev.runwayml.com/v1/user",
-      "https://api.dev.runwayml.com/v1/organization/credits",
     ];
 
     let lastError = "";
@@ -76,18 +91,10 @@ Deno.serve(async (req: Request) => {
 
         if (resp.ok) {
           const data = await resp.json();
-          const credits = typeof data.credits === "number"
-            ? data.credits
-            : typeof data.balance === "number"
-              ? data.balance
-              : typeof data.remaining === "number"
-                ? data.remaining
-                : typeof data.available_credits === "number"
-                  ? data.available_credits
-                  : null;
+          const credits = findCreditBalance(data);
           if (credits !== null) {
             return new Response(
-              JSON.stringify({ credits, raw: data }),
+              JSON.stringify({ credits, source: url }),
               { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
             );
           }

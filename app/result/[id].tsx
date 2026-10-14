@@ -3129,15 +3129,16 @@ function ResultScreenInner() {
 
   const copyOverlaysForPreview: CopyOverlayTimeline[] | null = useMemo(() => {
     if (isCleanVideoMode) return null;
-    if (productVision) {
-      const layers = productVision.suggestedCopyLayers;
-      const primary = layers?.primary || activeHook || activeOneLiner || scan?.summary || '시선 집중! 지금 바로 확인하세요';
-      const secondary = layers?.secondary || scan?.one_liner || '왜 다들 이걸 찾는지 알겠더라고요';
-      const tertiary = layers?.tertiary || (shortUrl ? `자세히 보기 ${shortUrl}` : '지금 확인하고 놓치 마세요');
+    const previewVision = productVision ?? scan?.product_vision ?? null;
+    if (previewVision) {
+      const layers = previewVision.suggestedCopyLayers;
+      const primary = layers?.primary || activeHook || activeOneLiner || scan?.summary || '제품 분석 결과를 바탕으로 문구를 준비 중입니다';
+      const secondary = layers?.secondary || scan?.one_liner || '제품의 핵심 특징을 확인해보세요';
+      const tertiary = layers?.tertiary || (shortUrl ? `자세히 보기 ${shortUrl}` : '지금 확인하세요');
       return buildCopyOverlayTimeline({
         title: primary,
         hookCopy: primary,
-        featureCopy: productVision.visualFeatures.slice(0, 3).join(' · ') || secondary,
+        featureCopy: previewVision.visualFeatures.slice(0, 3).join(' · ') || secondary,
         ctaCopy: tertiary,
         subtitleCopy: secondary,
       }, Math.max(3, Math.round(selectedDurationMs / 1000)));
@@ -3153,7 +3154,7 @@ function ResultScreenInner() {
       ctaCopy: ctaText,
       subtitleCopy: featureText,
     }, Math.max(3, Math.round(selectedDurationMs / 1000)));
-  }, [productVision, isCleanVideoMode, activeHook, activeOneLiner, scan?.summary, scan?.product_name, scan?.one_liner, activeCaption, inlineEdit.captionText, shortUrl, selectedDurationMs]);
+  }, [productVision, scan?.product_vision, isCleanVideoMode, activeHook, activeOneLiner, scan?.summary, scan?.product_name, scan?.one_liner, activeCaption, inlineEdit.captionText, shortUrl, selectedDurationMs]);
 
   const trendingSuggestions = getTrendingSuggestions(trendingHashtags, [...activeHashtags, ...addedHashtags]);
 
