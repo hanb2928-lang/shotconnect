@@ -718,10 +718,6 @@ function ResultScreenInner() {
           setIsGeneratingVideo(false);
           setVideoGenProgress(null);
           if (videoUnsubRef.current) { videoUnsubRef.current(); videoUnsubRef.current = null; }
-          // Refund credits for failed generation
-          import('@/lib/credits').then(({ refundCredits }) => {
-            refundCredits(hdUpscale ? 'video_hd' : 'video_draft').catch(() => {});
-          }).catch(() => {});
           return;
         }
         const sp = stepToProgress(row.step);
@@ -1833,10 +1829,6 @@ function ResultScreenInner() {
         setBgJobNotice(null);
         setVideoGenError('영상 생성에 실패했습니다. 다시 시도해주세요.');
         setVideoStage('failed');
-        // Refund credits for failed generation
-        import('@/lib/credits').then(({ refundCredits }) => {
-          refundCredits(hdUpscale ? 'video_hd' : 'video_draft').catch(() => {});
-        }).catch(() => {});
       }
     };
 
