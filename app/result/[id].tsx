@@ -2709,6 +2709,92 @@ function ResultScreenInner() {
     }
   };
 
+  const saveImageLockRef = useRef(false);
+  const [imageSavedFeedback, setImageSavedFeedback] = useState(false);
+  const handleSaveGeneratedImage = async () => {
+    if (generatedImages.length === 0 || saveImageLockRef.current) return;
+    const uri = generatedImages[selectedImageIndex] ?? generatedImages[0];
+    if (!uri) return;
+    saveImageLockRef.current = true;
+    setUploadError(null);
+    setUploadProgress(0);
+
+    let fallbackObjectUrl: string | null = null;
+    try {
+      const fileName = `shotconnect-ai-image-${scan?.id ?? 'card'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+
+      if (Platform.OS === 'web') {
+        let fetchRes: Response;
+        try {
+          fetchRes = await fetch(uri);
+        } catch {
+          throw new Error('이미지를 불러올 수 없습니다. 네트워크 연결을 확인해주세요.');
+        }
+        if (!fetchRes.ok) throw new Error(`이미지 서버 응답 오류 (${fetchRes.status})`);
+        const blob = await fetchRes.blob();
+        fallbackObjectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = fallbackObjectUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } else {
+        const permission = await MediaLibrary.requestPermissionsAsync();
+        if (!permission.granted) {
+          throw new Error('갤러리 접근 권한이 필요합니다.');
+        }
+        if (uri.startsWith('data:')) {
+          const base64 = uri.split(',')[1] ?? '';
+          const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
+          if (!dir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
+          const fileUri = `${dir}${fileName}`;
+          await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+          try {
+            await MediaLibrary.saveToLibraryAsync(fileUri);
+          } finally {
+            FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+          }
+        } else {
+          const dir = FileSystem.cacheDirectory;
+          if (!dir) throw new Error('임시 저장 공간을 사용할 수 없습니다.');
+          const fileUri = `${dir}${fileName}`;
+          const downloadResult = await FileSystem.downloadAsync(uri, fileUri);
+          if (downloadResult.status !== 200) {
+            FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+            throw new Error(`이미지 다운로드 실패 (${downloadResult.status})`);
+          }
+          try {
+            await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
+          } finally {
+            FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+          }
+        }
+      }
+
+      if (!mountedRef.current) return;
+      setUploadProgress(100);
+      setUploadDone(true);
+      setImageSavedFeedback(true);
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        setUploadProgress(null);
+        setUploadDone(false);
+        setImageSavedFeedback(false);
+      }, 2500);
+    } catch (saveError) {
+      if (!mountedRef.current) return;
+      setUploadProgress(null);
+      const message = saveError instanceof Error ? saveError.message : '이미지 저장에 실패했습니다. 다시 시도해주세요.';
+      setUploadError(message);
+    } finally {
+      saveImageLockRef.current = false;
+      if (fallbackObjectUrl && Platform.OS === 'web') {
+        URL.revokeObjectURL(fallbackObjectUrl);
+      }
+    }
+  };
+
   const saveShareLockRef = useRef(false);
   const handleSaveAndShare = async () => {
     if (uploadProgress !== null || saveShareLockRef.current) return;
@@ -3963,6 +4049,7 @@ function ResultScreenInner() {
           narrationActive={!isCleanVideoMode && narrationPlaying}
           ttsUrl={isCleanVideoMode ? null : (ttsUrl ?? scan?.tts_url ?? null)}
           onDownload={handleSaveVideo}
+          onSaveImage={targetMediaType === 'image' && generatedImages.length > 0 ? handleSaveGeneratedImage : undefined}
         />
 
         {/* === 2순위: 플랫폼 선택 === */}
@@ -4882,16 +4969,51 @@ function ResultScreenInner() {
                   onPress={async () => {
                     const uri = generatedImages[imageViewerIndex];
                     if (!uri) return;
-                    try {
-                      const fileUri = `${FileSystem.documentDirectory}ai_image_${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
-                      const base64 = uri.split(',')[1] ?? '';
-                      await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+                    if (Platform.OS === 'web') {
                       try {
-                        await MediaLibrary.saveToLibraryAsync(fileUri);
-                      } finally {
-                        FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
-                      }
-                    } catch { /* non-fatal */ }
+                        const res = await fetch(uri);
+                        const blob = await res.blob();
+                        const objUrl = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = objUrl;
+                        link.download = `shotconnect-ai-image-${Date.now()}.png`;
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        URL.revokeObjectURL(objUrl);
+                      } catch { /* non-fatal */ }
+                    } else {
+                      try {
+                        const permission = await MediaLibrary.requestPermissionsAsync();
+                        if (!permission.granted) return;
+                        if (uri.startsWith('data:')) {
+                          const base64 = uri.split(',')[1] ?? '';
+                          const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
+                          if (!dir) return;
+                          const fileUri = `${dir}ai_image_${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+                          await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+                          try {
+                            await MediaLibrary.saveToLibraryAsync(fileUri);
+                          } finally {
+                            FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+                          }
+                        } else {
+                          const dir = FileSystem.cacheDirectory;
+                          if (!dir) return;
+                          const fileUri = `${dir}ai_image_${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+                          const downloadResult = await FileSystem.downloadAsync(uri, fileUri);
+                          if (downloadResult.status === 200) {
+                            try {
+                              await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
+                            } finally {
+                              FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+                            }
+                          } else {
+                            FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+                          }
+                        }
+                      } catch { /* non-fatal */ }
+                    }
                   }}
                   activeOpacity={0.7}
                 >
@@ -5196,8 +5318,18 @@ function ResultScreenInner() {
       <VirtualFittingLoadingOverlay visible={fittingOverlayVisible} />
 
       <ProcessingBarrier
-        visible={isRegenerating || isGeneratingImage || (analysisStatus === 'processing')}
-        label={isRegenerating ? '카피 재생성 중...' : isGeneratingImage ? 'AI 이미지 생성 중...' : '제품 분석 중...'}
+        visible={isRegenerating || isGeneratingImage || isGeneratingVideo || isMuxing || videoStage === 'drafting' || videoStage === 'hd_upgrading' || (analysisStatus === 'processing')}
+        label={
+          isGeneratingVideo || videoStage === 'drafting' || videoStage === 'hd_upgrading'
+            ? 'AI 영상 생성 중...'
+            : isMuxing
+              ? '음성 합성 중...'
+              : isRegenerating
+                ? '카피 재생성 중...'
+                : isGeneratingImage
+                  ? 'AI 이미지 생성 중...'
+                  : '제품 분석 중...'
+        }
         sublabel="완료될 때까지 화면이 잠겨 있어요"
       />
 

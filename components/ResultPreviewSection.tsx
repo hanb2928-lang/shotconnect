@@ -13,6 +13,7 @@ import {
   X,
   AlertCircle,
   RotateCcw,
+  Download,
   Image as ImageIcon,
 } from 'lucide-react-native';
 import { ShortFormPreviewPlayer } from '@/components/ShortFormPreviewPlayer';
@@ -41,6 +42,7 @@ export interface ResultPreviewSectionProps {
   isProcessing: boolean;
   progressMessage: string;
   onDownload: () => void;
+  onSaveImage?: () => void;
   // Extended props for the full preview section
   generatedImages: string[];
   selectedImageIndex: number;
@@ -103,6 +105,7 @@ export function ResultPreviewSection({
   onRetryImage,
   onDismissVideoError,
   onDismissImageError,
+  onSaveImage,
   previewEditPlan,
   narrativePlan,
   bgmVolume,
@@ -256,6 +259,16 @@ export function ResultPreviewSection({
               ))}
             </ScrollView>
           )}
+          {onSaveImage && (
+            <TouchableOpacity
+              style={styles.imageSaveBtn}
+              onPress={onSaveImage}
+              activeOpacity={0.7}
+            >
+              <Download size={16} color={theme.colors.primary[300]} strokeWidth={2} />
+              <Text style={styles.imageSaveBtnText}>갤러리에 저장</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <View style={styles.imageHeroPlaceholder}>
@@ -405,6 +418,22 @@ const styles = StyleSheet.create({
   },
   imageThumbItemActive: {
     borderColor: theme.colors.accent[400],
+  },
+  imageSaveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.primary[500] + '15',
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary[400] + '40',
+  },
+  imageSaveBtnText: {
+    fontSize: 14,
+    fontFamily: theme.typography.fontFamily.semiBold,
+    color: theme.colors.primary[300],
   },
   imageHeroPlaceholder: {
     width: '100%',
