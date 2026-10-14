@@ -425,7 +425,7 @@ export async function createScanFromAngleShots(
   signal?: AbortSignal,
   onUploadProgress?: (completed: number, total: number) => void,
   onValidateProgress?: (completed: number, total: number, label: string) => void,
-): Promise<{ scanId: string; uploadedUrls: string[] }> {
+): Promise<{ scanId: string; uploadedUrls: string[]; uploadedOrderIndices: number[] }> {
   const aborted = (): boolean => signal?.aborted === true;
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
   const allShots = sorted.filter((s) => s.base64 || s.uri);
@@ -478,7 +478,7 @@ export async function createScanFromAngleShots(
     }
   }
 
-  return { scanId, uploadedUrls: results.map((r) => r.url) };
+  return { scanId, uploadedUrls: results.map((r) => r.url), uploadedOrderIndices: results.map((r) => r.shot.orderIndex) };
 }
 
 export async function runStereoPipeline(
@@ -490,6 +490,7 @@ export async function runStereoPipeline(
   studioSliders?: { facetSparkle: number; fabricDetail: number; blendStrength: number; smartFit?: boolean },
   existingUploadUrls?: string[],
   signal?: AbortSignal,
+  existingUploadOrderIndices?: number[],
 ): Promise<StereoPipelineResult> {
   const aborted = (): boolean => signal?.aborted === true;
   const steps = makeInitialSteps();
@@ -500,7 +501,7 @@ export async function runStereoPipeline(
   const sorted = [...shots].sort((a, b) => a.orderIndex - b.orderIndex);
   const uploadedShotCount = existingUploadUrls?.length ?? 0;
   const allShots = uploadedShotCount > 0
-    ? sorted.slice(0, Math.min(uploadedShotCount, STEREO_MAX_SHOTS))
+    ? sorted.filter((s) => existingUploadOrderIndices?.includes(s.orderIndex) ?? true).slice(0, Math.min(uploadedShotCount, STEREO_MAX_SHOTS))
     : sorted.filter((s) => s.base64 || s.uri).slice(0, STEREO_MAX_SHOTS);
   if (allShots.length === 0) throw new Error('촬영된 이미지가 없습니다.');
   if (allShots.length < STEREO_MIN_SHOTS) {
@@ -591,13 +592,10 @@ export async function runStereoPipeline(
   const anglePayloads: AngleImagePayload[] = validShots.map((s, i) => ({
     key: ['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front',
     label: s.label,
-    url: allUrls[i],
+    url: allUrls[i] ?? allUrls[0],
     mimeType: s.mimeType,
     orderIndex: s.orderIndex,
   }));
-  // runSynthesis only reads .key, .label, .orderIndex — never .base64.
-  // Omitting base64 here prevents 5 multi-MB strings (10-20MB) from
-  // coexisting in native heap during the parallel synthesis + cloud call.
   const angleInputs: AngleInput[] = validShots.map((s) => ({
     key: (['front', 'left', 'right', 'back', 'top'][s.orderIndex] || 'front') as AngleInput['key'],
     label: s.label,
@@ -828,6 +826,7 @@ function createAbortedResult(scanId: string, uploadedPaths?: string[]): StereoPi
   if (uploadedPaths && uploadedPaths.length > 0) {
     rollbackUploads(uploadedPaths).catch(() => {});
   }
+  supabase.from('scans').delete().eq('id', scanId).then(() => {}, () => {});
   return {
     scanId,
     cloudResult: null,

@@ -913,7 +913,14 @@ function CameraScreenInner() {
       stereoOverlayRef.current = false;
       return;
     }
-    await prepareCameraForProcessing();
+    try {
+      await prepareCameraForProcessing();
+    } catch {
+      stereoOverlayRef.current = false;
+      releasePipelineLock();
+      if (isMountedRef.current) setError('카메라 처리 준비 중 오류가 발생했습니다. 다시 시도해주세요.');
+      return;
+    }
     if (!isMountedRef.current) {
       stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
@@ -946,6 +953,7 @@ function CameraScreenInner() {
 
     let scanId: string;
     let uploadedUrls: string[];
+    let uploadedOrderIndices: number[];
     try {
       // Step 0: Frame validation mini-stepper — shows per-shot progress
       // ("1/5 컷 검증 완료") before upload starts, giving the user immediate
@@ -986,6 +994,7 @@ function CameraScreenInner() {
       );
       scanId = result.scanId;
       uploadedUrls = result.uploadedUrls;
+      uploadedOrderIndices = result.uploadedOrderIndices;
     } catch (err) {
       stereoOverlayRef.current = false;
       if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
@@ -1014,6 +1023,7 @@ function CameraScreenInner() {
         studioSliders,
         uploadedUrls,
         controller.signal,
+        uploadedOrderIndices,
       );
       if (isMountedRef.current) {
         clearSnapshot();
@@ -1426,7 +1436,14 @@ function CameraScreenInner() {
       stereoOverlayRef.current = false;
       return;
     }
-    await prepareCameraForProcessing();
+    try {
+      await prepareCameraForProcessing();
+    } catch {
+      stereoOverlayRef.current = false;
+      releasePipelineLock();
+      if (isMountedRef.current) setError('카메라 처리 준비 중 오류가 발생했습니다. 다시 시도해주세요.');
+      return;
+    }
     if (!isMountedRef.current) {
       stereoOverlayRef.current = false;
       setStereoOverlayVisible(false);
@@ -1503,7 +1520,9 @@ function CameraScreenInner() {
     const pipelineShots = [...sorted];
     nativeHeapCooldownGuard().finally(() => {
       if (controller.signal.aborted) { releasePipelineLock(); return; }
-      runFittingPipeline(pipelineShots, scanId, undefined, cleanMode, studioSliders, controller.signal).catch(() => {}).finally(() => {
+      runFittingPipeline(pipelineShots, scanId, undefined, cleanMode, studioSliders, controller.signal).catch((err) => {
+        logError(err, { component: 'CameraScreen', action: 'runFittingPipeline' });
+      }).finally(() => {
         if (stereoAbortRef.current === controller) stereoAbortRef.current = null;
         releasePipelineLock();
       });
