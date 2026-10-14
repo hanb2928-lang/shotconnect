@@ -107,9 +107,9 @@ const VIDEO_UNKNOWN_PATTERNS = [
 const VIDEO_FALLBACK_PRODUCT_NAME = "지금 가장 핫한 추천 아이템";
 const VIDEO_FALLBACK_CAPTION = "시선 집중! 지금 바로 확인하세요";
 const VIDEO_FALLBACK_COPY_LAYERS = {
-  primary: "시선 집중! 하이엔드 럭셔리 컬렉션",
-  secondary: "내 몸에 완벽하게 감기는 핏",
-  tertiary: "지금 바로 확인하세요",
+  primary: "지금 가장 핫한 추천 아이템",
+  secondary: "제품의 핵심 특징을 확인해보세요",
+  tertiary: "지금 확인하세요",
 };
 
 function sanitizeCopyLayers(layers: { primary: string; secondary: string; tertiary: string }): { primary: string; secondary: string; tertiary: string } {
