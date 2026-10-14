@@ -2776,6 +2776,123 @@ function ResultScreenInner() {
     }
   };
 
+  const saveAllLockRef = useRef(false);
+  const [batchSaveProgress, setBatchSaveProgress] = useState<number | null>(null);
+  const [batchSaveDone, setBatchSaveDone] = useState(false);
+  const handleSaveAllGeneratedImages = async () => {
+    if (generatedImages.length === 0 || saveAllLockRef.current) return;
+    saveAllLockRef.current = true;
+    setUploadError(null);
+    setBatchSaveProgress(0);
+
+    const total = generatedImages.length;
+    let saved = 0;
+
+    if (Platform.OS === 'web') {
+      try {
+        for (let i = 0; i < total; i++) {
+          const uri = generatedImages[i];
+          if (!uri) continue;
+          try {
+            const res = await fetch(uri);
+            if (!res.ok) continue;
+            const blob = await res.blob();
+            const objUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objUrl;
+            link.download = `shotconnect-ai-image-${scan?.id ?? 'card'}-${Date.now()}-${i + 1}.png`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(objUrl);
+            saved++;
+          } catch {
+            // continue to next image
+          }
+          if (mountedRef.current) setBatchSaveProgress(Math.round(((i + 1) / total) * 100));
+        }
+      } finally {
+        if (mountedRef.current) {
+          if (saved > 0) {
+            setBatchSaveDone(true);
+            setTimeout(() => {
+              if (mountedRef.current) { setBatchSaveProgress(null); setBatchSaveDone(false); }
+            }, 2500);
+          } else {
+            setUploadError('이미지 저장에 실패했습니다. 네트워크 연결을 확인해주세요.');
+            setBatchSaveProgress(null);
+          }
+        }
+        saveAllLockRef.current = false;
+      }
+      return;
+    }
+
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (!permission.granted) {
+        throw new Error('갤러리 접근 권한이 필요합니다.');
+      }
+
+      for (let i = 0; i < total; i++) {
+        const uri = generatedImages[i];
+        if (!uri) continue;
+        const fileName = `shotconnect-ai-image-${scan?.id ?? 'card'}-${Date.now()}-${i + 1}-${Math.random().toString(36).slice(2, 6)}.png`;
+        try {
+          if (uri.startsWith('data:')) {
+            const base64 = uri.split(',')[1] ?? '';
+            const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
+            if (!dir) continue;
+            const fileUri = `${dir}${fileName}`;
+            await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+            try {
+              await MediaLibrary.saveToLibraryAsync(fileUri);
+              saved++;
+            } finally {
+              FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+            }
+          } else {
+            const dir = FileSystem.cacheDirectory;
+            if (!dir) continue;
+            const fileUri = `${dir}${fileName}`;
+            const downloadResult = await FileSystem.downloadAsync(uri, fileUri);
+            if (downloadResult.status === 200) {
+              try {
+                await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
+                saved++;
+              } finally {
+                FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+              }
+            } else {
+              FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {}).finally(() => { /* release ref */ });
+            }
+          }
+        } catch {
+          // continue to next image
+        }
+        if (mountedRef.current) setBatchSaveProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      if (!mountedRef.current) return;
+      if (saved > 0) {
+        setBatchSaveDone(true);
+        setTimeout(() => {
+          if (mountedRef.current) { setBatchSaveProgress(null); setBatchSaveDone(false); }
+        }, 2500);
+      } else {
+        setUploadError('이미지 저장에 실패했습니다. 다시 시도해주세요.');
+        setBatchSaveProgress(null);
+      }
+    } catch (saveError) {
+      if (!mountedRef.current) return;
+      const message = saveError instanceof Error ? saveError.message : '이미지 저장에 실패했습니다. 다시 시도해주세요.';
+      setUploadError(message);
+      setBatchSaveProgress(null);
+    } finally {
+      saveAllLockRef.current = false;
+    }
+  };
+
   const saveShareLockRef = useRef(false);
   const handleSaveAndShare = async () => {
     if (uploadProgress !== null || saveShareLockRef.current) return;
@@ -5001,6 +5118,32 @@ function ResultScreenInner() {
                   <Download size={15} color={theme.colors.dark.text} strokeWidth={2} />
                   <Text style={styles.galleryModalActionText}>저장</Text>
                 </TouchableOpacity>
+                {generatedImages.length > 1 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.galleryModalActionBtn,
+                      batchSaveDone && { backgroundColor: theme.colors.success[500] + '30' },
+                    ]}
+                    onPress={handleSaveAllGeneratedImages}
+                    disabled={batchSaveProgress !== null}
+                    activeOpacity={0.7}
+                  >
+                    {batchSaveDone ? (
+                      <CheckCircle2 size={15} color={theme.colors.success[400]} strokeWidth={2} />
+                    ) : batchSaveProgress !== null ? (
+                      <Loader2Icon size={15} color={theme.colors.dark.text} strokeWidth={2} />
+                    ) : (
+                      <Download size={15} color={theme.colors.dark.text} strokeWidth={2} />
+                    )}
+                    <Text style={styles.galleryModalActionText}>
+                      {batchSaveDone
+                        ? `${generatedImages.length}장 저장됨`
+                        : batchSaveProgress !== null
+                          ? `저장 중... ${batchSaveProgress}%`
+                          : `전체 저장 (${generatedImages.length}장)`}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={[styles.galleryModalActionBtn, styles.galleryModalActionPrimary]}
                   onPress={async () => {
