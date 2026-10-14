@@ -5318,18 +5318,8 @@ function ResultScreenInner() {
       <VirtualFittingLoadingOverlay visible={fittingOverlayVisible} />
 
       <ProcessingBarrier
-        visible={isRegenerating || isGeneratingImage || isGeneratingVideo || isMuxing || videoStage === 'drafting' || videoStage === 'hd_upgrading' || (analysisStatus === 'processing')}
-        label={
-          isGeneratingVideo || videoStage === 'drafting' || videoStage === 'hd_upgrading'
-            ? 'AI 영상 생성 중...'
-            : isMuxing
-              ? '음성 합성 중...'
-              : isRegenerating
-                ? '카피 재생성 중...'
-                : isGeneratingImage
-                  ? 'AI 이미지 생성 중...'
-                  : '제품 분석 중...'
-        }
+        visible={isRegenerating || (analysisStatus === 'processing')}
+        label={isRegenerating ? '카피 재생성 중...' : '제품 분석 중...'}
         sublabel="완료될 때까지 화면이 잠겨 있어요"
       />
 
