@@ -1513,6 +1513,18 @@ function CameraScreenInner() {
     shots.length = 0;
   }, [router, cleanMode, studioSliders, prepareCameraForProcessing]);
 
+  const handleCloseToModeSelect = useCallback(() => {
+    if (stereoAbortRef.current) { stereoAbortRef.current.abort(); stereoAbortRef.current = null; }
+    stereoOverlayRef.current = false;
+    setStereoOverlayVisible(false);
+    setStereoMinimized(false);
+    releasePipelineLock();
+    setScreenPhase('mode_select');
+    setError(null);
+    setCameraReady(false);
+    cameraReadyRef.current = false;
+  }, []);
+
   const handleShutterPress = useCallback((target: 'multiAngle' | 'fitting') => {
     if (captureBtnLockRef.current || processingRef.current || autoSavingRef.current || stereoOverlayRef.current) return;
     setCameraMode('picture');
@@ -1708,7 +1720,7 @@ function CameraScreenInner() {
           <View style={[styles.topBar, { top: safeTop + 8 }]}>
             <TouchableOpacity
               style={styles.topBarBtn}
-              onPress={() => { setScreenPhase('mode_select'); setError(null); }}
+              onPress={handleCloseToModeSelect}
               activeOpacity={0.7}
             >
               <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
@@ -1830,7 +1842,7 @@ function CameraScreenInner() {
         <View style={[styles.topBar, { top: safeTop + 8 }]}>
           <TouchableOpacity
             style={styles.topBarBtn}
-            onPress={() => { setScreenPhase('mode_select'); setError(null); setCameraReady(false); cameraReadyRef.current = false; }}
+            onPress={handleCloseToModeSelect}
             activeOpacity={0.7}
           >
             <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
@@ -1931,7 +1943,7 @@ function CameraScreenInner() {
         <View style={[styles.topBar, { top: safeTop + 8 }]}>
           <TouchableOpacity
             style={styles.topBarBtn}
-            onPress={() => { setScreenPhase('mode_select'); setError(null); }}
+            onPress={handleCloseToModeSelect}
             activeOpacity={0.7}
           >
             <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
@@ -2049,7 +2061,7 @@ function CameraScreenInner() {
         <TouchableOpacity style={styles.permissionBtn} onPress={requestPermission} activeOpacity={0.8}>
           <Text style={styles.permissionBtnText}>권한 허용</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.backToModeBtn} onPress={() => setScreenPhase('mode_select')} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.backToModeBtn} onPress={handleCloseToModeSelect} activeOpacity={0.7}>
           <Text style={styles.backToModeText}>뒤로 가기</Text>
         </TouchableOpacity>
       </View>
@@ -2062,7 +2074,7 @@ function CameraScreenInner() {
       <View style={[styles.topBar, { top: safeTop + 8 }]}>
         <TouchableOpacity
           style={styles.topBarBtn}
-          onPress={() => { setScreenPhase('mode_select'); setError(null); setCameraReady(false); cameraReadyRef.current = false; }}
+          onPress={handleCloseToModeSelect}
           activeOpacity={0.7}
         >
           <X size={22} color={theme.colors.dark.text} strokeWidth={2} />
